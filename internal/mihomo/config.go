@@ -10,7 +10,7 @@ import (
 
 	"go.yaml.in/yaml/v3"
 
-	"github.com/kube-clash/kube-clash/internal/cluster"
+	"github.com/fengqi-dev/kube-clash/internal/cluster"
 )
 
 const KubernetesProxy = "KUBERNETES"
@@ -21,25 +21,30 @@ type Options struct {
 	ControllerHost   string
 	ControllerPort   int
 	ControllerSecret string
+	TUNAddress       string
 	IPv6             bool
 }
 
 type config struct {
-	Mode               string    `yaml:"mode"`
-	LogLevel           string    `yaml:"log-level"`
-	IPv6               bool      `yaml:"ipv6"`
-	ExternalController string    `yaml:"external-controller"`
-	Secret             string    `yaml:"secret"`
-	TUN                tunConfig `yaml:"tun"`
-	DNS                dnsConfig `yaml:"dns"`
-	Proxies            []proxy   `yaml:"proxies"`
-	Rules              []string  `yaml:"rules"`
+	Mode               string      `yaml:"mode"`
+	LogLevel           string      `yaml:"log-level"`
+	IPv6               bool        `yaml:"ipv6"`
+	ExternalController string      `yaml:"external-controller"`
+	Secret             string      `yaml:"secret"`
+	TUN                *tunConfig  `yaml:"tun,omitempty"`
+	Listeners          []tunConfig `yaml:"listeners,omitempty"`
+	DNS                dnsConfig   `yaml:"dns"`
+	Proxies            []proxy     `yaml:"proxies"`
+	Rules              []string    `yaml:"rules"`
 }
 
 type tunConfig struct {
-	Enable              bool     `yaml:"enable"`
+	Name                string   `yaml:"name,omitempty"`
+	Type                string   `yaml:"type,omitempty"`
+	Enable              bool     `yaml:"enable,omitempty"`
 	Stack               string   `yaml:"stack"`
-	Device              string   `yaml:"device"`
+	Device              string   `yaml:"device,omitempty"`
+	Inet4Address        []string `yaml:"inet4-address"`
 	AutoRoute           bool     `yaml:"auto-route"`
 	AutoDetectInterface bool     `yaml:"auto-detect-interface"`
 	StrictRoute         bool     `yaml:"strict-route"`
@@ -81,6 +86,12 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 	if options.ControllerSecret == "" {
 		return nil, errors.New("controller secret is required")
 	}
+	if options.TUNAddress == "" {
+		options.TUNAddress = defaultTUNAddress
+	}
+	if _, err := netip.ParsePrefix(options.TUNAddress); err != nil {
+		return nil, fmt.Errorf("invalid TUN address %q: %w", options.TUNAddress, err)
+	}
 
 	routes, rules, err := networkRules(discovery)
 	if err != nil {
@@ -101,16 +112,17 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		IPv6:               options.IPv6,
 		ExternalController: net.JoinHostPort(options.ControllerHost, strconv.Itoa(options.ControllerPort)),
 		Secret:             options.ControllerSecret,
-		TUN: tunConfig{
-			Enable:              true,
+		Listeners: []tunConfig{{
+			Name:                "KubeClash",
+			Type:                "tun",
 			Stack:               "mixed",
-			Device:              "KubeClash",
+			Inet4Address:        []string{options.TUNAddress},
 			AutoRoute:           true,
 			AutoDetectInterface: true,
 			StrictRoute:         true,
 			DNSHijack:           []string{"any:53", "tcp://any:53"},
 			RouteAddress:        routes,
-		},
+		}},
 		DNS: dnsConfig{
 			Enable:           true,
 			IPv6:             options.IPv6,

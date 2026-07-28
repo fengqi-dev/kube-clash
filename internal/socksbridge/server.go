@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kube-clash/kube-clash/internal/tunnel"
+	"github.com/fengqi-dev/kube-clash/internal/tunnel"
 )
 
 const (

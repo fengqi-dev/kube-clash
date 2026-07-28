@@ -6,6 +6,10 @@ export function Bootstrap() {
   return window['go']['main']['App']['Bootstrap']();
 }
 
+export function CheckForUpdates() {
+  return window['go']['main']['App']['CheckForUpdates']();
+}
+
 export function Connect(arg1, arg2) {
   return window['go']['main']['App']['Connect'](arg1, arg2);
 }
@@ -16,4 +20,8 @@ export function Disconnect() {
 
 export function Namespaces(arg1) {
   return window['go']['main']['App']['Namespaces'](arg1);
+}
+
+export function OpenUpdatePage() {
+  return window['go']['main']['App']['OpenUpdatePage']();
 }

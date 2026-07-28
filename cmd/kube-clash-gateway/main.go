@@ -7,7 +7,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/kube-clash/kube-clash/internal/gateway"
+	"github.com/fengqi-dev/kube-clash/internal/gateway"
 )
 
 var version = "dev"

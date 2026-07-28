@@ -124,6 +124,20 @@ func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery,
 			}
 		}
 	}
+	if len(podCIDRs) == 0 {
+		for _, pod := range pods.Items {
+			for _, raw := range pod.Status.PodIPs {
+				if ip, parseErr := netip.ParseAddr(raw.IP); parseErr == nil {
+					podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
+				}
+			}
+			if pod.Status.PodIP != "" {
+				if ip, parseErr := netip.ParseAddr(pod.Status.PodIP); parseErr == nil {
+					podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
+				}
+			}
+		}
+	}
 
 	serviceIPs := make(map[string]struct{})
 	dnsServer := ""

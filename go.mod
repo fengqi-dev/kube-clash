@@ -1,4 +1,4 @@
-module github.com/kube-clash/kube-clash
+module github.com/fengqi-dev/kube-clash
 
 go 1.26.0
 
