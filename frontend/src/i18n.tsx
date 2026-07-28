@@ -1,0 +1,257 @@
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+
+export type Language = "en" | "zh-CN";
+
+const en = {
+  "nav.overview": "Overview",
+  "nav.connections": "Connections",
+  "nav.network": "Network",
+  "nav.logs": "Logs",
+  "nav.settings": "Settings",
+  "header.overview": "Transparent access to your Kubernetes cluster network",
+  "header.connections": "Inspect active sessions routed through Kube Clash",
+  "header.network": "Pod, Service, and DNS routes",
+  "header.logs": "Client and Gateway runtime logs",
+  "header.settings": "Client preferences, version, and updates",
+  "phase.idle": "Disconnected",
+  "phase.checking": "Checking access",
+  "phase.installing-gateway": "Installing Gateway",
+  "phase.discovering-network": "Discovering network",
+  "phase.starting-tunnel": "Starting Mihomo",
+  "phase.connected": "Connected",
+  "phase.error": "Connection failed",
+  "step.access": "Cluster access",
+  "step.accessDetail": "Verify Kubernetes API access",
+  "step.gateway": "Gateway",
+  "step.gatewayDetail": "Install the cluster connector automatically",
+  "step.discovery": "Network discovery",
+  "step.discoveryDetail": "Sync Pods, Services, and DNS",
+  "step.tun": "Mihomo TUN",
+  "step.tunDetail": "Transparent routes and cluster DNS",
+  "core.running": "Running",
+  "core.onDemand": "On demand",
+  "core.managed": "Managed automatically",
+  "window.minimise": "Minimise window",
+  "window.maximise": "Maximise or restore window",
+  "window.close": "Close application",
+  "overview.localCredentials": "Credentials stay on this device",
+  "overview.loadingKubeconfig": "Loading kubeconfig",
+  "overview.noContext": "No context selected",
+  "overview.noCluster": "No cluster found",
+  "overview.cancel": "Cancel connection",
+  "overview.disconnect": "Disconnect",
+  "overview.connect": "Connect cluster",
+  "overview.podNetwork": "Pod network",
+  "overview.pods": "{count} Pods",
+  "overview.waitingDiscovery": "Waiting for network discovery",
+  "overview.routesSynced": "Exact routes synced",
+  "overview.clusterDns": "Cluster DNS",
+  "overview.gatewayDetail": "Connected through an API Server port-forward",
+  "overview.tunDetail": "Only handles Pod, Service, and cluster DNS traffic",
+  "connections.title": "Active connections",
+  "connections.description": "TCP and UDP sessions through Mihomo TUN and the cluster Gateway",
+  "connections.memory": "Memory {value}",
+  "connections.disconnectedTitle": "No active connections",
+  "connections.disconnectedDetail": "Connect to a Kubernetes cluster to see sessions here in real time.",
+  "connections.emptyTitle": "No active connections right now",
+  "connections.emptyDetail": "Connections appear here after accessing a Pod, ClusterIP, or cluster.local domain.",
+  "connections.application": "Application",
+  "connections.target": "Target",
+  "connections.protocol": "Protocol",
+  "connections.status": "Status",
+  "connections.traffic": "Traffic",
+  "connections.unknownTarget": "Unknown target",
+  "connections.active": "Active",
+  "network.title": "Cluster network",
+  "network.description": "Routes are active only while connected and update with Kubernetes resources",
+  "network.rediscover": "Rediscover",
+  "network.serviceRoutes": "Service routes",
+  "network.exactRoutes": "Exact ClusterIP routes",
+  "network.notFound": "Not found",
+  "network.waitingTitle": "Waiting for network discovery",
+  "network.waitingDetail": "Pod, Service, and CoreDNS information loads automatically after connecting.",
+  "network.type": "Type",
+  "network.target": "Target",
+  "network.source": "Source",
+  "network.status": "Status",
+  "network.clusterIPs": "{count} ClusterIPs",
+  "network.applied": "Applied",
+  "network.discovered": "Discovered",
+  "logs.title": "Runtime logs",
+  "logs.description": "Credentials, tokens, and certificate content are automatically redacted",
+  "logs.copy": "Copy diagnostics",
+  "logs.podCIDRsFound": "Discovered {count} Pod CIDRs",
+  "logs.servicesFound": "Discovered {count} ClusterIP Services",
+  "settings.title": "Settings",
+  "settings.description": "Language preferences and software updates",
+  "settings.language": "Language",
+  "settings.languageDescription": "Choose the display language for Kube Clash",
+  "settings.english": "English",
+  "settings.chinese": "简体中文",
+  "settings.updateTitle": "Software update",
+  "settings.updateDescription": "Check for the latest stable version of Kube Clash",
+  "settings.checking": "Checking",
+  "settings.checkUpdates": "Check for updates",
+  "settings.currentVersion": "Current version {version}",
+  "settings.newVersion": "New version {version} is available",
+  "settings.latestStable": "Latest stable version: {version}",
+  "settings.upToDate": "You are up to date",
+  "settings.noRelease": "No release information is available yet",
+  "settings.lastChecked": "Last checked: {value}",
+  "settings.checkOnStartup": "Checked automatically after startup",
+  "settings.download": "View and download",
+  "settings.releasePage": "View releases",
+  "settings.updatePrivacy": "Update checks only request public GitHub Release information. Kubeconfig, cluster addresses, and usage data are never uploaded.",
+  "settings.updateVerify": "Review the release notes and SHA-256 checksum files before installing an update.",
+} as const;
+
+export type TranslationKey = keyof typeof en;
+
+const zh: Record<TranslationKey, string> = {
+  "nav.overview": "概览",
+  "nav.connections": "连接",
+  "nav.network": "网络",
+  "nav.logs": "日志",
+  "nav.settings": "设置",
+  "header.overview": "透明访问 Kubernetes 集群网络",
+  "header.connections": "查看经过 Kube Clash 的活动会话",
+  "header.network": "Pod、Service 和 DNS 路由",
+  "header.logs": "客户端与 Gateway 运行记录",
+  "header.settings": "客户端偏好、版本与更新",
+  "phase.idle": "未连接",
+  "phase.checking": "检查权限",
+  "phase.installing-gateway": "安装 Gateway",
+  "phase.discovering-network": "发现网络",
+  "phase.starting-tunnel": "启动 Mihomo",
+  "phase.connected": "已连接",
+  "phase.error": "连接失败",
+  "step.access": "集群权限",
+  "step.accessDetail": "验证 Kubernetes API 访问",
+  "step.gateway": "Gateway",
+  "step.gatewayDetail": "自动安装集群连接器",
+  "step.discovery": "网络发现",
+  "step.discoveryDetail": "同步 Pod、Service 与 DNS",
+  "step.tun": "Mihomo TUN",
+  "step.tunDetail": "透明路由和集群 DNS",
+  "core.running": "运行中",
+  "core.onDemand": "按需启动",
+  "core.managed": "自动管理",
+  "window.minimise": "最小化窗口",
+  "window.maximise": "最大化或还原窗口",
+  "window.close": "关闭应用",
+  "overview.localCredentials": "凭证仅保留在本机",
+  "overview.loadingKubeconfig": "正在读取 kubeconfig",
+  "overview.noContext": "未选择 Context",
+  "overview.noCluster": "未发现集群",
+  "overview.cancel": "取消连接",
+  "overview.disconnect": "断开连接",
+  "overview.connect": "连接集群",
+  "overview.podNetwork": "Pod 网络",
+  "overview.pods": "{count} 个 Pod",
+  "overview.waitingDiscovery": "等待网络发现",
+  "overview.routesSynced": "精确路由已同步",
+  "overview.clusterDns": "集群 DNS",
+  "overview.gatewayDetail": "通过 API Server port-forward 连接",
+  "overview.tunDetail": "只接管 Pod、Service 与集群 DNS",
+  "connections.title": "活动连接",
+  "connections.description": "通过 Mihomo TUN 和集群 Gateway 的 TCP、UDP 会话",
+  "connections.memory": "内存 {value}",
+  "connections.disconnectedTitle": "暂无活动连接",
+  "connections.disconnectedDetail": "连接 Kubernetes 集群后，会话将实时显示在这里。",
+  "connections.emptyTitle": "当前没有活动连接",
+  "connections.emptyDetail": "访问 Pod、ClusterIP 或 cluster.local 域名后，连接会实时显示。",
+  "connections.application": "应用",
+  "connections.target": "目标",
+  "connections.protocol": "协议",
+  "connections.status": "状态",
+  "connections.traffic": "流量",
+  "connections.unknownTarget": "未知目标",
+  "connections.active": "活跃",
+  "network.title": "集群网络",
+  "network.description": "路由仅在连接期间生效，并随 Kubernetes 资源自动更新",
+  "network.rediscover": "重新发现",
+  "network.serviceRoutes": "Service 路由",
+  "network.exactRoutes": "ClusterIP 精确路由",
+  "network.notFound": "未发现",
+  "network.waitingTitle": "等待网络发现",
+  "network.waitingDetail": "连接集群后自动加载 Pod、Service 和 CoreDNS 信息。",
+  "network.type": "类型",
+  "network.target": "目标",
+  "network.source": "来源",
+  "network.status": "状态",
+  "network.clusterIPs": "{count} 个 ClusterIP",
+  "network.applied": "已应用",
+  "network.discovered": "已发现",
+  "logs.title": "运行日志",
+  "logs.description": "凭据、Token 和证书内容会自动脱敏",
+  "logs.copy": "复制诊断信息",
+  "logs.podCIDRsFound": "发现 {count} 个 Pod CIDR",
+  "logs.servicesFound": "发现 {count} 个 ClusterIP Service",
+  "settings.title": "设置",
+  "settings.description": "语言偏好与软件更新",
+  "settings.language": "语言",
+  "settings.languageDescription": "选择 Kube Clash 的显示语言",
+  "settings.english": "English",
+  "settings.chinese": "简体中文",
+  "settings.updateTitle": "软件更新",
+  "settings.updateDescription": "自动检查 Kube Clash 的最新稳定版本",
+  "settings.checking": "正在检查",
+  "settings.checkUpdates": "检查更新",
+  "settings.currentVersion": "当前版本 {version}",
+  "settings.newVersion": "发现新版本 {version}",
+  "settings.latestStable": "最新稳定版 {version}",
+  "settings.upToDate": "当前已是最新版本",
+  "settings.noRelease": "尚未获取到已发布版本",
+  "settings.lastChecked": "上次检查：{value}",
+  "settings.checkOnStartup": "启动后自动检查",
+  "settings.download": "查看并下载",
+  "settings.releasePage": "查看发布页",
+  "settings.updatePrivacy": "更新检查只请求 GitHub 的公开 Release 信息，不会上传 kubeconfig、集群地址或使用数据。",
+  "settings.updateVerify": "安装更新前可在 Release 页面查看变更说明和 SHA-256 校验文件。",
+};
+
+type Parameters = Record<string, string | number>;
+type Translator = (key: TranslationKey, parameters?: Parameters) => string;
+
+interface I18nContextValue {
+  language: Language;
+  locale: string;
+  setLanguage(language: Language): void;
+  t: Translator;
+}
+
+const I18nContext = createContext<I18nContextValue | null>(null);
+const storageKey = "kube-clash.language";
+
+export function LanguageProvider({ children }: { children: ReactNode }) {
+  const [language, setLanguage] = useState<Language>(() => {
+    const saved = localStorage.getItem(storageKey);
+    return saved === "zh-CN" ? "zh-CN" : "en";
+  });
+
+  useEffect(() => {
+    localStorage.setItem(storageKey, language);
+    document.documentElement.lang = language;
+  }, [language]);
+
+  const value = useMemo<I18nContextValue>(() => {
+    const dictionary = language === "zh-CN" ? zh : en;
+    const t: Translator = (key, parameters) => {
+      const template = dictionary[key] ?? en[key];
+      if (!parameters) return template;
+      return Object.entries(parameters).reduce(
+        (result, [name, replacement]) => result.replaceAll(`{${name}}`, String(replacement)),
+        template,
+      );
+    };
+    return { language, locale: language === "zh-CN" ? "zh-CN" : "en-US", setLanguage, t };
+  }, [language]);
+
+  return <I18nContext.Provider value={value}>{children}</I18nContext.Provider>;
+}
+
+export function useI18n() {
+  const context = useContext(I18nContext);
+  if (!context) throw new Error("useI18n must be used inside LanguageProvider");
+  return context;
+}

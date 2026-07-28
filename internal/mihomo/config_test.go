@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kube-clash/kube-clash/internal/cluster"
+	"github.com/fengqi-dev/kube-clash/internal/cluster"
 )
 
 func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
@@ -21,6 +21,10 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 	text := string(content)
 	required := []string{
 		"stack: mixed",
+		"listeners:",
+		"type: tun",
+		"inet4-address:",
+		"- 198.19.0.1/30",
 		"auto-route: true",
 		"route-address:",
 		"- 10.244.0.0/16",

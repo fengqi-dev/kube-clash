@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -38,6 +39,15 @@ type Forwarder struct {
 	stop      chan struct{}
 	done      chan error
 	once      sync.Once
+}
+
+type PortForward interface {
+	Address() string
+	Close() error
+}
+
+func (f *Forwarder) Address() string {
+	return fmt.Sprintf("127.0.0.1:%d", f.LocalPort)
 }
 
 func (f *Forwarder) Close() error {
@@ -116,6 +126,10 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 	runAsNonRoot := true
 	allowPrivilegeEscalation := false
 	readOnlyRootFilesystem := true
+	pullPolicy := corev1.PullIfNotPresent
+	if strings.HasSuffix(image, ":latest") {
+		pullPolicy = corev1.PullAlways
+	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: GatewayName, Namespace: GatewayNamespace, Labels: gatewayLabels,
@@ -136,7 +150,7 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 					Containers: []corev1.Container{{
 						Name:            "gateway",
 						Image:           image,
-						ImagePullPolicy: corev1.PullIfNotPresent,
+						ImagePullPolicy: pullPolicy,
 						Ports: []corev1.ContainerPort{{
 							Name: "tunnel", ContainerPort: GatewayPort, Protocol: corev1.ProtocolTCP,
 						}},
@@ -186,7 +200,7 @@ func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (string
 
 func (p *Provider) StartPortForward(
 	ctx context.Context, contextName, podName string, remotePort uint16,
-) (*Forwarder, error) {
+) (PortForward, error) {
 	config, err := p.RESTConfig(contextName)
 	if err != nil {
 		return nil, err

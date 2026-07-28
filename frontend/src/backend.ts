@@ -1,4 +1,4 @@
-import type { BootstrapData, SessionState } from "./types";
+import type { BootstrapData, SessionState, UpdateInfo } from "./types";
 
 declare global {
   interface Window {
@@ -9,11 +9,13 @@ declare global {
           Namespaces(contextName: string): Promise<string[]>;
           Connect(contextName: string, namespace: string): Promise<void>;
           Disconnect(): Promise<void>;
+          CheckForUpdates(): Promise<UpdateInfo>;
+          OpenUpdatePage(): Promise<void>;
         };
       };
     };
     runtime?: {
-      EventsOn(event: string, callback: (state: SessionState) => void): () => void;
+      EventsOn(event: string, callback: (state: never) => void): () => void;
     };
   }
 }
@@ -27,12 +29,20 @@ function api() {
 }
 
 export const backend = {
-  bootstrap: () => api().Bootstrap(),
-  namespaces: (contextName: string) => api().Namespaces(contextName),
-  connect: (contextName: string, namespace: string) => api().Connect(contextName, namespace),
-  disconnect: () => api().Disconnect(),
+  bootstrap: () => Promise.resolve().then(() => api().Bootstrap()),
+  namespaces: (contextName: string) =>
+    Promise.resolve().then(() => api().Namespaces(contextName)),
+  connect: (contextName: string, namespace: string) =>
+    Promise.resolve().then(() => api().Connect(contextName, namespace)),
+  disconnect: () => Promise.resolve().then(() => api().Disconnect()),
+  checkForUpdates: () => Promise.resolve().then(() => api().CheckForUpdates()),
+  openUpdatePage: () => Promise.resolve().then(() => api().OpenUpdatePage()),
   onSession: (callback: (state: SessionState) => void) => {
     if (!window.runtime) return () => undefined;
-    return window.runtime.EventsOn("session:state", callback);
+    return window.runtime.EventsOn("session:state", callback as (state: never) => void);
+  },
+  onUpdate: (callback: (state: UpdateInfo) => void) => {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOn("update:state", callback as (state: never) => void);
   },
 };

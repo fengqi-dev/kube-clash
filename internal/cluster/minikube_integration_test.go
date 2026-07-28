@@ -6,17 +6,19 @@ import (
 	"bufio"
 	"context"
 	"encoding/binary"
+	"fmt"
 	"io"
 	"net"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/kube-clash/kube-clash/internal/socksbridge"
-	"github.com/kube-clash/kube-clash/internal/tunnel"
+	"github.com/fengqi-dev/kube-clash/internal/socksbridge"
+	"github.com/fengqi-dev/kube-clash/internal/tunnel"
 )
 
 func TestMinikubeGatewayTCPAndDNS(t *testing.T) {
@@ -58,9 +60,12 @@ func TestMinikubeGatewayTCPAndDNS(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gatewayAddress := net.JoinHostPort("127.0.0.1", portString(forwarder.LocalPort))
+	gatewayAddress := forwarder.Address()
 	testGatewayTCP(t, gatewayAddress, apiService.Spec.ClusterIP)
 	testGatewayDNS(t, gatewayAddress, dnsService.Spec.ClusterIP)
+	if target := os.Getenv("KUBE_CLASH_MINIKUBE_HTTP_TARGET"); target != "" {
+		testGatewayHTTP(t, gatewayAddress, target)
+	}
 
 	bridgeContext, stopBridge := context.WithCancel(ctx)
 	defer stopBridge()
@@ -70,6 +75,42 @@ func TestMinikubeGatewayTCPAndDNS(t *testing.T) {
 	}
 	testSOCKSTCP(t, bridge.Addr().String(), apiService.Spec.ClusterIP)
 	testSOCKSDNS(t, bridge.Addr().String(), dnsService.Spec.ClusterIP)
+}
+
+func testGatewayHTTP(t *testing.T, gatewayAddress, target string) {
+	t.Helper()
+	host, rawPort, err := net.SplitHostPort(target)
+	if err != nil {
+		t.Fatalf("parse HTTP target %q: %v", target, err)
+	}
+	var port uint16
+	if _, err := fmt.Sscanf(rawPort, "%d", &port); err != nil {
+		t.Fatalf("parse HTTP target port %q: %v", rawPort, err)
+	}
+	connection, err := net.DialTimeout("tcp", gatewayAddress, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err := tunnel.WriteOpen(connection, tunnel.OpenRequest{
+		Command: tunnel.CommandTCP, Host: host, Port: port,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(connection); err != nil {
+		t.Fatalf("gateway HTTP dial failed: %v", err)
+	}
+	_ = connection.SetDeadline(time.Now().Add(5 * time.Second))
+	if _, err := fmt.Fprintf(connection, "GET / HTTP/1.1\r\nHost: %s\r\nConnection: close\r\n\r\n", host); err != nil {
+		t.Fatal(err)
+	}
+	response, err := io.ReadAll(io.LimitReader(connection, 1<<20))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(response), "HTTP/1.1 200 OK") {
+		t.Fatalf("unexpected HTTP response through gateway: %q", response)
+	}
 }
 
 func testGatewayTCP(t *testing.T, gatewayAddress, targetIP string) {
@@ -254,19 +295,4 @@ func readSOCKSReplyAddress(t *testing.T, connection net.Conn) (byte, *net.UDPAdd
 	return header[1], &net.UDPAddr{
 		IP: net.IP(address[:4]), Port: int(binary.BigEndian.Uint16(address[4:])),
 	}
-}
-
-func portString(port uint16) string {
-	const digits = "0123456789"
-	if port == 0 {
-		return "0"
-	}
-	var buffer [5]byte
-	index := len(buffer)
-	for port > 0 {
-		index--
-		buffer[index] = digits[port%10]
-		port /= 10
-	}
-	return string(buffer[index:])
 }
