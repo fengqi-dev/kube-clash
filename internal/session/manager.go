@@ -73,9 +73,9 @@ type State struct {
 	// InventoryRevision increments only on Informer-driven inventory snapshots
 	// (pod/service/deployment add/update/delete). UI lists should key off this
 	// instead of UpdatedAt, which also advances on the metrics ticker.
-	InventoryRevision  int64     `json:"inventoryRevision"`
-	KubernetesVersion  string    `json:"kubernetesVersion,omitempty"`
-	UpdatedAt          time.Time `json:"updatedAt"`
+	InventoryRevision int64     `json:"inventoryRevision"`
+	KubernetesVersion string    `json:"kubernetesVersion,omitempty"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 type ClusterProvider interface {

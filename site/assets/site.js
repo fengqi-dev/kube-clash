@@ -45,16 +45,16 @@ const dictionary = {
     "overview.more.releases.body": "Desktop packages and Gateway images.",
     "overview.more.github.title": "GitHub",
     "overview.more.github.body": "Source, issues, and contribution entry points.",
-    "overview.callout.title": "Early access (M1)",
+    "overview.callout.title": "Download KubeLoop",
     "overview.callout.body":
-      "Core connect / disconnect, TUN networking, and the privileged helper are available. Signed installers are still being polished.",
+      "Grab a desktop build from GitHub Releases, then connect with your kubeconfig.",
 
     "started.title": "Get started",
     "started.desc": "Connect your machine to a cluster in a few minutes.",
     "started.steps.title": "Connect once",
     "started.step1.title": "Install KubeLoop",
     "started.step1.body":
-      "Download a desktop build from GitHub Releases (or build from source with Wails).",
+      "Download a platform archive from GitHub Releases (or build from source with Wails). macOS: if Gatekeeper blocks the app, right-click → Open, or run xattr -cr KubeLoop.app. Windows: if SmartScreen appears, choose More info → Run anyway. Linux: extract and run.",
     "started.step2.title": "Confirm kubeconfig access",
     "started.step2.body":
       "Make sure this machine can reach the cluster API with a normal kubeconfig.",
@@ -199,15 +199,15 @@ const dictionary = {
     "overview.more.releases.body": "桌面安装包与 Gateway 镜像。",
     "overview.more.github.title": "GitHub",
     "overview.more.github.body": "源码、Issue 与贡献入口。",
-    "overview.callout.title": "早期体验版（M1）",
-    "overview.callout.body":
-      "连接编排、TUN 网络与特权 Helper 已可用；签名安装包仍在打磨。",
+    "overview.callout.title": "下载 KubeLoop",
+    "overview.callout.body": "从 GitHub Releases 获取桌面构建，再用本机 kubeconfig 连接集群。",
 
     "started.title": "快速开始",
     "started.desc": "几分钟内把本机连上集群。",
     "started.steps.title": "连接一次",
     "started.step1.title": "安装 KubeLoop",
-    "started.step1.body": "从 GitHub Releases 下载桌面构建（或用 Wails 从源码构建）。",
+    "started.step1.body":
+      "从 GitHub Releases 下载对应平台压缩包（或用 Wails 从源码构建）。macOS：若被 Gatekeeper 拦截，可右键 → 打开，或执行 xattr -cr KubeLoop.app。Windows：若出现 SmartScreen，选择「更多信息 → 仍要运行」。Linux：解压后直接运行。",
     "started.step2.title": "确认 kubeconfig 可用",
     "started.step2.body": "确保本机可用普通 kubeconfig 访问集群 API。",
     "started.step3.title": "选择 Context 并连接",
