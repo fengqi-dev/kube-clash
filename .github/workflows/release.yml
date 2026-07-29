@@ -208,9 +208,17 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      - name: Download release artifacts
+      - name: Download desktop artifacts
         uses: actions/download-artifact@v7
         with:
+          pattern: desktop-*
+          path: dist
+          merge-multiple: true
+
+      - name: Download gateway artifacts
+        uses: actions/download-artifact@v7
+        with:
+          pattern: gateway-*
           path: dist
           merge-multiple: true
 
