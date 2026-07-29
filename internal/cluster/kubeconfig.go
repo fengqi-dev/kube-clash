@@ -262,6 +262,25 @@ func normalizeKubeconfigPaths(paths []string) []string {
 	return out
 }
 
+// ServerVersion returns the Kubernetes API server GitVersion for contextName.
+func (p *Provider) ServerVersion(ctx context.Context, contextName string) (string, error) {
+	if contextName == "" {
+		return "", fmt.Errorf("context is required")
+	}
+	client, err := p.client(contextName)
+	if err != nil {
+		return "", err
+	}
+	version, err := client.Discovery().ServerVersion()
+	if err != nil {
+		return "", err
+	}
+	if version == nil || version.GitVersion == "" {
+		return "", fmt.Errorf("empty server version")
+	}
+	return version.GitVersion, nil
+}
+
 // Probe checks whether the Kubernetes API for contextName is reachable.
 func (p *Provider) Probe(ctx context.Context, contextName string) ProbeResult {
 	result := ProbeResult{Context: contextName}
@@ -270,21 +289,13 @@ func (p *Provider) Probe(ctx context.Context, contextName string) ProbeResult {
 		return result
 	}
 	start := time.Now()
-	client, err := p.client(contextName)
-	if err != nil {
-		result.Error = err.Error()
-		result.LatencyMs = time.Since(start).Milliseconds()
-		return result
-	}
-	version, err := client.Discovery().ServerVersion()
+	version, err := p.ServerVersion(ctx, contextName)
 	result.LatencyMs = time.Since(start).Milliseconds()
 	if err != nil {
 		result.Error = err.Error()
 		return result
 	}
 	result.OK = true
-	if version != nil {
-		result.Version = version.GitVersion
-	}
+	result.Version = version
 	return result
 }

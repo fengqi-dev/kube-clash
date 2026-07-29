@@ -84,6 +84,9 @@ export function useSession() {
             : (initial.namespaces[0] ?? "default"));
         setContextName(selected);
         setNamespace(nextNamespace);
+        if (selected) {
+          void backend.probeContext(selected).catch(() => undefined);
+        }
       })
       .catch((error: Error) => setUIError(error.message))
       .finally(() => setLoading(false));
@@ -119,6 +122,7 @@ export function useSession() {
         : (namespaces[0] ?? "default");
       setNamespace(nextNamespace);
       await backend.rememberSelection(next, nextNamespace);
+      void backend.probeContext(next).catch(() => undefined);
     } catch (error) {
       setUIError((error as Error).message);
     }

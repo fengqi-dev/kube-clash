@@ -1,19 +1,25 @@
+import { useEffect, useState, type ReactNode } from "react";
 import {
   Boxes,
   Gauge,
   Network,
   Orbit,
+  PanelLeftClose,
+  PanelLeftOpen,
   ScrollText,
   Server,
   Settings2,
-  ShieldCheck,
   Globe,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { type AppView } from "@/hooks/use-session";
 import { useI18n, type TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -39,104 +45,186 @@ const navKeys: Record<AppView, TranslationKey> = {
   settings: "nav.settings",
 };
 
+const storageKey = "kubeloop.sidebar.collapsed";
+
 export function AppSidebar({
   view,
   ready,
-  coreVersion,
   updateAvailable,
   onNavigate,
 }: {
   view: AppView;
   ready: boolean;
-  coreVersion?: string;
   updateAvailable: boolean;
   onNavigate(view: AppView): void;
 }) {
   const { t } = useI18n();
+  const [collapsed, setCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem(storageKey) === "1";
+    } catch {
+      return false;
+    }
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(storageKey, collapsed ? "1" : "0");
+    } catch {
+      // ignore quota / private mode
+    }
+  }, [collapsed]);
+
+  function navButton({
+    id,
+    Icon,
+    label,
+    trailing,
+    dot,
+  }: {
+    id: AppView;
+    Icon: LucideIcon;
+    label: string;
+    trailing?: ReactNode;
+    dot?: "success" | "primary";
+  }) {
+    const active = view === id;
+    const button = (
+      <Button
+        type="button"
+        variant="ghost"
+        onClick={() => onNavigate(id)}
+        aria-label={label}
+        className={cn(
+          "h-9 rounded-md text-[14px] font-medium",
+          collapsed
+            ? "w-9 justify-center px-0"
+            : "w-full justify-start gap-2.5 px-2.5",
+          active
+            ? "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent"
+            : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+        )}
+      >
+        <Icon
+          size={16}
+          strokeWidth={1.9}
+          className={cn(
+            active ? "text-foreground" : "text-muted-foreground",
+            id === "settings" && active && "text-primary",
+          )}
+        />
+        {!collapsed ? (
+          <>
+            {label}
+            {trailing}
+          </>
+        ) : null}
+      </Button>
+    );
+
+    if (!collapsed) return button;
+
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <span className="relative inline-flex">
+            {button}
+            {dot ? (
+              <span
+                className={cn(
+                  "pointer-events-none absolute top-1.5 right-1.5 size-1.5 rounded-full",
+                  dot === "success" ? "bg-success" : "bg-primary",
+                )}
+              />
+            ) : null}
+          </span>
+        </TooltipTrigger>
+        <TooltipContent side="right" sideOffset={8}>
+          {label}
+        </TooltipContent>
+      </Tooltip>
+    );
+  }
+
+  const collapseLabel = collapsed ? t("nav.expandSidebar") : t("nav.collapseSidebar");
+  const CollapseIcon = collapsed ? PanelLeftOpen : PanelLeftClose;
 
   return (
-    <aside className="relative z-10 flex w-[220px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-3 text-sidebar-foreground">
-      <div className="window-drag flex h-11 items-center gap-2.5 px-2">
-        <div className="grid size-8 place-items-center rounded-md bg-primary text-primary-foreground">
+    <aside
+      className={cn(
+        "relative z-10 flex shrink-0 flex-col border-r border-sidebar-border bg-sidebar py-3 text-sidebar-foreground transition-[width] duration-200",
+        collapsed ? "w-[60px] px-2" : "w-[220px] px-3",
+      )}
+    >
+      <div
+        className={cn(
+          "window-drag flex items-center",
+          collapsed ? "flex-col gap-2" : "h-11 gap-2.5 px-2",
+        )}
+      >
+        <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
           <Orbit size={18} strokeWidth={1.9} />
         </div>
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold tracking-tight">KubeLoop</div>
-          <div className="truncate text-[11px] text-muted-foreground">Network client</div>
-        </div>
-      </div>
-
-      <nav className="mt-5 space-y-0.5">
-        {navigation.map(({ id, icon: Icon }) => {
-          const active = view === id;
-          return (
+        {!collapsed ? (
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold tracking-tight">KubeLoop</div>
+            <div className="truncate text-[11px] text-muted-foreground">Network client</div>
+          </div>
+        ) : null}
+        <Tooltip>
+          <TooltipTrigger asChild>
             <Button
-              key={id}
               type="button"
               variant="ghost"
-              onClick={() => onNavigate(id)}
-              className={cn(
-                "h-9 w-full justify-start gap-2.5 rounded-md px-2.5 text-[13px] font-medium",
-                active
-                  ? "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent"
-                  : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
-              )}
+              aria-label={collapseLabel}
+              onClick={() => setCollapsed((value) => !value)}
+              className="window-no-drag size-8 shrink-0 px-0 text-muted-foreground hover:bg-accent/70 hover:text-foreground"
             >
-              <Icon
-                size={16}
-                strokeWidth={1.9}
-                className={active ? "text-foreground" : "text-muted-foreground"}
-              />
-              {t(navKeys[id])}
-              {id === "connections" && ready && (
-                <span className="ml-auto size-1.5 rounded-full bg-success" />
-              )}
+              <CollapseIcon size={16} strokeWidth={1.9} />
             </Button>
-          );
-        })}
+          </TooltipTrigger>
+          <TooltipContent side={collapsed ? "right" : "bottom"} sideOffset={8}>
+            {collapseLabel}
+          </TooltipContent>
+        </Tooltip>
+      </div>
+
+      <nav
+        className={cn(
+          "mt-5 space-y-1",
+          collapsed && "flex flex-col items-center",
+        )}
+      >
+        {navigation.map(({ id, icon }) =>
+          navButton({
+            id,
+            Icon: icon,
+            label: t(navKeys[id]),
+            trailing:
+              id === "connections" && ready ? (
+                <span className="ml-auto size-1.5 rounded-full bg-success" />
+              ) : undefined,
+            dot: id === "connections" && ready ? "success" : undefined,
+          }),
+        )}
       </nav>
 
-      <div className="mt-auto space-y-2 px-1 pb-1">
-        <div className="rounded-md border border-sidebar-border bg-muted/40 px-3 py-2.5">
-          <div className="flex items-center gap-2 text-[11px] font-medium text-muted-foreground">
-            <ShieldCheck size={13} className="text-primary" />
-            sing-box Core
-          </div>
-          <div className="mt-1.5 flex items-center justify-between gap-2">
-            <span className="font-mono text-[11px] text-muted-foreground">
-              {coreVersion ?? "v1.19.28"}
-            </span>
-            <Badge
-              variant="secondary"
-              className={cn(
-                "rounded-md px-1.5 py-0 text-[10px] font-medium",
-                ready && "bg-success/15 text-success",
-              )}
-            >
-              {ready ? t("core.running") : t("core.onDemand")}
-            </Badge>
-          </div>
-        </div>
+      <div
+        className={cn(
+          "mt-auto space-y-2 pb-1",
+          collapsed ? "flex flex-col items-center px-0" : "px-1",
+        )}
+      >
         <Separator className="bg-sidebar-border" />
-        <Button
-          type="button"
-          variant="ghost"
-          onClick={() => onNavigate("settings")}
-          className={cn(
-            "h-9 w-full justify-start gap-2.5 rounded-md px-2.5 text-[13px] font-medium",
-            view === "settings"
-              ? "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent"
-              : "text-muted-foreground hover:bg-muted hover:text-foreground",
-          )}
-        >
-          <Settings2
-            size={16}
-            strokeWidth={1.9}
-            className={view === "settings" ? "text-primary" : undefined}
-          />
-          {t("nav.settings")}
-          {updateAvailable && <span className="ml-auto size-1.5 rounded-full bg-primary" />}
-        </Button>
+        {navButton({
+          id: "settings",
+          Icon: Settings2,
+          label: t("nav.settings"),
+          trailing: updateAvailable ? (
+            <span className="ml-auto size-1.5 rounded-full bg-primary" />
+          ) : undefined,
+          dot: updateAvailable ? "primary" : undefined,
+        })}
       </div>
     </aside>
   );
