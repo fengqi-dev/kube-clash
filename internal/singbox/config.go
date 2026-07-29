@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"sort"
 	"strconv"
+	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
@@ -19,6 +20,12 @@ const (
 	DefaultDNSPort     = 1053
 )
 
+// HostAlias maps a DNS name to an IPv4 address for the local dns-in resolver.
+type HostAlias struct {
+	Domain string
+	IP     string
+}
+
 type Options struct {
 	BridgeHost       string
 	BridgePort       int
@@ -29,6 +36,7 @@ type Options struct {
 	DNSPort          int
 	TUNAddress       string
 	Namespace        string
+	Hosts            []HostAlias
 }
 
 func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
@@ -68,26 +76,47 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		return nil, err
 	}
 
-	dnsServers := []map[string]any{
-		{"type": "local", "tag": "local"},
+	hosts, err := NormalizeHostAliases(options.Hosts)
+	if err != nil {
+		return nil, err
 	}
-	dnsRules := []map[string]any{}
+
+	dnsServers := make([]map[string]any, 0, 3)
+	dnsRules := make([]map[string]any, 0, 2)
+	if len(hosts) > 0 {
+		predefined := make(map[string]any, len(hosts))
+		domains := make([]string, 0, len(hosts))
+		for _, item := range hosts {
+			predefined[item.Domain] = item.IP
+			domains = append(domains, item.Domain)
+		}
+		dnsServers = append(dnsServers, map[string]any{
+			"type":       "hosts",
+			"tag":        "hosts",
+			"predefined": predefined,
+		})
+		dnsRules = append(dnsRules, map[string]any{
+			"domain": domains,
+			"server": "hosts",
+		})
+	}
 	if discovery.DNSServer != "" {
 		dnsIP, parseErr := netip.ParseAddr(discovery.DNSServer)
 		if parseErr != nil {
 			return nil, fmt.Errorf("invalid cluster DNS address %q: %w", discovery.DNSServer, parseErr)
 		}
-		dnsServers = append([]map[string]any{{
+		dnsServers = append(dnsServers, map[string]any{
 			"type":   "udp",
 			"tag":    "cluster",
 			"server": dnsIP.String(),
 			"detour": KubernetesOutbound,
-		}}, dnsServers...)
+		})
 		dnsRules = append(dnsRules, map[string]any{
 			"domain_suffix": []string{"cluster.local"},
 			"server":        "cluster",
 		})
 	}
+	dnsServers = append(dnsServers, map[string]any{"type": "local", "tag": "local"})
 
 	routeRules := []map[string]any{
 		{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
@@ -206,12 +235,57 @@ func validatePort(port int, label string) error {
 func errLabel(label string) string { return label }
 
 // ResolverDomains returns split-DNS match domains routed to the local dns-in.
-func ResolverDomains(namespace string) []string {
+func ResolverDomains(namespace string, hosts ...HostAlias) []string {
 	domains := []string{"cluster.local", "svc.cluster.local"}
 	if namespace != "" {
 		domains = append(domains, namespace+".svc.cluster.local")
 	}
+	seen := make(map[string]struct{}, len(domains)+len(hosts))
+	for _, domain := range domains {
+		seen[domain] = struct{}{}
+	}
+	for _, item := range hosts {
+		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Domain)), ".")
+		if domain == "" {
+			continue
+		}
+		if _, exists := seen[domain]; exists {
+			continue
+		}
+		seen[domain] = struct{}{}
+		domains = append(domains, domain)
+	}
 	return domains
+}
+
+// NormalizeHostAliases validates and canonicalizes host aliases.
+// An empty input returns nil (clears config).
+func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	out := make([]HostAlias, 0, len(items))
+	seen := make(map[string]struct{}, len(items))
+	for _, item := range items {
+		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Domain)), ".")
+		if domain == "" {
+			return nil, errors.New("host alias domain is required")
+		}
+		if strings.ContainsAny(domain, " \t/") {
+			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
+		}
+		ip, err := netip.ParseAddr(strings.TrimSpace(item.IP))
+		if err != nil || !ip.Is4() {
+			return nil, fmt.Errorf("invalid host alias IPv4 %q", item.IP)
+		}
+		if _, exists := seen[domain]; exists {
+			return nil, fmt.Errorf("duplicate host alias domain %q", domain)
+		}
+		seen[domain] = struct{}{}
+		out = append(out, HostAlias{Domain: domain, IP: ip.String()})
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
+	return out, nil
 }
 
 // SearchDomains returns Kubernetes-style DNS search suffixes for short names

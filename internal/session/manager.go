@@ -91,6 +91,7 @@ type Core interface {
 		cluster.Discovery,
 		string,
 		string,
+		[]singbox.HostAlias,
 	) (singbox.RunningCore, error)
 }
 
@@ -335,7 +336,8 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Phase = PhaseStarting
 	state.Message = "正在安装并启动 sing-box TUN"
 	m.publish(state)
-	core, err := m.core.Start(ctx, discovery, bridge.Addr().String(), request.Namespace)
+	hosts := m.hostAliasesFor(request.Context)
+	core, err := m.core.Start(ctx, discovery, bridge.Addr().String(), request.Namespace, hosts)
 	if err != nil {
 		m.fail(ctx, state, "无法启动 sing-box TUN", err)
 		return
@@ -708,6 +710,59 @@ func (m *Manager) SetManualNetwork(contextName string, network cluster.ManualNet
 	return m.store.SetManualNetwork(contextName, store.ManualNetwork{
 		PodCIDRs: normalized.PodCIDRs, ServiceCIDRs: normalized.ServiceCIDRs, DNSServer: normalized.DNSServer,
 	})
+}
+
+func (m *Manager) HostAliases(contextName string) []store.HostAliasSpec {
+	if m.store == nil || contextName == "" {
+		return nil
+	}
+	return m.store.HostAliases(contextName)
+}
+
+// SetHostAliases replaces host aliases for a context. An empty list clears stored config.
+func (m *Manager) SetHostAliases(contextName string, items []store.HostAliasSpec) error {
+	if m.store == nil {
+		return errors.New("state store is unavailable")
+	}
+	if contextName == "" {
+		return errors.New("context is required")
+	}
+	normalized, err := normalizeHostAliasSpecs(items)
+	if err != nil {
+		return err
+	}
+	return m.store.SetHostAliases(contextName, normalized)
+}
+
+func (m *Manager) hostAliasesFor(contextName string) []singbox.HostAlias {
+	items := m.HostAliases(contextName)
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]singbox.HostAlias, 0, len(items))
+	for _, item := range items {
+		out = append(out, singbox.HostAlias{Domain: item.Domain, IP: item.IP})
+	}
+	return out
+}
+
+func normalizeHostAliasSpecs(items []store.HostAliasSpec) ([]store.HostAliasSpec, error) {
+	if len(items) == 0 {
+		return nil, nil
+	}
+	converted := make([]singbox.HostAlias, 0, len(items))
+	for _, item := range items {
+		converted = append(converted, singbox.HostAlias{Domain: item.Domain, IP: item.IP})
+	}
+	normalized, err := singbox.NormalizeHostAliases(converted)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]store.HostAliasSpec, 0, len(normalized))
+	for _, item := range normalized {
+		out = append(out, store.HostAliasSpec{Domain: item.Domain, IP: item.IP})
+	}
+	return out, nil
 }
 
 func (m *Manager) GatewayInstallManifest() string {

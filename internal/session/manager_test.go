@@ -174,7 +174,7 @@ func newFakeCore() *fakeCore {
 }
 
 func (f *fakeCore) Start(
-	context.Context, cluster.Discovery, string, string,
+	context.Context, cluster.Discovery, string, string, []singbox.HostAlias,
 ) (singbox.RunningCore, error) {
 	close(f.started)
 	return f.process, nil

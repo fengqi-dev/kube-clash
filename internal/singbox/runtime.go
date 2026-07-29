@@ -48,6 +48,7 @@ func (r *Runtime) Start(
 	discovery cluster.Discovery,
 	bridgeAddress string,
 	namespace string,
+	hosts []HostAlias,
 ) (RunningCore, error) {
 	host, rawPort, err := net.SplitHostPort(bridgeAddress)
 	if err != nil {
@@ -73,6 +74,10 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
+	normalizedHosts, err := NormalizeHostAliases(hosts)
+	if err != nil {
+		return nil, err
+	}
 	config, err := Generate(discovery, Options{
 		BridgeHost:       host,
 		BridgePort:       bridgePort,
@@ -82,6 +87,7 @@ func (r *Runtime) Start(
 		DNSPort:          dnsPort,
 		TUNAddress:       tunAddress,
 		Namespace:        namespace,
+		Hosts:            normalizedHosts,
 	})
 	if err != nil {
 		return nil, err
@@ -112,10 +118,11 @@ func (r *Runtime) Start(
 		return nil, fmt.Errorf("write sing-box config: %w", err)
 	}
 	searchDomains := SearchDomains(namespace)
+	resolverDomains := ResolverDomains(namespace, normalizedHosts...)
 	dnsMeta, _ := json.Marshal(map[string]any{
 		"listen":  DefaultDNSListen,
 		"port":    dnsPort,
-		"domains": ResolverDomains(namespace),
+		"domains": resolverDomains,
 		"search":  searchDomains,
 		"ndots":   5,
 	})
@@ -139,7 +146,7 @@ func (r *Runtime) Start(
 		controllerAddress: net.JoinHostPort("127.0.0.1", strconv.Itoa(controllerPort)),
 		controllerSecret:  secret,
 		dnsPort:           dnsPort,
-		resolverDomains:   ResolverDomains(namespace),
+		resolverDomains:   resolverDomains,
 		httpClient:        r.HTTPClient,
 	}
 	if r.StartCommand == nil && r.PrivilegedStart != nil {
@@ -414,6 +421,9 @@ func (p *Process) Close() error {
 				}
 			}
 		}
+		// Remove session files only after the lifecycle wrapper has exited so
+		// embedded split-DNS restore (including host-alias resolver files) can
+		// still read dns-meta / search-domain scripts under workDir.
 		_ = os.RemoveAll(p.workDir)
 	})
 	err := p.Err()

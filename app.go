@@ -274,6 +274,14 @@ func (a *App) SetManualNetwork(contextName string, network cluster.ManualNetwork
 	return a.manager.SetManualNetwork(contextName, network)
 }
 
+func (a *App) GetHostAliases(contextName string) []store.HostAliasSpec {
+	return a.manager.HostAliases(contextName)
+}
+
+func (a *App) SetHostAliases(contextName string, items []store.HostAliasSpec) error {
+	return a.manager.SetHostAliases(contextName, items)
+}
+
 func (a *App) GatewayInstallManifest() string {
 	return a.manager.GatewayInstallManifest()
 }

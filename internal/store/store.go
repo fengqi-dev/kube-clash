@@ -32,7 +32,14 @@ type ClusterState struct {
 	PortForwards  []PortForwardSpec `json:"portForwards,omitempty"`
 	Exchanges     []ExchangeSpec    `json:"exchanges,omitempty"`
 	Previews      []PreviewSpec     `json:"previews,omitempty"`
+	HostAliases   []HostAliasSpec   `json:"hostAliases,omitempty"`
 	ManualNetwork *ManualNetwork    `json:"manualNetwork,omitempty"`
+}
+
+// HostAliasSpec maps a DNS name to an IPv4 address for the local tunnel DNS.
+type HostAliasSpec struct {
+	Domain string `json:"domain"`
+	IP     string `json:"ip"`
 }
 
 // ManualNetwork is user-supplied Pod/Service CIDR and CoreDNS when auto-discovery fails.
@@ -268,6 +275,33 @@ func (s *Store) SetPreviews(contextName string, items []PreviewSpec) error {
 	return s.saveLocked()
 }
 
+func (s *Store) HostAliases(contextName string) []HostAliasSpec {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item := s.state.Clusters[contextName]
+	if item == nil {
+		return nil
+	}
+	return cloneHostAliases(item.HostAliases)
+}
+
+// SetHostAliases replaces host aliases for a context.
+// An empty or nil list clears the stored configuration.
+func (s *Store) SetHostAliases(contextName string, items []HostAliasSpec) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if contextName == "" {
+		return nil
+	}
+	cluster := s.ensureClusterLocked(contextName)
+	if len(items) == 0 {
+		cluster.HostAliases = nil
+	} else {
+		cluster.HostAliases = cloneHostAliases(items)
+	}
+	return s.saveLocked()
+}
+
 func (s *Store) ManualNetwork(contextName string) ManualNetwork {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -388,11 +422,21 @@ func cloneCluster(item ClusterState) ClusterState {
 		PortForwards: clonePortForwards(item.PortForwards),
 		Exchanges:    cloneExchanges(item.Exchanges),
 		Previews:     clonePreviews(item.Previews),
+		HostAliases:  cloneHostAliases(item.HostAliases),
 	}
 	if item.ManualNetwork != nil {
 		copyItem := cloneManualNetwork(*item.ManualNetwork)
 		out.ManualNetwork = &copyItem
 	}
+	return out
+}
+
+func cloneHostAliases(items []HostAliasSpec) []HostAliasSpec {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]HostAliasSpec, len(items))
+	copy(out, items)
 	return out
 }
 

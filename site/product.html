@@ -6,7 +6,7 @@
     <title>Product — KubeLoop Docs</title>
     <meta
       name="description"
-      content="KubeLoop product capabilities: TUN, cluster DNS, cluster management, Exchange, Preview, Port Forward."
+      content="KubeLoop product capabilities: TUN, cluster DNS, Host Aliases, cluster management, Exchange, Preview, Port Forward."
     />
     <link rel="icon" href="assets/appicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/styles.css" />
@@ -26,7 +26,7 @@
 
           <section class="section">
             <h2 data-i18n="product.core.title">Core capabilities</h2>
-            <div class="card-grid cols-3">
+            <div class="card-grid">
               <div class="card">
                 <span class="card-icon">T</span>
                 <span class="card-body">
@@ -43,6 +43,16 @@
                   <p data-i18n="product.core.dns.body">
                     Split DNS with search domains — mysql.default and
                     *.svc.cluster.local both work.
+                  </p>
+                </span>
+              </div>
+              <div class="card">
+                <span class="card-icon">H</span>
+                <span class="card-body">
+                  <h3 data-i18n="product.core.hosts.title">Host Aliases</h3>
+                  <p data-i18n="product.core.hosts.body">
+                    Per-context domain → IPv4 maps via local DNS while connected.
+                    Reconnect to apply; cleared on disconnect.
                   </p>
                 </span>
               </div>

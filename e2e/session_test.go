@@ -80,7 +80,7 @@ type recordingCore struct {
 }
 
 func (r *recordingCore) Start(
-	_ context.Context, _ cluster.Discovery, bridgeAddress string, _ string,
+	_ context.Context, _ cluster.Discovery, bridgeAddress string, _ string, _ []singbox.HostAlias,
 ) (singbox.RunningCore, error) {
 	r.bridgeAddress = bridgeAddress
 	return r.process, nil

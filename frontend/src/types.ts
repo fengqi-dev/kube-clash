@@ -62,6 +62,11 @@ export interface ManualNetwork {
   dnsServer?: string;
 }
 
+export interface HostAlias {
+  domain: string;
+  ip: string;
+}
+
 export interface Connection {
   id: string;
   network: string;
