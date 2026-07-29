@@ -23,14 +23,15 @@ import type { InterceptInfo, PortForwardInfo, PreviewInfo } from "@/types";
 export function ActiveSessions({
   ready,
   refreshKey,
-  sessionUpdatedAt,
-  scope = "all",
+  inventoryRevision = 0,
+  scope = "network",
 }: {
   ready: boolean;
   refreshKey: number;
-  sessionUpdatedAt?: string;
-  /** Workload only manages Pod port-forwards; Network shows all session types. */
-  scope?: "all" | "podPortForward";
+  /** Informer-driven; reload after reconcile may stop stale bindings. */
+  inventoryRevision?: number;
+  /** Workload: pod PF only. Network: service PF + Exchange + Preview. */
+  scope?: "network" | "podPortForward";
 }) {
   const { t } = useI18n();
   const [forwards, setForwards] = useState<PortForwardInfo[]>([]);
@@ -46,7 +47,9 @@ export function ActiveSessions({
       !podOnly && ready ? backend.listPreviews() : Promise.resolve([]),
     ]);
     setForwards(
-      podOnly ? forwardItems.filter((item) => item.kind === "pod") : forwardItems,
+      forwardItems.filter((item) =>
+        podOnly ? item.kind === "pod" : item.kind === "service",
+      ),
     );
     setExchanges(exchangeItems);
     setPreviews(previewItems);
@@ -63,7 +66,7 @@ export function ActiveSessions({
     return () => {
       active = false;
     };
-  }, [podOnly, ready, refreshKey, sessionUpdatedAt, t]);
+  }, [podOnly, ready, refreshKey, inventoryRevision, t]);
 
   async function stopForward(id: string) {
     setBusy(true);

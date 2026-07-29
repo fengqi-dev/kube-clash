@@ -607,6 +607,7 @@ export namespace session {
 	    // Go type: time
 	    connectedAt?: any;
 	    metrics?: singbox.Metrics;
+	    inventoryRevision: number;
 	    // Go type: time
 	    updatedAt: any;
 	
@@ -631,6 +632,7 @@ export namespace session {
 	        this.coreVersion = source["coreVersion"];
 	        this.connectedAt = this.convertValues(source["connectedAt"], null);
 	        this.metrics = this.convertValues(source["metrics"], singbox.Metrics);
+	        this.inventoryRevision = source["inventoryRevision"];
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	    }
 	

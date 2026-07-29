@@ -209,7 +209,7 @@ export function WorkloadView({
       <ActiveSessions
         ready={ready}
         refreshKey={refreshKey}
-        sessionUpdatedAt={session.updatedAt}
+        inventoryRevision={session.inventoryRevision}
         scope="podPortForward"
       />
 
