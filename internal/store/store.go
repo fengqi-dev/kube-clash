@@ -257,8 +257,8 @@ func (s *Store) saveLocked() error {
 
 func cloneState(state State) State {
 	out := State{
-		Version: state.Version,
-		UI:      state.UI,
+		Version:  state.Version,
+		UI:       state.UI,
 		Clusters: make(map[string]*ClusterState, len(state.Clusters)),
 	}
 	for name, item := range state.Clusters {
