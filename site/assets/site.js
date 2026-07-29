@@ -91,7 +91,7 @@ const dictionary = {
     "product.tools.preview.title": "Preview",
     "product.tools.preview.body": "Expose a local app as a temporary ClusterIP Service.",
     "product.tools.portfwd.title": "Port Forward",
-    "product.tools.portfwd.body": "Forward a local port to a Pod or Service — even when TUN is off.",
+    "product.tools.portfwd.body": "Forward a local port to a Pod or Service.",
     "product.gateway.title": "Minimal Gateway",
     "product.gateway.body":
       "Unprivileged in-cluster Deployment reached only via API Server port-forward. Works with scoped RBAC and admin-preinstalled Gateways.",
@@ -239,7 +239,7 @@ const dictionary = {
     "product.tools.preview.title": "Preview",
     "product.tools.preview.body": "把本机应用临时暴露为 ClusterIP Service。",
     "product.tools.portfwd.title": "端口转发",
-    "product.tools.portfwd.body": "将本地端口转发到 Pod 或 Service——未开 TUN 也能用。",
+    "product.tools.portfwd.body": "将本地端口转发到 Pod 或 Service。",
     "product.gateway.title": "最小化 Gateway",
     "product.gateway.body":
       "无特权集群内 Deployment，仅经 API Server port-forward 访问；支持受限 RBAC 与管理员预装。",

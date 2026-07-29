@@ -37,7 +37,7 @@ like a VPN — so local apps can reach Pod IPs, ClusterIP Services, and
 | --- | --- |
 | Open a Service in the browser / call an internal API | Connect, then use the ClusterIP or `*.svc.cluster.local` name |
 | Debug against a real Pod IP | Pod CIDR is routed locally after Connect |
-| `kubectl port-forward` without the terminal | **Port Forward** in the Network page (works even when TUN is off) |
+| `kubectl port-forward` without the terminal | **Port Forward** in the Network page |
 | Run a local process *as* a cluster Service | **Exchange** (Service Local Intercept): cluster clients keep the same ClusterIP / DNS; traffic lands on your machine |
 | Expose a local process as a new ClusterIP | **Preview** creates a temporary Service that points at your local app |
 
