@@ -69,6 +69,7 @@ jobs:
         shell: bash
         env:
           CGO_LDFLAGS: ${{ runner.os == 'macOS' && '-framework UniformTypeIdentifiers' || '' }}
+          VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
           if [[ "${RUNNER_OS}" == "Linux" ]]; then
             wails build -clean -tags webkit2_41 \
@@ -81,6 +82,8 @@ jobs:
       - name: Build desktop application
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
           $versionFlag = "-X main.version=$env:GITHUB_REF_NAME"
           wails build -clean -ldflags $versionFlag
@@ -141,7 +144,7 @@ jobs:
           mkdir -p dist
           CGO_ENABLED=0 GOOS=linux go build \
             -trimpath \
-            -ldflags="-s -w" \
+            -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o "dist/kubeloop-gateway-linux-${GOARCH}" \
             ./cmd/kubeloop-gateway
 
@@ -192,6 +195,8 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
 
   publish:
     name: Publish GitHub Release

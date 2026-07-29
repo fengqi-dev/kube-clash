@@ -342,6 +342,20 @@ func TestRetainMetricsKeepsRecentConnections(t *testing.T) {
 	}
 }
 
+func TestResolveGatewayImage(t *testing.T) {
+	t.Setenv("KUBELOOP_GATEWAY_IMAGE", "")
+	if got := ResolveGatewayImage("dev"); got != DefaultGatewayImage {
+		t.Fatalf("dev = %q, want %q", got, DefaultGatewayImage)
+	}
+	if got := ResolveGatewayImage("v0.2.0"); got != "ghcr.io/fengqi-dev/kube-loop/gateway:v0.2.0" {
+		t.Fatalf("release = %q", got)
+	}
+	t.Setenv("KUBELOOP_GATEWAY_IMAGE", "registry.example/gateway:custom")
+	if got := ResolveGatewayImage("v0.2.0"); got != "registry.example/gateway:custom" {
+		t.Fatalf("env override = %q", got)
+	}
+}
+
 func TestRetainMetricsCapsPublishedConnections(t *testing.T) {
 	manager := NewManager(&fakeProvider{})
 	connections := make([]singbox.Connection, 250)

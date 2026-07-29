@@ -120,8 +120,11 @@ wails dev
 ```
 
 ```bash
-wails build
-./build/bundle-helper.sh    # ship kubeloop-helper next to / inside the app
+# VERSION is injected into Go, the Vite frontend, helper, and Gateway image/binary
+VERSION=v0.1.0
+VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
+./build/bundle-helper.sh "$VERSION"   # ship kubeloop-helper next to / inside the app
+# Gateway image (release CI): docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
 ```
 
 Useful overrides while developing:

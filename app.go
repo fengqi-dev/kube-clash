@@ -53,7 +53,9 @@ func NewApp() *App {
 	if stateStore != nil {
 		provider.SetExtraKubeconfigFiles(stateStore.KubeconfigFiles())
 	}
-	options := []session.Option{}
+	options := []session.Option{
+		session.WithGatewayImage(session.ResolveGatewayImage(version)),
+	}
 	if stateStore != nil {
 		options = append(options, session.WithStore(stateStore))
 	}
