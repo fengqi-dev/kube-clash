@@ -30,6 +30,28 @@
       "problemMatcher": ["$tsc"]
     },
     {
+      "label": "build: helper",
+      "type": "shell",
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "command": "./build/bundle-helper.sh",
+      "args": ["dev", "build/bin"],
+      "windows": {
+        "command": "go",
+        "args": [
+          "build",
+          "-trimpath",
+          "-ldflags",
+          "-s -w -X main.version=dev",
+          "-o",
+          "build/bin/kubeloop-helper.exe",
+          "./cmd/kubeloop-helper"
+        ]
+      },
+      "problemMatcher": ["$go"]
+    },
+    {
       "label": "build",
       "type": "shell",
       "options": {
@@ -68,7 +90,7 @@
           "build/bin/KubeLoop.exe"
         ]
       },
-      "dependsOn": ["npm: build"],
+      "dependsOn": ["npm: build", "build: helper"],
       "group": {
         "kind": "build",
         "isDefault": true

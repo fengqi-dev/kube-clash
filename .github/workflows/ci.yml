@@ -88,7 +88,7 @@ jobs:
         run: go test -tags webkit2_41 ./...
 
       - name: Run race detector
-        run: go test -race ./internal/gateway ./internal/singbox ./internal/session ./internal/socksbridge ./internal/tunnel
+        run: go test -race ./internal/gateway ./internal/helper ./internal/singbox ./internal/session ./internal/socksbridge ./internal/tunnel
 
       - name: Build Gateway binaries
         shell: bash
@@ -98,9 +98,65 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
             go build -trimpath -o /tmp/kubeloop-gateway-arm64 ./cmd/kubeloop-gateway
 
-      - name: Cross-compile sing-box package
+      - name: Build privileged helper
+        shell: bash
+        run: |
+          go build -trimpath -ldflags="-s -w -X main.version=ci" \
+            -o /tmp/kubeloop-helper ./cmd/kubeloop-helper
+          /tmp/kubeloop-helper version
+
+      - name: Cross-compile helper and sing-box packages
         shell: bash
         run: |
           for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
             GOOS=${pair%/*} GOARCH=${pair#*/} go build ./internal/singbox
+            GOOS=${pair%/*} GOARCH=${pair#*/} go build ./internal/helper
+            out="/tmp/kubeloop-helper-${pair%/*}-${pair#*/}"
+            if [[ "${pair%/*}" == "windows" ]]; then
+              out="${out}.exe"
+            fi
+            GOOS=${pair%/*} GOARCH=${pair#*/} CGO_ENABLED=0 go build -trimpath \
+              -o "${out}" ./cmd/kubeloop-helper
           done
+
+  e2e:
+    name: E2E (Minikube)
+    needs: go
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Start Minikube
+        uses: medyagh/setup-minikube@v0.0.19
+        with:
+          driver: docker
+          cpus: 2
+          memory: 4096
+
+      - name: Build and load Gateway image
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p build/bin
+          CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" go build \
+            -trimpath -ldflags="-s -w" \
+            -o build/bin/kube-loop-gateway \
+            ./cmd/kubeloop-gateway
+          eval "$(minikube docker-env --shell bash)"
+          docker build -t kube-loop-gateway:dev -f build/gateway.e2e.Dockerfile .
+
+      - name: Run Minikube e2e tests
+        shell: bash
+        env:
+          KUBELOOP_E2E: "1"
+          KUBELOOP_E2E_CONTEXT: minikube
+          KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
+        run: go test -tags=e2e ./e2e -count=1 -timeout=25m -v

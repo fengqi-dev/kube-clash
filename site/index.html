@@ -1,0 +1,273 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>KubeLoop — Transparent Kubernetes network access</title>
+    <meta
+      name="description"
+      content="KubeLoop is a cross-platform desktop client that routes local apps to Pod IPs, ClusterIP Services, and cluster DNS through a managed sing-box TUN."
+    />
+    <meta property="og:title" content="KubeLoop" />
+    <meta
+      property="og:description"
+      content="Transparent Kubernetes network access from your desktop. No per-app proxies. No port-forward rituals."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="assets/appicon.png" />
+    <link rel="icon" href="assets/appicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="shell topbar-inner">
+        <a class="brand" href="#top">
+          <img src="assets/appicon.svg" width="28" height="28" alt="" />
+          <span>KubeLoop</span>
+        </a>
+        <nav class="nav" aria-label="Primary">
+          <a class="hide-sm" href="#how" data-i18n="nav.how">How it works</a>
+          <a class="hide-sm" href="#features" data-i18n="nav.features">Features</a>
+          <a class="hide-sm" href="#arch" data-i18n="nav.arch">Architecture</a>
+          <a href="https://github.com/fengqi-dev/kube-loop">GitHub</a>
+          <div class="lang-switch" role="group" aria-label="Language">
+            <button type="button" class="lang-btn" data-lang="en" aria-pressed="true">EN</button>
+            <button type="button" class="lang-btn" data-lang="zh-CN" aria-pressed="false">中文</button>
+          </div>
+        </nav>
+      </div>
+    </header>
+
+    <main id="top">
+      <section class="hero">
+        <div class="shell hero-copy">
+          <p class="eyebrow" data-i18n="hero.eyebrow">Desktop Kubernetes client</p>
+          <h1 class="brand-mark">KubeLoop</h1>
+          <p class="lead" data-i18n="hero.lead">
+            Transparent Kubernetes network access from your desktop.
+          </p>
+          <p class="support" data-i18n="hero.support">
+            Connect once. Reach Pod IPs, ClusterIP Services, and cluster DNS
+            without port-forwards or per-application proxy settings.
+          </p>
+          <div class="cta-row">
+            <a
+              class="button button-primary"
+              href="https://github.com/fengqi-dev/kube-loop/releases"
+              data-i18n="cta.download"
+              >Download releases</a
+            >
+            <a
+              class="button button-secondary"
+              href="https://github.com/fengqi-dev/kube-loop"
+              data-i18n="cta.github"
+              >View on GitHub</a
+            >
+          </div>
+        </div>
+
+        <div class="hero-stage" aria-hidden="true">
+          <div class="product-plane">
+            <div class="product-chrome">
+              <i class="dot"></i><i class="dot"></i><i class="dot"></i>
+              <span>kube-loop · connected</span>
+            </div>
+            <div class="product-body">
+              <aside class="side">
+                <div class="side-item active"><i></i><span data-i18n="mock.overview">Overview</span></div>
+                <div class="side-item"><i></i><span data-i18n="mock.connections">Connections</span></div>
+                <div class="side-item"><i></i><span data-i18n="mock.network">Network</span></div>
+                <div class="side-item"><i></i><span data-i18n="mock.logs">Logs</span></div>
+              </aside>
+              <div class="main-pane">
+                <h2 class="pane-title" data-i18n="mock.traffic">Traffic statistics</h2>
+                <p class="pane-sub" data-i18n="mock.trafficSub">Live upload / download through the cluster tunnel</p>
+                <div class="metrics">
+                  <div class="metric">
+                    <span data-i18n="mock.upload">Upload</span>
+                    <strong>5.87 KB/s</strong>
+                  </div>
+                  <div class="metric">
+                    <span data-i18n="mock.download">Download</span>
+                    <strong>4.33 KB/s</strong>
+                  </div>
+                  <div class="metric">
+                    <span data-i18n="mock.active">Active</span>
+                    <strong>35</strong>
+                  </div>
+                </div>
+                <div class="chart">
+                  <svg viewBox="0 0 640 120" preserveAspectRatio="none">
+                    <path
+                      class="chart-line"
+                      d="M0 86 C60 80, 100 54, 150 58 S240 92, 300 70 S420 28, 480 44 S580 78, 640 52"
+                      stroke="#f59e0b"
+                      stroke-width="2.5"
+                    />
+                    <path
+                      class="chart-line"
+                      d="M0 70 C70 74, 110 40, 170 48 S260 88, 320 60 S430 22, 500 38 S580 66, 640 40"
+                      stroke="#3b82f6"
+                      stroke-width="2.5"
+                    />
+                  </svg>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="how">
+        <div class="shell">
+          <div class="section-head">
+            <h2 data-i18n="how.title">Connect once. Reach the cluster.</h2>
+            <p data-i18n="how.support">
+              KubeLoop discovers your cluster network, installs a minimal Gateway,
+              and routes only Kubernetes traffic through a managed sing-box TUN.
+            </p>
+          </div>
+          <div class="steps">
+            <article class="flow-step">
+              <h3 data-i18n="how.step1.title">Select context</h3>
+              <p data-i18n="how.step1.body">
+                Pick a kubeconfig Context and DNS Namespace. Credentials stay on
+                this device.
+              </p>
+            </article>
+            <article class="flow-step">
+              <h3 data-i18n="how.step2.title">Click Connect</h3>
+              <p data-i18n="how.step2.body">
+                KubeLoop installs the Gateway, discovers Pods, Services, and
+                CoreDNS, then starts the tunnel.
+              </p>
+            </article>
+            <article class="flow-step">
+              <h3 data-i18n="how.step3.title">Use cluster names</h3>
+              <p data-i18n="how.step3.body">
+                Local apps talk to Pod IPs, ClusterIPs, and
+                <code>*.cluster.local</code> directly. Everything else stays DIRECT.
+              </p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="features">
+        <div class="shell">
+          <div class="section-head">
+            <h2 data-i18n="features.title">Built for developer workstations</h2>
+            <p data-i18n="features.support">
+              A desktop-first workflow that replaces port-forward rituals and
+              proxy env vars with one transparent tunnel.
+            </p>
+          </div>
+          <dl class="feature-list">
+            <div class="feature">
+              <dt data-i18n="features.f1.label">Transparent TUN</dt>
+              <dd data-i18n="features.f1.body">
+                Managed sing-box routes only discovered Pod and Service traffic.
+              </dd>
+            </div>
+            <div class="feature">
+              <dt data-i18n="features.f2.label">Cluster DNS</dt>
+              <dd data-i18n="features.f2.body">
+                Resolve Service names and cluster.local domains from local apps.
+              </dd>
+            </div>
+            <div class="feature">
+              <dt data-i18n="features.f3.label">Exchange</dt>
+              <dd data-i18n="features.f3.body">
+                Replace a ClusterIP Service with a process on your machine.
+              </dd>
+            </div>
+            <div class="feature">
+              <dt data-i18n="features.f4.label">Port Forward</dt>
+              <dd data-i18n="features.f4.body">
+                Forward a local port to a Pod or Service without leaving the UI.
+              </dd>
+            </div>
+            <div class="feature">
+              <dt data-i18n="features.f5.label">Minimal Gateway</dt>
+              <dd data-i18n="features.f5.body">
+                Unprivileged in-cluster Deployment, reached only via API Server
+                port-forward.
+              </dd>
+            </div>
+            <div class="feature">
+              <dt data-i18n="features.f6.label">Cross-platform</dt>
+              <dd data-i18n="features.f6.body">
+                macOS, Windows, and Linux desktop builds from the same Wails app.
+              </dd>
+            </div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="section" id="arch">
+        <div class="shell">
+          <div class="section-head">
+            <h2 data-i18n="arch.title">How traffic flows</h2>
+            <p data-i18n="arch.support">
+              Local applications enter through sing-box. Only cluster destinations
+              cross the SOCKS bridge into the Gateway.
+            </p>
+          </div>
+          <pre class="arch" data-i18n="arch.diagram">Local application
+      │
+      ▼
+sing-box TUN / DNS / rules
+      │  SOCKS5 TCP + UDP
+      ▼
+KubeLoop local bridge
+      │  API Server port-forward
+      ▼
+In-cluster Gateway
+      │
+      ├── Pod IP
+      ├── ClusterIP Service
+      └── CoreDNS</pre>
+        </div>
+      </section>
+
+      <section class="shell">
+        <div class="cta-band">
+          <h2 data-i18n="band.title">Try the latest desktop build</h2>
+          <p data-i18n="band.support">
+            KubeLoop is under active M1 development. Grab a release, connect to
+            your cluster, and open a Service by name.
+          </p>
+          <div class="cta-row">
+            <a
+              class="button button-primary"
+              href="https://github.com/fengqi-dev/kube-loop/releases"
+              data-i18n="cta.download"
+              >Download releases</a
+            >
+            <a
+              class="button button-secondary"
+              href="https://github.com/fengqi-dev/kube-loop/blob/main/docs/design.md"
+              data-i18n="cta.design"
+              >Read the design</a
+            >
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="footer">
+      <div class="shell footer-inner">
+        <span data-i18n="footer.copy">© KubeLoop contributors. Apache License 2.0.</span>
+        <span>
+          <a href="https://github.com/fengqi-dev/kube-loop">GitHub</a>
+          ·
+          <a href="https://github.com/fengqi-dev/kube-loop/blob/main/THIRD_PARTY_NOTICES.md"
+            >Notices</a
+          >
+        </span>
+      </div>
+    </footer>
+
+    <script src="assets/site.js" defer></script>
+  </body>
+</html>

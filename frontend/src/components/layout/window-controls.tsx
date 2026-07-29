@@ -1,7 +1,7 @@
-import { Maximize2, Minus, X } from "lucide-react";
+import { Minus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
-import { Quit, WindowMinimise, WindowToggleMaximise } from "../../../wailsjs/runtime/runtime";
+import { Quit, WindowMinimise } from "../../../wailsjs/runtime/runtime";
 
 export function WindowControls() {
   const { t } = useI18n();
@@ -22,21 +22,10 @@ export function WindowControls() {
         type="button"
         variant="ghost"
         size="icon"
-        aria-label={t("window.maximise")}
-        title={t("window.maximise")}
-        onClick={() => WindowToggleMaximise()}
-        className="rounded-none border-x"
-      >
-        <Maximize2 size={13} strokeWidth={1.8} />
-      </Button>
-      <Button
-        type="button"
-        variant="ghost"
-        size="icon"
         aria-label={t("window.close")}
         title={t("window.close")}
         onClick={() => Quit()}
-        className="rounded-none hover:bg-destructive hover:text-white"
+        className="rounded-none border-l hover:bg-destructive hover:text-white"
       >
         <X strokeWidth={1.8} />
       </Button>

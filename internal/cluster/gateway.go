@@ -28,6 +28,12 @@ const (
 	GatewayPort      = 1080
 )
 
+// GatewayInfo identifies the running in-cluster Gateway Pod.
+type GatewayInfo struct {
+	Name string
+	IP   string
+}
+
 var gatewayLabels = map[string]string{
 	"app.kubernetes.io/name":       GatewayName,
 	"app.kubernetes.io/part-of":    "kubeloop",
@@ -60,19 +66,19 @@ func (f *Forwarder) Close() error {
 	}
 }
 
-func (p *Provider) EnsureGateway(ctx context.Context, contextName, image string) (string, error) {
+func (p *Provider) EnsureGateway(ctx context.Context, contextName, image string) (GatewayInfo, error) {
 	if image == "" {
-		return "", errors.New("gateway image is required")
+		return GatewayInfo{}, errors.New("gateway image is required")
 	}
 	client, err := p.client(contextName)
 	if err != nil {
-		return "", err
+		return GatewayInfo{}, err
 	}
 	if err := ensureNamespace(ctx, client); err != nil {
-		return "", err
+		return GatewayInfo{}, err
 	}
 	if err := ensureDeployment(ctx, client, image); err != nil {
-		return "", err
+		return GatewayInfo{}, err
 	}
 	return waitForGatewayPod(ctx, client)
 }
@@ -175,7 +181,7 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 	}
 }
 
-func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (string, error) {
+func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (GatewayInfo, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	for {
@@ -183,24 +189,44 @@ func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (string
 			LabelSelector: "app.kubernetes.io/name=" + GatewayName,
 		})
 		if err != nil {
-			return "", fmt.Errorf("list gateway pods: %w", err)
+			return GatewayInfo{}, fmt.Errorf("list gateway pods: %w", err)
 		}
 		for _, pod := range list.Items {
-			if pod.Status.Phase == corev1.PodRunning && podReady(pod) {
-				return pod.Name, nil
+			if pod.Status.Phase == corev1.PodRunning && podReady(pod) && pod.Status.PodIP != "" {
+				return GatewayInfo{Name: pod.Name, IP: pod.Status.PodIP}, nil
 			}
 		}
 		select {
 		case <-ctx.Done():
-			return "", fmt.Errorf("wait for gateway: %w", ctx.Err())
+			return GatewayInfo{}, fmt.Errorf("wait for gateway: %w", ctx.Err())
 		case <-ticker.C:
 		}
 	}
 }
 
+// StartPortForward opens an API Server port-forward to a Gateway Pod.
 func (p *Provider) StartPortForward(
 	ctx context.Context, contextName, podName string, remotePort uint16,
 ) (PortForward, error) {
+	return p.StartPodPortForward(ctx, contextName, GatewayNamespace, podName, 0, remotePort)
+}
+
+// StartPodPortForward forwards 127.0.0.1:localPort to podName:remotePort.
+// When localPort is 0, the OS allocates an ephemeral port.
+func (p *Provider) StartPodPortForward(
+	ctx context.Context,
+	contextName, namespace, podName string,
+	localPort, remotePort uint16,
+) (PortForward, error) {
+	if namespace == "" {
+		return nil, errors.New("namespace is required")
+	}
+	if podName == "" {
+		return nil, errors.New("pod name is required")
+	}
+	if remotePort == 0 {
+		return nil, errors.New("remote port is required")
+	}
 	config, err := p.RESTConfig(contextName)
 	if err != nil {
 		return nil, err
@@ -214,7 +240,7 @@ func (p *Provider) StartPortForward(
 		return nil, fmt.Errorf("parse API server URL: %w", err)
 	}
 	serverURL.Path = fmt.Sprintf(
-		"/api/v1/namespaces/%s/pods/%s/portforward", GatewayNamespace, podName,
+		"/api/v1/namespaces/%s/pods/%s/portforward", namespace, podName,
 	)
 	dialer := spdy.NewDialer(upgrader, &http.Client{Transport: transport}, http.MethodPost, serverURL)
 	stop := make(chan struct{})
@@ -222,17 +248,19 @@ func (p *Provider) StartPortForward(
 	done := make(chan error, 1)
 	errorsOutput := &lockedBuffer{}
 	forward, err := portforward.NewOnAddresses(
-		dialer, []string{"127.0.0.1"}, []string{fmt.Sprintf("0:%d", remotePort)},
+		dialer,
+		[]string{"127.0.0.1"},
+		[]string{fmt.Sprintf("%d:%d", localPort, remotePort)},
 		stop, ready, io.Discard, errorsOutput,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("create gateway port-forward: %w", err)
+		return nil, fmt.Errorf("create port-forward: %w", err)
 	}
 	go func() { done <- forward.ForwardPorts() }()
 	select {
 	case <-ready:
 	case err := <-done:
-		return nil, fmt.Errorf("start gateway port-forward: %w: %s", err, errorsOutput.String())
+		return nil, fmt.Errorf("start port-forward: %w: %s", err, errorsOutput.String())
 	case <-ctx.Done():
 		close(stop)
 		return nil, ctx.Err()
@@ -240,7 +268,7 @@ func (p *Provider) StartPortForward(
 	ports, err := forward.GetPorts()
 	if err != nil || len(ports) != 1 {
 		close(stop)
-		return nil, fmt.Errorf("get gateway local port: %w", err)
+		return nil, fmt.Errorf("get local port: %w", err)
 	}
 	return &Forwarder{LocalPort: ports[0].Local, stop: stop, done: done}, nil
 }

@@ -8,7 +8,7 @@
 - 产品目标为 macOS、Windows、Linux 多平台，优先交付 macOS；
 - Gateway 由桌面客户端自动检查、安装和升级；
 - 第一阶段只完成 Pod、Service 和集群 DNS 的透明访问；
-- “用本地服务替换集群 Service”等反向映射能力不进入 MVP。
+- M2 支持用本地服务替换集群 Service（TCP/UDP），断开时完整恢复 Endpoints。
 - 使用 sing-box 作为 TUN、DNS 和规则路由内核。
 
 ## 1. 产品定位
@@ -30,7 +30,7 @@ Kubernetes 网络细节，只需要选择集群并点击连接。
 - 访问 Pod IP；
 - 访问 ClusterIP Service；
 - 解析并访问 `*.svc.cluster.local`；
-- 后续支持将本地进程映射为集群内 Service 的目标。
+- 将本地进程映射为集群内 Service 的目标（Service Local Intercept）。
 
 ## 2. 首版范围
 
@@ -46,12 +46,24 @@ Kubernetes 网络细节，只需要选择集群并点击连接。
 8. 展示连接时长、上下行流量、活动连接和诊断信息。
 9. 从 UI 完成连接、断开、Gateway 安装和卸载。
 
-### 2.2 MVP 暂不包含
+### 2.2 M2：Service Local Intercept
+
+在已连接会话中，用户可将现有 ClusterIP Service 替换为本地进程：
+
+1. 桌面通过控制通道在 Gateway 上注册唯一 listen 端口（TCP/UDP）；
+2. 清空 Service selector，写入托管 EndpointSlice，后端指向 Gateway Pod IP:listenPort；
+3. 集群客户端仍使用原 ClusterIP / DNS；kube-proxy 将流量送到 Gateway；
+4. Gateway 发出 `InboundReady`，桌面 `Accept` 后转发到 `127.0.0.1`（或指定本地地址）；
+5. 停止拦截或断开连接时恢复 selector、删除托管 EndpointSlice，并注销 Gateway 监听。
+
+Gateway 仍无 kube API、无特权、无 hostNetwork。EndpointSlice 变更由桌面 kubeconfig 完成。
+
+### 2.3 MVP 暂不包含
 
 - 全局公网代理和 Clash 规则订阅；
 - 多集群同时连接；
 - ICMP/Ping 的完整语义；
-- 将本地服务反向暴露到集群；
+- Headless / ExternalName Service 拦截；
 - Service Mesh 流量身份模拟；
 - Windows 客户端。
 
@@ -402,6 +414,11 @@ Gateway 返回协商后的能力和限制。不兼容时返回明确的升级信
 - 读取 Gateway Pod；
 - 对 Gateway Pod 创建 port-forward。
 
+Service Local Intercept 额外需要：
+
+- 更新目标 Service（清空/恢复 selector）；
+- 创建、更新、删除 EndpointSlice。
+
 安装 Gateway 还需要在指定 Namespace 创建：
 
 - Deployment；
@@ -409,7 +426,7 @@ Gateway 返回协商后的能力和限制。不兼容时返回明确的升级信
 - Role / RoleBinding。
 
 建议默认安装在 `kubeloop-system`。企业环境可以由管理员预装，普通开发者只保留发现和
-port-forward 权限。
+port-forward 权限；若启用 Intercept，还需 EndpointSlice 写权限。
 
 Gateway 本身不需要读取 Kubernetes API，因此默认 ServiceAccount 不授予额外权限。
 
@@ -520,7 +537,7 @@ UI 中展示：
 - systemd-resolved；
 - deb/rpm/AppImage 分发评估。
 
-反向映射、多集群和规则路由放在三平台基础访问能力稳定之后。
+多集群和规则路由放在三平台基础访问能力稳定之后。Service Local Intercept 见 §2.2。
 
 ## 13. MVP 验收标准
 

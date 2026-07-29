@@ -186,11 +186,11 @@ func (i *Installer) baseDir() (string, error) {
 	if i.BaseDir != "" {
 		return i.BaseDir, nil
 	}
-	value, err := os.UserConfigDir()
+	home, err := os.UserHomeDir()
 	if err != nil {
-		return "", fmt.Errorf("find user config directory: %w", err)
+		return "", fmt.Errorf("find user home directory: %w", err)
 	}
-	return filepath.Join(value, "KubeLoop"), nil
+	return filepath.Join(home, ".kubeloop"), nil
 }
 
 func validateBinary(path string) (string, error) {
