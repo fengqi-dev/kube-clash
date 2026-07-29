@@ -57,7 +57,11 @@ type State struct {
 	CoreVersion     string                `json:"coreVersion,omitempty"`
 	ConnectedAt     *time.Time            `json:"connectedAt,omitempty"`
 	Metrics         *singbox.Metrics      `json:"metrics,omitempty"`
-	UpdatedAt       time.Time             `json:"updatedAt"`
+	// InventoryRevision increments only on Informer-driven inventory snapshots
+	// (pod/service/deployment add/update/delete). UI lists should key off this
+	// instead of UpdatedAt, which also advances on the metrics ticker.
+	InventoryRevision int64     `json:"inventoryRevision"`
+	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
 type ClusterProvider interface {
@@ -426,6 +430,7 @@ func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
 	next.Discovery = &discovery
 	next.Pods = append([]cluster.PodInfo{}, snap.PodItems...)
 	next.Services = append([]cluster.ServiceInfo{}, snap.ServiceItems...)
+	next.InventoryRevision++
 	m.state = next
 	m.mu.Unlock()
 

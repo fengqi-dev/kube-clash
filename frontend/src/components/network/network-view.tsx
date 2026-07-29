@@ -127,7 +127,7 @@ export function NetworkView({
     return () => {
       active = false;
     };
-  }, [ready, refreshKey, session.updatedAt]);
+  }, [ready, refreshKey, session.inventoryRevision]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -267,7 +267,7 @@ export function NetworkView({
       <ActiveSessions
         ready={ready}
         refreshKey={refreshKey}
-        sessionUpdatedAt={session.updatedAt}
+        inventoryRevision={session.inventoryRevision}
       />
 
       <PortForwardDialog

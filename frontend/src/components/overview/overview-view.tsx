@@ -65,12 +65,10 @@ export function OverviewView({
         .catch(() => undefined);
     };
     refresh();
-    const timer = window.setInterval(refresh, 3000);
     return () => {
       active = false;
-      window.clearInterval(timer);
     };
-  }, [session.updatedAt, ready]);
+  }, [session.inventoryRevision, ready]);
 
   const issues = session.capabilities?.issues ?? [];
   const gatewayManifest = session.gatewayManifest ?? "";

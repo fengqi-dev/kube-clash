@@ -122,6 +122,8 @@ export interface SessionState {
   coreVersion?: string;
   connectedAt?: string;
   metrics?: Metrics;
+  /** Bumps on Informer inventory changes only; not on metrics ticks. */
+  inventoryRevision?: number;
   updatedAt: string;
 }
 
