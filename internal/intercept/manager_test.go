@@ -17,12 +17,13 @@ import (
 )
 
 type fakeCluster struct {
-	service   *corev1.Service
-	applied   *cluster.ServiceInterceptSnapshot
-	restored  bool
-	preview   *cluster.PreviewServiceSnapshot
-	deleted   bool
-	previewIP string
+	service          *corev1.Service
+	applied          *cluster.ServiceInterceptSnapshot
+	restored         bool
+	preview          *cluster.PreviewServiceSnapshot
+	deleted          bool
+	previewIP        string
+	endpointsSubsets []corev1.EndpointSubset
 }
 
 func (f *fakeCluster) GetService(
@@ -34,6 +35,10 @@ func (f *fakeCluster) GetService(
 func (f *fakeCluster) ApplyServiceIntercept(
 	_ context.Context, _ string, snapshot *cluster.ServiceInterceptSnapshot, _ string,
 ) error {
+	if len(f.endpointsSubsets) > 0 {
+		snapshot.HasEndpoints = true
+		snapshot.EndpointsSubsets = append([]corev1.EndpointSubset(nil), f.endpointsSubsets...)
+	}
 	copySnapshot := *snapshot
 	f.applied = &copySnapshot
 	return nil
@@ -154,6 +159,120 @@ func TestStartStopInterceptRegistersAndRestores(t *testing.T) {
 	}
 	if !api.restored {
 		t.Fatal("restore not called")
+	}
+}
+
+func TestStartMirrorTeesToLocalKeepsPrimaryResponse(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	primary, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Close()
+	go func() {
+		conn, err := primary.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 32)
+		n, _ := conn.Read(buf)
+		_, _ = fmt.Fprintf(conn, "primary:%s", buf[:n])
+	}()
+
+	mirrored := make(chan string, 1)
+	local, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	go func() {
+		conn, err := local.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 32)
+		n, _ := conn.Read(buf)
+		mirrored <- string(buf[:n])
+		_, _ = conn.Write([]byte("local-should-be-ignored"))
+	}()
+
+	primaryPort := primary.Addr().(*net.TCPAddr).Port
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.96.1.10",
+				Selector:  map[string]string{"app": "api"},
+				Ports: []corev1.ServicePort{{
+					Name: "http", Port: 80, Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+		endpointsSubsets: []corev1.EndpointSubset{{
+			Addresses: []corev1.EndpointAddress{{IP: "127.0.0.1"}},
+			Ports: []corev1.EndpointPort{{
+				Name: "http", Port: int32(primaryPort), Protocol: corev1.ProtocolTCP,
+			}},
+		}},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.8", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	info, err := manager.StartMirror(ctx, Mapping{
+		Namespace: "default",
+		Service:   "api",
+		Ports: []PortMapping{{
+			ServicePort: 80, Protocol: "TCP",
+			LocalHost: "127.0.0.1", LocalPort: local.Addr().(*net.TCPAddr).Port,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode != ModeMirror {
+		t.Fatalf("mode=%q", info.Mode)
+	}
+	if len(manager.List()) != 0 || len(manager.ListMirrors()) != 1 {
+		t.Fatalf("list exchange=%d mirror=%d", len(manager.List()), len(manager.ListMirrors()))
+	}
+
+	client, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", info.Ports[0].ListenPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 64)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buf[:n]); got != "primary:ping" {
+		t.Fatalf("client got %q, want primary response", got)
+	}
+	select {
+	case got := <-mirrored:
+		if got != "ping" {
+			t.Fatalf("mirror got %q", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("local mirror did not receive request copy")
 	}
 }
 

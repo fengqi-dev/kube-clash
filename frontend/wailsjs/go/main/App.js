@@ -46,6 +46,10 @@ export function ListIntercepts() {
   return window['go']['main']['App']['ListIntercepts']();
 }
 
+export function ListMirrors() {
+  return window['go']['main']['App']['ListMirrors']();
+}
+
 export function ListPods(arg1, arg2) {
   return window['go']['main']['App']['ListPods'](arg1, arg2);
 }
@@ -96,6 +100,10 @@ export function SetManualNetwork(arg1, arg2) {
 
 export function StartIntercept(arg1) {
   return window['go']['main']['App']['StartIntercept'](arg1);
+}
+
+export function StartMirror(arg1) {
+  return window['go']['main']['App']['StartMirror'](arg1);
 }
 
 export function StartPortForward(arg1) {

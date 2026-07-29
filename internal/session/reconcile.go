@@ -61,9 +61,6 @@ func (m *Manager) reconcileBindings(ctx context.Context, snap cluster.InventoryS
 	}
 
 	for _, item := range m.intercept.List() {
-		if item.Preview {
-			continue
-		}
 		reason := staleServiceBindingReason(item.Namespace, item.Service, item.Locals, services)
 		if reason == "" {
 			continue
@@ -76,6 +73,21 @@ func (m *Manager) reconcileBindings(ctx context.Context, snap cluster.InventoryS
 			m.persistExchanges(m.State().Context)
 		}
 		m.AppendLog("INFO", fmt.Sprintf("stopped exchange %s/%s (%s)", item.Namespace, item.Service, reason))
+	}
+
+	for _, item := range m.intercept.ListMirrors() {
+		reason := staleServiceBindingReason(item.Namespace, item.Service, item.Locals, services)
+		if reason == "" {
+			continue
+		}
+		if err := m.intercept.Stop(ctx, item.ID); err != nil {
+			m.AppendLog("ERROR", fmt.Sprintf("stop mirror %s/%s: %v", item.Namespace, item.Service, err))
+			continue
+		}
+		if !m.isRestoring() {
+			m.persistMirrors(m.State().Context)
+		}
+		m.AppendLog("INFO", fmt.Sprintf("stopped mirror %s/%s (%s)", item.Namespace, item.Service, reason))
 	}
 
 	for _, item := range m.intercept.ListPreviews() {

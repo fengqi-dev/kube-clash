@@ -294,6 +294,14 @@ func (a *App) StartIntercept(mapping intercept.Mapping) (intercept.Info, error) 
 	return a.manager.StartIntercept(ctx, mapping)
 }
 
+func (a *App) StartMirror(mapping intercept.Mapping) (intercept.Info, error) {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.manager.StartMirror(ctx, mapping)
+}
+
 func (a *App) StopIntercept(id string) error {
 	ctx := a.ctx
 	if ctx == nil {
@@ -304,6 +312,10 @@ func (a *App) StopIntercept(id string) error {
 
 func (a *App) ListIntercepts() []intercept.Info {
 	return a.manager.ListIntercepts()
+}
+
+func (a *App) ListMirrors() []intercept.Info {
+	return a.manager.ListMirrors()
 }
 
 func (a *App) StartPreview(request intercept.PreviewRequest) (intercept.Info, error) {

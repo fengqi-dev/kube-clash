@@ -27,6 +27,7 @@ type Mapping struct {
 	Namespace string        `json:"namespace"`
 	Service   string        `json:"service"`
 	Ports     []PortMapping `json:"ports"`
+	Mode      string        `json:"mode,omitempty"` // exchange (default) or mirror
 }
 
 // PreviewRequest creates a new ClusterIP Service that exposes a local process.
@@ -36,13 +37,14 @@ type PreviewRequest struct {
 	Ports     []PortMapping `json:"ports"`
 }
 
-// Info is a running intercept or preview visible to the UI.
+// Info is a running intercept, mirror, or preview visible to the UI.
 type Info struct {
 	ID        string                  `json:"id"`
 	Namespace string                  `json:"namespace"`
 	Service   string                  `json:"service"`
 	ClusterIP string                  `json:"clusterIP,omitempty"`
 	Preview   bool                    `json:"preview,omitempty"`
+	Mode      string                  `json:"mode,omitempty"` // exchange | mirror
 	Ports     []cluster.InterceptPort `json:"ports"`
 	Locals    []PortMapping           `json:"locals"`
 }
@@ -71,10 +73,11 @@ type Manager struct {
 }
 
 type runtimeIntercept struct {
-	info     Info
-	snapshot cluster.ServiceInterceptSnapshot
-	preview  *cluster.PreviewServiceSnapshot
-	portKeys map[string]PortMapping // interceptID -> local mapping
+	info         Info
+	snapshot     cluster.ServiceInterceptSnapshot
+	preview      *cluster.PreviewServiceSnapshot
+	portKeys     map[string]PortMapping // subID -> local mapping
+	primaryAddrs map[string]string      // subID -> pod host:port (mirror)
 }
 
 func NewManager(api ClusterAPI) *Manager {
@@ -132,19 +135,38 @@ func (m *Manager) StopAll(ctx context.Context) error {
 }
 
 func (m *Manager) List() []Info {
-	return m.list(false)
+	return m.listByMode(ModeExchange)
+}
+
+func (m *Manager) ListMirrors() []Info {
+	return m.listByMode(ModeMirror)
 }
 
 func (m *Manager) ListPreviews() []Info {
-	return m.list(true)
-}
-
-func (m *Manager) list(preview bool) []Info {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	items := make([]Info, 0, len(m.byID))
 	for _, item := range m.byID {
-		if item.info.Preview != preview {
+		if item.info.Preview {
+			items = append(items, item.info)
+		}
+	}
+	return items
+}
+
+func (m *Manager) listByMode(mode string) []Info {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	items := make([]Info, 0, len(m.byID))
+	for _, item := range m.byID {
+		if item.info.Preview {
+			continue
+		}
+		itemMode := item.info.Mode
+		if itemMode == "" {
+			itemMode = ModeExchange
+		}
+		if itemMode != mode {
 			continue
 		}
 		items = append(items, item.info)
@@ -153,11 +175,28 @@ func (m *Manager) list(preview bool) []Info {
 }
 
 func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, error) {
+	mapping.Mode = ModeExchange
+	return m.startServiceIntercept(ctx, mapping)
+}
+
+func (m *Manager) StartMirror(ctx context.Context, mapping Mapping) (Info, error) {
+	mapping.Mode = ModeMirror
+	return m.startServiceIntercept(ctx, mapping)
+}
+
+func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (Info, error) {
 	if mapping.Namespace == "" {
 		mapping.Namespace = "default"
 	}
 	if mapping.Service == "" {
 		return Info{}, fmt.Errorf("service is required")
+	}
+	mode := mapping.Mode
+	if mode == "" {
+		mode = ModeExchange
+	}
+	if mode != ModeExchange && mode != ModeMirror {
+		return Info{}, fmt.Errorf("unsupported intercept mode %q", mode)
 	}
 
 	m.mu.Lock()
@@ -182,6 +221,11 @@ func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, er
 	locals, err := mapping.resolveLocals(service)
 	if err != nil {
 		return Info{}, err
+	}
+	if mode == ModeMirror {
+		if err := rejectUDPMirror(locals); err != nil {
+			return Info{}, err
+		}
 	}
 	ports, err := buildPortsForLocals(service, locals, m.allocateListenPort)
 	if err != nil {
@@ -220,15 +264,28 @@ func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, er
 		return Info{}, err
 	}
 
+	var primaryAddrs map[string]string
+	if mode == ModeMirror {
+		primaryAddrs, err = buildPrimaryAddrs(*snapshot, ports, portKeys, interceptID)
+		if err != nil {
+			_ = m.cluster.RestoreServiceIntercept(ctx, contextName, *snapshot)
+			m.rollbackRegisters(control, portKeys)
+			return Info{}, err
+		}
+	}
+
 	info := Info{
 		ID:        interceptID,
 		Namespace: mapping.Namespace,
 		Service:   mapping.Service,
+		Mode:      mode,
 		Ports:     ports,
 		Locals:    locals,
 	}
 	m.mu.Lock()
-	m.byID[interceptID] = &runtimeIntercept{info: info, snapshot: *snapshot, portKeys: portKeys}
+	m.byID[interceptID] = &runtimeIntercept{
+		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs,
+	}
 	m.byKey[key] = interceptID
 	m.mu.Unlock()
 	return info, nil
@@ -353,10 +410,19 @@ func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint
 	m.mu.Lock()
 	gatewayAddress := m.gatewayAddress
 	var local PortMapping
+	var primaryAddr string
+	mode := ModeExchange
 	found := false
 	for _, runtime := range m.byID {
 		if mapping, ok := runtime.portKeys[interceptSubID]; ok {
 			local = mapping
+			mode = runtime.info.Mode
+			if mode == "" {
+				mode = ModeExchange
+			}
+			if runtime.primaryAddrs != nil {
+				primaryAddr = runtime.primaryAddrs[interceptSubID]
+			}
 			found = true
 			break
 		}
@@ -366,11 +432,17 @@ func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint
 	if !found || gatewayAddress == "" {
 		return
 	}
-	go m.serveInbound(ctx, gatewayAddress, streamID, network, local)
+	go m.serveInbound(ctx, gatewayAddress, streamID, network, local, mode, primaryAddr)
 }
 
 func (m *Manager) serveInbound(
-	ctx context.Context, gatewayAddress string, streamID uint64, network byte, local PortMapping,
+	ctx context.Context,
+	gatewayAddress string,
+	streamID uint64,
+	network byte,
+	local PortMapping,
+	mode string,
+	primaryAddr string,
 ) {
 	tunnelConn, err := acceptStream(ctx, gatewayAddress, streamID)
 	if err != nil {
@@ -379,6 +451,14 @@ func (m *Manager) serveInbound(
 	host := local.LocalHost
 	if host == "" {
 		host = "127.0.0.1"
+	}
+	if mode == ModeMirror {
+		if network == tunnel.NetworkUDP {
+			_ = tunnelConn.Close()
+			return
+		}
+		m.serveMirrorTCP(ctx, tunnelConn, primaryAddr, host, local.LocalPort)
+		return
 	}
 	switch network {
 	case tunnel.NetworkUDP:
@@ -395,6 +475,28 @@ func (m *Manager) serveInbound(
 		defer localConn.Close()
 		relayTCP(tunnelConn, localConn)
 	}
+}
+
+func (m *Manager) serveMirrorTCP(
+	ctx context.Context, client net.Conn, primaryAddr, localHost string, localPort int,
+) {
+	if primaryAddr == "" {
+		_ = client.Close()
+		return
+	}
+	var dialer net.Dialer
+	primary, err := dialer.DialContext(ctx, "tcp", primaryAddr)
+	if err != nil {
+		_ = client.Close()
+		return
+	}
+	localConn, err := dialer.DialContext(
+		ctx, "tcp", net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort)),
+	)
+	if err != nil {
+		localConn = nil
+	}
+	mirrorTCP(client, primary, localConn)
 }
 
 func normalizePreviewPorts(ports []PortMapping) ([]PortMapping, error) {

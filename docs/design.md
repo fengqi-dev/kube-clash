@@ -59,6 +59,16 @@ While connected, users can replace an existing ClusterIP Service with a local pr
 
 The Gateway still has no kube API access, no privilege, and no hostNetwork. EndpointSlice changes are performed with the desktop kubeconfig.
 
+### 2.2.1 Traffic Mirror
+
+Mirror uses the same Service → Gateway hijack as Exchange, but the desktop datapath differs:
+
+1. Dial the original Pod (from the Endpoints snapshot) as the **primary** path and return its response to the cluster client;
+2. Tee a copy of the client request to a local TCP process; discard the local response;
+3. If the local dial fails, primary traffic continues uninterrupted.
+
+UDP mirror is out of scope for the first release.
+
 ### 2.3 Out of MVP
 
 - Global public proxying and rule subscriptions;

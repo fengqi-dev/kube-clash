@@ -31,6 +31,7 @@ type ClusterState struct {
 	Connected     bool              `json:"connected,omitempty"`
 	PortForwards  []PortForwardSpec `json:"portForwards,omitempty"`
 	Exchanges     []ExchangeSpec    `json:"exchanges,omitempty"`
+	Mirrors       []MirrorSpec      `json:"mirrors,omitempty"`
 	Previews      []PreviewSpec     `json:"previews,omitempty"`
 	HostAliases   []HostAliasSpec   `json:"hostAliases,omitempty"`
 	ManualNetwork *ManualNetwork    `json:"manualNetwork,omitempty"`
@@ -68,6 +69,14 @@ type PortMapping struct {
 
 // ExchangeSpec replaces an existing Service with a local process.
 type ExchangeSpec struct {
+	Namespace string        `json:"namespace"`
+	Service   string        `json:"service"`
+	Ports     []PortMapping `json:"ports"`
+}
+
+// MirrorSpec hijacks a Service through the Gateway while keeping cluster
+// Pods as the primary response path and teeing requests to a local process.
+type MirrorSpec struct {
 	Namespace string        `json:"namespace"`
 	Service   string        `json:"service"`
 	Ports     []PortMapping `json:"ports"`
@@ -261,6 +270,17 @@ func (s *Store) SetExchanges(contextName string, items []ExchangeSpec) error {
 	}
 	cluster := s.ensureClusterLocked(contextName)
 	cluster.Exchanges = cloneExchanges(items)
+	return s.saveLocked()
+}
+
+func (s *Store) SetMirrors(contextName string, items []MirrorSpec) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if contextName == "" {
+		return nil
+	}
+	cluster := s.ensureClusterLocked(contextName)
+	cluster.Mirrors = cloneMirrors(items)
 	return s.saveLocked()
 }
 
@@ -464,6 +484,21 @@ func cloneExchanges(items []ExchangeSpec) []ExchangeSpec {
 	out := make([]ExchangeSpec, len(items))
 	for i, item := range items {
 		out[i] = ExchangeSpec{
+			Namespace: item.Namespace,
+			Service:   item.Service,
+			Ports:     clonePortMappings(item.Ports),
+		}
+	}
+	return out
+}
+
+func cloneMirrors(items []MirrorSpec) []MirrorSpec {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]MirrorSpec, len(items))
+	for i, item := range items {
+		out[i] = MirrorSpec{
 			Namespace: item.Namespace,
 			Service:   item.Service,
 			Ports:     clonePortMappings(item.Ports),

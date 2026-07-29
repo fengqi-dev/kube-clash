@@ -39,8 +39,10 @@ declare global {
           SetHostAliases(contextName: string, items: HostAlias[]): Promise<void>;
           GatewayInstallManifest(): Promise<string>;
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
+          StartMirror(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
           ListIntercepts(): Promise<InterceptInfo[]>;
+          ListMirrors(): Promise<InterceptInfo[]>;
           StartPreview(request: PreviewRequest): Promise<PreviewInfo>;
           StopPreview(id: string): Promise<void>;
           ListPreviews(): Promise<PreviewInfo[]>;
@@ -100,8 +102,11 @@ export const backend = {
     Promise.resolve().then(() => api().GatewayInstallManifest()),
   startIntercept: (mapping: InterceptMapping) =>
     Promise.resolve().then(() => api().StartIntercept(mapping)),
+  startMirror: (mapping: InterceptMapping) =>
+    Promise.resolve().then(() => api().StartMirror(mapping)),
   stopIntercept: (id: string) => Promise.resolve().then(() => api().StopIntercept(id)),
   listIntercepts: () => Promise.resolve().then(() => api().ListIntercepts()),
+  listMirrors: () => Promise.resolve().then(() => api().ListMirrors()),
   startPreview: (request: PreviewRequest) =>
     Promise.resolve().then(() => api().StartPreview(request)),
   stopPreview: (id: string) => Promise.resolve().then(() => api().StopPreview(id)),

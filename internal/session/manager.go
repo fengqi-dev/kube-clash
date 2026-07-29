@@ -613,17 +613,31 @@ func (m *Manager) StartIntercept(ctx context.Context, mapping intercept.Mapping)
 	return info, err
 }
 
+func (m *Manager) StartMirror(ctx context.Context, mapping intercept.Mapping) (intercept.Info, error) {
+	info, err := m.intercept.StartMirror(ctx, mapping)
+	if err == nil && !m.isRestoring() {
+		m.persistMirrors(m.State().Context)
+		m.AppendLog("INFO", fmt.Sprintf("started mirror %s/%s", mapping.Namespace, mapping.Service))
+	}
+	return info, err
+}
+
 func (m *Manager) StopIntercept(ctx context.Context, id string) error {
 	err := m.intercept.Stop(ctx, id)
 	if err == nil && !m.isRestoring() {
 		m.persistExchanges(m.State().Context)
-		m.AppendLog("INFO", fmt.Sprintf("stopped exchange %s", id))
+		m.persistMirrors(m.State().Context)
+		m.AppendLog("INFO", fmt.Sprintf("stopped intercept %s", id))
 	}
 	return err
 }
 
 func (m *Manager) ListIntercepts() []intercept.Info {
 	return m.intercept.List()
+}
+
+func (m *Manager) ListMirrors() []intercept.Info {
+	return m.intercept.ListMirrors()
 }
 
 func (m *Manager) StartPreview(ctx context.Context, request intercept.PreviewRequest) (intercept.Info, error) {

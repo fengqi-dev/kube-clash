@@ -183,6 +183,7 @@ export interface InterceptInfo {
   id: string;
   namespace: string;
   service: string;
+  mode?: string;
   ports: InterceptPort[];
   locals: InterceptPortMapping[];
 }

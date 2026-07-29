@@ -6,7 +6,7 @@
     <title>Workflows — KubeLoop Docs</title>
     <meta
       name="description"
-      content="Everyday KubeLoop workflows: open Services, Host Aliases, debug Pods, Port Forward, and Exchange."
+      content="Everyday KubeLoop workflows: open Services, Host Aliases, debug Pods, Port Forward, Exchange, and Mirror."
     />
     <link rel="icon" href="assets/appicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/styles.css" />
@@ -21,8 +21,8 @@
         <div class="content-inner">
           <h1 class="page-title" data-i18n="workflows.title">Workflows</h1>
           <p class="page-desc" data-i18n="workflows.desc">
-            Browse, debug, map domains, intercept, and preview without opening a
-            terminal for every Service.
+            Browse, debug, map domains, exchange, mirror, and preview without
+            opening a terminal for every Service.
           </p>
 
           <section class="section">
@@ -59,7 +59,7 @@
                 <p class="hint" data-i18n="workflows.w3.hint">localhost:8080</p>
               </article>
               <article class="rail-row">
-                <p class="label" data-i18n="workflows.w4.label">Intercept</p>
+                <p class="label" data-i18n="workflows.w4.label">Exchange</p>
                 <div>
                   <h3 data-i18n="workflows.w4.title">Run a local process as a Service</h3>
                   <p data-i18n="workflows.w4.body">
@@ -69,15 +69,26 @@
                 <p class="hint" data-i18n="workflows.w4.hint">Exchange</p>
               </article>
               <article class="rail-row">
-                <p class="label" data-i18n="workflows.w5.label">Host alias</p>
+                <p class="label" data-i18n="workflows.w5.label">Mirror</p>
                 <div>
-                  <h3 data-i18n="workflows.w5.title">Map a custom domain to a cluster IP</h3>
+                  <h3 data-i18n="workflows.w5.title">Debug without replacing the Service</h3>
                   <p data-i18n="workflows.w5.body">
+                    Cluster Pods keep answering clients; a copy of each TCP request is
+                    sent to your local process.
+                  </p>
+                </div>
+                <p class="hint" data-i18n="workflows.w5.hint">Mirror</p>
+              </article>
+              <article class="rail-row">
+                <p class="label" data-i18n="workflows.w6.label">Host alias</p>
+                <div>
+                  <h3 data-i18n="workflows.w6.title">Map a custom domain to a cluster IP</h3>
+                  <p data-i18n="workflows.w6.body">
                     On Host Aliases, bind app.dev to a Service or Pod IP. Reconnect so
                     split DNS picks it up.
                   </p>
                 </div>
-                <p class="hint" data-i18n="workflows.w5.hint">app.dev → 10.96.x.x</p>
+                <p class="hint" data-i18n="workflows.w6.hint">app.dev → 10.96.x.x</p>
               </article>
             </div>
           </section>

@@ -3,6 +3,7 @@ import {
   ArrowRightLeft,
   Cable,
   Copy,
+  CopyPlus,
   Eye,
   Server,
   ShieldCheck,
@@ -45,6 +46,7 @@ export function OverviewView({
   const [podPortForwards, setPodPortForwards] = useState(0);
   const [networkPortForwards, setNetworkPortForwards] = useState(0);
   const [exchanges, setExchanges] = useState(0);
+  const [mirrors, setMirrors] = useState(0);
   const [previews, setPreviews] = useState(0);
 
   useEffect(() => {
@@ -53,13 +55,15 @@ export function OverviewView({
       Promise.all([
         backend.listPortForwards(),
         backend.listIntercepts(),
+        backend.listMirrors(),
         backend.listPreviews(),
       ])
-        .then(([forwards, intercepts, previewItems]) => {
+        .then(([forwards, intercepts, mirrorItems, previewItems]) => {
           if (!active) return;
           setPodPortForwards(forwards.filter((item) => item.kind === "pod").length);
           setNetworkPortForwards(forwards.filter((item) => item.kind === "service").length);
           setExchanges(intercepts.length);
+          setMirrors(mirrorItems.length);
           setPreviews(previewItems.length);
         })
         .catch(() => undefined);
@@ -130,6 +134,7 @@ export function OverviewView({
               podPortForwards={podPortForwards}
               networkPortForwards={networkPortForwards}
               exchanges={exchanges}
+              mirrors={mirrors}
               previews={previews}
             />
           </div>
@@ -363,11 +368,13 @@ function SessionMetrics({
   podPortForwards,
   networkPortForwards,
   exchanges,
+  mirrors,
   previews,
 }: {
   podPortForwards: number;
   networkPortForwards: number;
   exchanges: number;
+  mirrors: number;
   previews: number;
 }) {
   const { t } = useI18n();
@@ -386,6 +393,7 @@ function SessionMetrics({
       rows: [
         { icon: Cable, label: t("network.tabPortForward"), value: networkPortForwards },
         { icon: ArrowRightLeft, label: t("network.tabExchange"), value: exchanges },
+        { icon: CopyPlus, label: t("network.tabMirror"), value: mirrors },
         { icon: Eye, label: t("network.tabPreview"), value: previews },
       ],
     },

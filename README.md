@@ -80,7 +80,9 @@ the whole cluster:
 4. If the user cannot list Nodes / read CoreDNS, enter **Pod CIDR**, **Service
    CIDR**, and **Cluster DNS** on Overview (saved per context; reconnect to apply).
 
-Exchange / Preview stay disabled when Service / EndpointSlice / Endpoints write is missing.
+Exchange / Mirror / Preview stay disabled when Service / EndpointSlice / Endpoints write is missing.
+**Exchange** replaces a Service with a local process; **Mirror** keeps cluster Pods as the
+primary path and tees TCP requests to a local process.
 See [docs/design.md](docs/design.md) §8 (or [中文](docs/design.zh-CN.md)) for example Roles.
 
 ## Security posture
@@ -93,8 +95,8 @@ KubeLoop is built so cluster access stays scoped and recoverable:
   mounted ServiceAccount token, and is not published as a Service / Ingress.
 - Routing is limited to discovered Pod and Service ranges; non-cluster traffic
   remains direct.
-- Exchange / Preview changes to Services, Endpoints, and EndpointSlices are always restored
-  on stop or disconnect.
+- Exchange / Mirror / Preview changes to Services, Endpoints, and EndpointSlices are always
+  restored on stop or disconnect.
 - The privileged helper only accepts local IPC for session start/stop under your
   `~/.kubeloop` session paths — it does not talk to the Kubernetes API.
 

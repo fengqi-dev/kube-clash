@@ -30,6 +30,8 @@ export function InstallHelper():Promise<void>;
 
 export function ListIntercepts():Promise<Array<intercept.Info>>;
 
+export function ListMirrors():Promise<Array<intercept.Info>>;
+
 export function ListPods(arg1:string,arg2:string):Promise<Array<cluster.PodInfo>>;
 
 export function ListPortForwards():Promise<Array<portfwd.Info>>;
@@ -55,6 +57,8 @@ export function SetHostAliases(arg1:string,arg2:Array<store.HostAliasSpec>):Prom
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
 
 export function StartIntercept(arg1:intercept.Mapping):Promise<intercept.Info>;
+
+export function StartMirror(arg1:intercept.Mapping):Promise<intercept.Info>;
 
 export function StartPortForward(arg1:portfwd.Request):Promise<portfwd.Info>;
 
