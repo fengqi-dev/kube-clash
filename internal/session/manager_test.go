@@ -107,7 +107,7 @@ func (f *fakeProvider) StartPortForward(
 	return f.forwarder, nil
 }
 func (f *fakeProvider) ApplyServiceIntercept(
-	context.Context, string, cluster.ServiceInterceptSnapshot, string,
+	context.Context, string, *cluster.ServiceInterceptSnapshot, string,
 ) error {
 	return f.err
 }

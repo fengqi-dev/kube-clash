@@ -67,7 +67,7 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 - Gateway 不使用 `privileged`、`hostNetwork`、`NET_ADMIN`，也不挂载 ServiceAccount
   Token；不以 Service / Ingress 对外发布。
 - 路由仅覆盖已发现的 Pod / Service 网段；非集群流量保持直连。
-- 流量交换 / 预览对 Service、EndpointSlice 的修改，在停止或断开时始终恢复。
+- 流量交换 / 预览对 Service、Endpoints、EndpointSlice 的修改，在停止或断开时始终恢复。
 - 特权 Helper 只接受本机 IPC，用于在 `~/.kubeloop` 会话目录下启停 TUN；它不访问
   Kubernetes API。
 

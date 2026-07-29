@@ -32,9 +32,9 @@ func (f *fakeCluster) GetService(
 }
 
 func (f *fakeCluster) ApplyServiceIntercept(
-	_ context.Context, _ string, snapshot cluster.ServiceInterceptSnapshot, _ string,
+	_ context.Context, _ string, snapshot *cluster.ServiceInterceptSnapshot, _ string,
 ) error {
-	copySnapshot := snapshot
+	copySnapshot := *snapshot
 	f.applied = &copySnapshot
 	return nil
 }

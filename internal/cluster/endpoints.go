@@ -31,17 +31,19 @@ type InterceptPort struct {
 
 // ServiceInterceptSnapshot stores enough state to restore a Service after intercept.
 type ServiceInterceptSnapshot struct {
-	Namespace string            `json:"namespace"`
-	Service   string            `json:"service"`
-	Selector  map[string]string `json:"selector,omitempty"`
-	Ports     []InterceptPort   `json:"ports"`
-	GatewayIP string            `json:"gatewayIP"`
+	Namespace        string                  `json:"namespace"`
+	Service          string                  `json:"service"`
+	Selector         map[string]string       `json:"selector,omitempty"`
+	Ports            []InterceptPort         `json:"ports"`
+	GatewayIP        string                  `json:"gatewayIP"`
+	EndpointsSubsets []corev1.EndpointSubset `json:"endpointsSubsets,omitempty"`
+	HasEndpoints     bool                    `json:"hasEndpoints,omitempty"`
 }
 
 func (p *Provider) ApplyServiceIntercept(
 	ctx context.Context,
 	contextName string,
-	snapshot ServiceInterceptSnapshot,
+	snapshot *ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
 	client, err := p.client(contextName)
@@ -80,9 +82,12 @@ func (p *Provider) GetService(
 func applyServiceIntercept(
 	ctx context.Context,
 	client kubernetes.Interface,
-	snapshot ServiceInterceptSnapshot,
+	snapshot *ServiceInterceptSnapshot,
 	interceptID string,
 ) error {
+	if snapshot == nil {
+		return fmt.Errorf("snapshot is required")
+	}
 	if snapshot.Namespace == "" || snapshot.Service == "" {
 		return fmt.Errorf("namespace and service are required")
 	}
@@ -121,11 +126,15 @@ func applyServiceIntercept(
 		return fmt.Errorf("clear service selector: %w", err)
 	}
 
+	if err := snapshotAndDeleteEndpoints(ctx, client, snapshot); err != nil {
+		return err
+	}
+
 	if err := deleteServiceEndpointSlices(ctx, client, snapshot.Namespace, snapshot.Service); err != nil {
 		return err
 	}
 
-	slice := managedEndpointSlice(snapshot, interceptID)
+	slice := managedEndpointSlice(*snapshot, interceptID)
 	_, err = client.DiscoveryV1().EndpointSlices(snapshot.Namespace).Create(ctx, slice, metav1.CreateOptions{})
 	if apierrors.IsAlreadyExists(err) {
 		_ = client.DiscoveryV1().EndpointSlices(snapshot.Namespace).Delete(
@@ -144,13 +153,12 @@ func restoreServiceIntercept(
 	client kubernetes.Interface,
 	snapshot ServiceInterceptSnapshot,
 ) error {
-	_ = client.DiscoveryV1().EndpointSlices(snapshot.Namespace).Delete(
-		ctx, managedEndpointSliceName(snapshot.Service), metav1.DeleteOptions{},
-	)
-
 	service, err := client.CoreV1().Services(snapshot.Namespace).Get(ctx, snapshot.Service, metav1.GetOptions{})
 	if err != nil {
 		if apierrors.IsNotFound(err) {
+			_ = client.DiscoveryV1().EndpointSlices(snapshot.Namespace).Delete(
+				ctx, managedEndpointSliceName(snapshot.Service), metav1.DeleteOptions{},
+			)
 			return nil
 		}
 		return fmt.Errorf("get service for restore: %w", err)
@@ -170,7 +178,84 @@ func restoreServiceIntercept(
 	if _, err := client.CoreV1().Services(snapshot.Namespace).Update(ctx, service, metav1.UpdateOptions{}); err != nil {
 		return fmt.Errorf("restore service selector: %w", err)
 	}
+
+	if err := restoreEndpoints(ctx, client, snapshot); err != nil {
+		return err
+	}
+
+	_ = client.DiscoveryV1().EndpointSlices(snapshot.Namespace).Delete(
+		ctx, managedEndpointSliceName(snapshot.Service), metav1.DeleteOptions{},
+	)
 	return nil
+}
+
+func snapshotAndDeleteEndpoints(
+	ctx context.Context,
+	client kubernetes.Interface,
+	snapshot *ServiceInterceptSnapshot,
+) error {
+	endpoints, err := client.CoreV1().Endpoints(snapshot.Namespace).Get(
+		ctx, snapshot.Service, metav1.GetOptions{},
+	)
+	if apierrors.IsNotFound(err) {
+		snapshot.HasEndpoints = false
+		snapshot.EndpointsSubsets = nil
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("get endpoints: %w", err)
+	}
+	snapshot.HasEndpoints = true
+	snapshot.EndpointsSubsets = cloneEndpointSubsets(endpoints.Subsets)
+	if err := client.CoreV1().Endpoints(snapshot.Namespace).Delete(
+		ctx, snapshot.Service, metav1.DeleteOptions{},
+	); err != nil && !apierrors.IsNotFound(err) {
+		return fmt.Errorf("delete endpoints: %w", err)
+	}
+	return nil
+}
+
+func restoreEndpoints(
+	ctx context.Context,
+	client kubernetes.Interface,
+	snapshot ServiceInterceptSnapshot,
+) error {
+	if !snapshot.HasEndpoints {
+		return nil
+	}
+	desired := &corev1.Endpoints{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      snapshot.Service,
+			Namespace: snapshot.Namespace,
+		},
+		Subsets: cloneEndpointSubsets(snapshot.EndpointsSubsets),
+	}
+	_, err := client.CoreV1().Endpoints(snapshot.Namespace).Create(ctx, desired, metav1.CreateOptions{})
+	if apierrors.IsAlreadyExists(err) {
+		current, getErr := client.CoreV1().Endpoints(snapshot.Namespace).Get(
+			ctx, snapshot.Service, metav1.GetOptions{},
+		)
+		if getErr != nil {
+			return fmt.Errorf("get endpoints for restore: %w", getErr)
+		}
+		current.Subsets = cloneEndpointSubsets(snapshot.EndpointsSubsets)
+		_, err = client.CoreV1().Endpoints(snapshot.Namespace).Update(ctx, current, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("restore endpoints: %w", err)
+	}
+	return nil
+}
+
+func cloneEndpointSubsets(subsets []corev1.EndpointSubset) []corev1.EndpointSubset {
+	if len(subsets) == 0 {
+		return nil
+	}
+	out := make([]corev1.EndpointSubset, len(subsets))
+	for i, subset := range subsets {
+		out[i] = *subset.DeepCopy()
+	}
+	return out
 }
 
 func deleteServiceEndpointSlices(
