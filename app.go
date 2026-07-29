@@ -44,6 +44,7 @@ func NewApp() *App {
 		helper.Version = version
 	}
 	provider := cluster.NewProvider()
+	provider.SetUserAgent(version)
 	stateStore, err := store.Open("")
 	if err != nil {
 		log.Printf("open state store: %v", err)

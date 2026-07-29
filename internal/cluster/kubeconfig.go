@@ -49,10 +49,22 @@ type ProbeResult struct {
 type Provider struct {
 	mu         sync.RWMutex
 	extraFiles []string
+	userAgent  string
 }
 
 func NewProvider() *Provider {
-	return &Provider{}
+	return &Provider{userAgent: "kube-loop/dev"}
+}
+
+// SetUserAgent sets the Kubernetes client User-Agent from the app version
+// (e.g. "dev" or "v0.2.0" → "kube-loop/dev" / "kube-loop/v0.2.0").
+func (p *Provider) SetUserAgent(version string) {
+	if version == "" {
+		version = "dev"
+	}
+	p.mu.Lock()
+	p.userAgent = "kube-loop/" + version
+	p.mu.Unlock()
 }
 
 // SetExtraKubeconfigFiles replaces the user-added kubeconfig path list.
