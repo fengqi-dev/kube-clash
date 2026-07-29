@@ -1,13 +1,16 @@
 import type {
   BootstrapData,
+  ClusterInventory,
   HelperStatus,
   InterceptInfo,
   InterceptMapping,
+  ManualNetwork,
   PodInfo,
   PortForwardInfo,
   PortForwardRequest,
   PreviewInfo,
   PreviewRequest,
+  ProbeResult,
   ServiceInfo,
   SessionState,
   UpdateInfo,
@@ -19,12 +22,19 @@ declare global {
       main?: {
         App?: {
           Bootstrap(): Promise<BootstrapData>;
+          ReloadContexts(): Promise<ClusterInventory>;
+          AddKubeconfig(): Promise<ClusterInventory>;
+          RemoveKubeconfig(path: string): Promise<ClusterInventory>;
+          ProbeContext(contextName: string): Promise<ProbeResult>;
           RememberSelection(contextName: string, namespace: string): Promise<void>;
           Namespaces(contextName: string): Promise<string[]>;
           ListServices(contextName: string, namespace: string): Promise<ServiceInfo[]>;
           ListPods(contextName: string, namespace: string): Promise<PodInfo[]>;
           Connect(contextName: string, namespace: string): Promise<void>;
           Disconnect(): Promise<void>;
+          GetManualNetwork(contextName: string): Promise<ManualNetwork>;
+          SetManualNetwork(contextName: string, network: ManualNetwork): Promise<void>;
+          GatewayInstallManifest(): Promise<string>;
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
           ListIntercepts(): Promise<InterceptInfo[]>;
@@ -58,6 +68,12 @@ function api() {
 
 export const backend = {
   bootstrap: () => Promise.resolve().then(() => api().Bootstrap()),
+  reloadContexts: () => Promise.resolve().then(() => api().ReloadContexts()),
+  addKubeconfig: () => Promise.resolve().then(() => api().AddKubeconfig()),
+  removeKubeconfig: (path: string) =>
+    Promise.resolve().then(() => api().RemoveKubeconfig(path)),
+  probeContext: (contextName: string) =>
+    Promise.resolve().then(() => api().ProbeContext(contextName)),
   rememberSelection: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().RememberSelection(contextName, namespace)),
   namespaces: (contextName: string) =>
@@ -69,6 +85,12 @@ export const backend = {
   connect: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().Connect(contextName, namespace)),
   disconnect: () => Promise.resolve().then(() => api().Disconnect()),
+  getManualNetwork: (contextName: string) =>
+    Promise.resolve().then(() => api().GetManualNetwork(contextName)),
+  setManualNetwork: (contextName: string, network: ManualNetwork) =>
+    Promise.resolve().then(() => api().SetManualNetwork(contextName, network)),
+  gatewayInstallManifest: () =>
+    Promise.resolve().then(() => api().GatewayInstallManifest()),
   startIntercept: (mapping: InterceptMapping) =>
     Promise.resolve().then(() => api().StartIntercept(mapping)),
   stopIntercept: (id: string) => Promise.resolve().then(() => api().StopIntercept(id)),

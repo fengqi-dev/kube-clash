@@ -96,3 +96,14 @@ func TestResolverDomains(t *testing.T) {
 		t.Fatalf("ResolverDomains = %v, want %v", got, want)
 	}
 }
+
+func TestSearchDomains(t *testing.T) {
+	got := SearchDomains("demo")
+	want := []string{"demo.svc.cluster.local", "svc.cluster.local", "cluster.local"}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("SearchDomains = %v, want %v", got, want)
+	}
+	if strings.Join(SearchDomains(""), ",") != strings.Join(SearchDomains("default"), ",") {
+		t.Fatal("empty namespace should default to default")
+	}
+}

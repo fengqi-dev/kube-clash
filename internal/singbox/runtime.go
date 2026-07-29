@@ -111,14 +111,21 @@ func (r *Runtime) Start(
 		cleanup()
 		return nil, fmt.Errorf("write sing-box config: %w", err)
 	}
+	searchDomains := SearchDomains(namespace)
 	dnsMeta, _ := json.Marshal(map[string]any{
 		"listen":  DefaultDNSListen,
 		"port":    dnsPort,
 		"domains": ResolverDomains(namespace),
+		"search":  searchDomains,
+		"ndots":   5,
 	})
 	if err := os.WriteFile(filepath.Join(workDir, "dns-meta.json"), dnsMeta, 0o600); err != nil {
 		cleanup()
 		return nil, fmt.Errorf("write sing-box dns metadata: %w", err)
+	}
+	if err := writeSearchDomainScripts(workDir, searchDomains); err != nil {
+		cleanup()
+		return nil, fmt.Errorf("write DNS search domain scripts: %w", err)
 	}
 	logPath := filepath.Join(workDir, "sing-box.log")
 	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)

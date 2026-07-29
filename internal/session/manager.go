@@ -42,16 +42,22 @@ type Request struct {
 }
 
 type State struct {
-	Phase       Phase              `json:"phase"`
-	Context     string             `json:"context"`
-	Namespace   string             `json:"namespace"`
-	Message     string             `json:"message"`
-	Error       string             `json:"error,omitempty"`
-	Discovery   *cluster.Discovery `json:"discovery,omitempty"`
-	CoreVersion string             `json:"coreVersion,omitempty"`
-	ConnectedAt *time.Time         `json:"connectedAt,omitempty"`
-	Metrics     *singbox.Metrics   `json:"metrics,omitempty"`
-	UpdatedAt   time.Time          `json:"updatedAt"`
+	Phase           Phase                 `json:"phase"`
+	Context         string                `json:"context"`
+	Namespace       string                `json:"namespace"`
+	Message         string                `json:"message"`
+	Error           string                `json:"error,omitempty"`
+	Discovery       *cluster.Discovery    `json:"discovery,omitempty"`
+	Capabilities    *cluster.Capabilities `json:"capabilities,omitempty"`
+	ScopeNamespaces []string              `json:"scopeNamespaces,omitempty"`
+	GatewayManifest string                `json:"gatewayManifest,omitempty"`
+	Pods            []cluster.PodInfo     `json:"pods,omitempty"`
+	Services        []cluster.ServiceInfo `json:"services,omitempty"`
+	Events          []LogEvent            `json:"events,omitempty"`
+	CoreVersion     string                `json:"coreVersion,omitempty"`
+	ConnectedAt     *time.Time            `json:"connectedAt,omitempty"`
+	Metrics         *singbox.Metrics      `json:"metrics,omitempty"`
+	UpdatedAt       time.Time             `json:"updatedAt"`
 }
 
 type ClusterProvider interface {
@@ -59,12 +65,15 @@ type ClusterProvider interface {
 	Namespaces(context.Context, string) ([]string, error)
 	ListServices(context.Context, string, string) ([]cluster.ServiceInfo, error)
 	ListPods(context.Context, string, string) ([]cluster.PodInfo, error)
-	Discover(context.Context, string) (cluster.Discovery, error)
+	Discover(context.Context, string, []string) (cluster.Discovery, error)
 	WatchInventory(
 		context.Context,
 		string,
+		[]string,
 		func(cluster.InventorySnapshot),
 	) (io.Closer, error)
+	ProbeCapabilities(context.Context, string) (cluster.Capabilities, error)
+	GetGateway(context.Context, string) (cluster.GatewayInfo, error)
 	EnsureGateway(context.Context, string, string) (cluster.GatewayInfo, error)
 	StartPortForward(context.Context, string, string, uint16) (cluster.PortForward, error)
 	StartPodPortForward(context.Context, string, string, string, uint16, uint16) (cluster.PortForward, error)
@@ -237,23 +246,63 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		Message: "正在检查 Kubernetes 访问权限", CoreVersion: singbox.Version,
 	}
 	m.publish(state)
+	m.AppendLog("INFO", fmt.Sprintf("connecting to context %s", request.Context))
+
+	caps, err := m.provider.ProbeCapabilities(ctx, request.Context)
+	if err != nil {
+		m.fail(ctx, state, "无法检查集群权限", err)
+		return
+	}
+	state.Capabilities = &caps
+	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
+	m.publish(state)
+	for _, issue := range caps.Issues {
+		m.AppendLog("INFO", issue)
+	}
+	if !caps.GatewayPortForward {
+		state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
+		m.fail(ctx, state, "当前账号无法对 Gateway 建立 port-forward", errors.New("missing pods/portforward in kubeloop-system"))
+		return
+	}
 
 	state.Phase = PhaseInstalling
 	state.Message = "正在安装或检查集群 Gateway"
 	m.publish(state)
-	gateway, err := m.provider.EnsureGateway(ctx, request.Context, m.gatewayImage)
-	if err != nil {
-		m.fail(ctx, state, "无法安装集群 Gateway", err)
-		return
+	var gateway cluster.GatewayInfo
+	if caps.GatewayInstall {
+		gateway, err = m.provider.EnsureGateway(ctx, request.Context, m.gatewayImage)
+		if err != nil {
+			m.fail(ctx, state, "无法安装集群 Gateway", err)
+			return
+		}
+	} else {
+		gateway, err = m.provider.GetGateway(ctx, request.Context)
+		if err != nil {
+			state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
+			m.fail(ctx, state, "未找到预装 Gateway，请管理员安装或授予安装权限", err)
+			return
+		}
 	}
 
 	state.Phase = PhaseDiscovering
 	state.Message = "正在发现 Pod、Service 和集群 DNS"
 	m.publish(state)
-	discovery, err := m.provider.Discover(ctx, request.Context)
+	scopeNS := caps.ScopeNamespaces
+	if caps.InventoryCluster {
+		scopeNS = nil
+	}
+	discovery, err := m.provider.Discover(ctx, request.Context, scopeNS)
 	if err != nil {
 		m.fail(ctx, state, "无法读取集群网络信息", err)
 		return
+	}
+	if m.store != nil {
+		manual := m.store.ManualNetwork(request.Context)
+		discovery = cluster.MergeManualNetwork(discovery, cluster.ManualNetwork{
+			PodCIDRs:     manual.PodCIDRs,
+			ServiceCIDRs: manual.ServiceCIDRs,
+			DNSServer:    manual.DNSServer,
+		})
 	}
 	state.Discovery = &discovery
 
@@ -298,7 +347,10 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Message = "已连接，可访问 Pod、Service 和集群 DNS"
 	state.ConnectedAt = &connectedAt
 	state.Metrics = &singbox.Metrics{}
+	state.Capabilities = &caps
+	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
 	m.publish(state)
+	m.AppendLog("INFO", fmt.Sprintf("connected to context %s", request.Context))
 	if m.store != nil {
 		if err := m.store.SetConnected(request.Context, request.Namespace, true); err != nil {
 			log.Printf("persist connected state: %v", err)
@@ -306,7 +358,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	m.restoreBindings(ctx, request.Context)
 
-	inventory, err := m.provider.WatchInventory(ctx, request.Context, func(snap cluster.InventorySnapshot) {
+	inventory, err := m.provider.WatchInventory(ctx, request.Context, scopeNS, func(snap cluster.InventorySnapshot) {
 		m.applyInventory(snap)
 	})
 	if err != nil {
@@ -324,6 +376,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			m.publish(State{
 				Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version,
 			})
+			m.AppendLog("INFO", "disconnected")
 			return
 		case <-core.Done():
 			m.clearRecentConnections()
@@ -369,8 +422,14 @@ func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
 		discovery.DNSServer = snap.DNSServer
 	}
 	next.Discovery = &discovery
+	next.Pods = append([]cluster.PodInfo{}, snap.PodItems...)
+	next.Services = append([]cluster.ServiceInfo{}, snap.ServiceItems...)
+	m.state = next
 	m.mu.Unlock()
-	m.publish(next)
+
+	ctx := context.Background()
+	m.reconcileBindings(ctx, snap)
+	m.publish(m.State())
 }
 
 func (m *Manager) retainMetrics(metrics singbox.Metrics) *singbox.Metrics {
@@ -542,6 +601,7 @@ func (m *Manager) StartIntercept(ctx context.Context, mapping intercept.Mapping)
 	info, err := m.intercept.StartIntercept(ctx, mapping)
 	if err == nil && !m.isRestoring() {
 		m.persistExchanges(m.State().Context)
+		m.AppendLog("INFO", fmt.Sprintf("started exchange %s/%s", mapping.Namespace, mapping.Service))
 	}
 	return info, err
 }
@@ -550,6 +610,7 @@ func (m *Manager) StopIntercept(ctx context.Context, id string) error {
 	err := m.intercept.Stop(ctx, id)
 	if err == nil && !m.isRestoring() {
 		m.persistExchanges(m.State().Context)
+		m.AppendLog("INFO", fmt.Sprintf("stopped exchange %s", id))
 	}
 	return err
 }
@@ -562,6 +623,7 @@ func (m *Manager) StartPreview(ctx context.Context, request intercept.PreviewReq
 	info, err := m.intercept.StartPreview(ctx, request)
 	if err == nil && !m.isRestoring() {
 		m.persistPreviews(m.State().Context)
+		m.AppendLog("INFO", fmt.Sprintf("started preview %s/%s", request.Namespace, request.Name))
 	}
 	return info, err
 }
@@ -570,6 +632,7 @@ func (m *Manager) StopPreview(ctx context.Context, id string) error {
 	err := m.intercept.Stop(ctx, id)
 	if err == nil && !m.isRestoring() {
 		m.persistPreviews(m.State().Context)
+		m.AppendLog("INFO", fmt.Sprintf("stopped preview %s", id))
 	}
 	return err
 }
@@ -584,6 +647,10 @@ func (m *Manager) StartPortForwardSession(
 	info, err := m.portfwd.Start(ctx, request)
 	if err == nil {
 		m.persistPortForwards()
+		m.AppendLog("INFO", fmt.Sprintf(
+			"started port-forward %s/%s/%s:%d → :%d",
+			request.Kind, request.Namespace, request.Name, request.RemotePort, info.LocalPort,
+		))
 	}
 	return info, err
 }
@@ -592,6 +659,7 @@ func (m *Manager) StopPortForward(id string) error {
 	err := m.portfwd.Stop(id)
 	if err == nil {
 		m.persistPortForwards()
+		m.AppendLog("INFO", fmt.Sprintf("stopped port-forward %s", id))
 	}
 	return err
 }
@@ -613,11 +681,45 @@ func (m *Manager) fail(ctx context.Context, state State, message string, err err
 	state.Error = err.Error()
 	state.ConnectedAt = nil
 	m.publish(state)
+	m.AppendLog("ERROR", message+": "+err.Error())
+}
+
+func (m *Manager) ManualNetwork(contextName string) cluster.ManualNetwork {
+	if m.store == nil || contextName == "" {
+		return cluster.ManualNetwork{}
+	}
+	item := m.store.ManualNetwork(contextName)
+	return cluster.ManualNetwork{
+		PodCIDRs: item.PodCIDRs, ServiceCIDRs: item.ServiceCIDRs, DNSServer: item.DNSServer,
+	}
+}
+
+func (m *Manager) SetManualNetwork(contextName string, network cluster.ManualNetwork) error {
+	if m.store == nil {
+		return errors.New("state store is unavailable")
+	}
+	if contextName == "" {
+		return errors.New("context is required")
+	}
+	normalized, err := cluster.NormalizeManualNetwork(network)
+	if err != nil {
+		return err
+	}
+	return m.store.SetManualNetwork(contextName, store.ManualNetwork{
+		PodCIDRs: normalized.PodCIDRs, ServiceCIDRs: normalized.ServiceCIDRs, DNSServer: normalized.DNSServer,
+	})
+}
+
+func (m *Manager) GatewayInstallManifest() string {
+	return cluster.GatewayInstallManifest(m.gatewayImage)
 }
 
 func (m *Manager) publish(state State) {
 	state.UpdatedAt = time.Now()
 	m.mu.Lock()
+	if state.Events == nil {
+		state.Events = m.state.Events
+	}
 	m.state = state
 	listeners := append([]func(State){}, m.listeners...)
 	m.mu.Unlock()

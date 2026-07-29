@@ -1,28 +1,22 @@
 import { useEffect, useMemo, useState } from "react";
 import { backend } from "@/backend";
-import type { BootstrapData, SessionState, UpdateInfo } from "@/types";
-
-export type NetworkSubView =
-  | "network-portfwd"
-  | "network-exchange"
-  | "network-preview";
+import type {
+  BootstrapData,
+  ClusterInventory,
+  KubeconfigFileInfo,
+  ProbeResult,
+  SessionState,
+  UpdateInfo,
+} from "@/types";
 
 export type AppView =
   | "overview"
+  | "clusters"
   | "connections"
+  | "workload"
   | "network"
-  | NetworkSubView
   | "logs"
   | "settings";
-
-export function isNetworkView(view: AppView): boolean {
-  return (
-    view === "network" ||
-    view === "network-portfwd" ||
-    view === "network-exchange" ||
-    view === "network-preview"
-  );
-}
 
 const emptySession: SessionState = {
   phase: "idle",
@@ -38,12 +32,24 @@ const emptyUpdate: UpdateInfo = {
   url: "https://github.com/fengqi-dev/kube-loop/releases",
 };
 
+function applyInventory(
+  current: BootstrapData,
+  inventory: ClusterInventory,
+): BootstrapData {
+  return {
+    ...current,
+    contexts: inventory.contexts,
+    kubeconfigFiles: inventory.files,
+  };
+}
+
 export function useSession() {
   const [data, setData] = useState<BootstrapData>({
     contexts: [],
     namespaces: ["default"],
     session: emptySession,
     update: emptyUpdate,
+    kubeconfigFiles: [],
   });
   const [contextName, setContextName] = useState("");
   const [namespace, setNamespace] = useState("default");
@@ -99,6 +105,7 @@ export function useSession() {
     () => data.contexts.find((item) => item.name === contextName),
     [contextName, data.contexts],
   );
+  const kubeconfigFiles: KubeconfigFileInfo[] = data.kubeconfigFiles ?? [];
 
   async function changeContext(next: string) {
     setContextName(next);
@@ -132,11 +139,82 @@ export function useSession() {
       if (busy || ready) {
         await backend.disconnect();
       } else {
-        await backend.connect(contextName, namespace);
+        // Namespace is only used by Network tools; tunnel DNS covers *.cluster.local.
+        await backend.connect(contextName, "default");
       }
     } catch (error) {
       setUIError((error as Error).message);
     }
+  }
+
+  async function connectContext(next: string) {
+    setUIError("");
+    try {
+      if (busy) {
+        await backend.disconnect();
+        return;
+      }
+      if (ready && session.context === next) {
+        await backend.disconnect();
+        return;
+      }
+      if (ready && session.context !== next) {
+        await backend.disconnect();
+      }
+      if (next !== contextName) {
+        await changeContext(next);
+      }
+      await backend.connect(next, "default");
+    } catch (error) {
+      setUIError((error as Error).message);
+    }
+  }
+
+  async function reloadContexts() {
+    setUIError("");
+    const inventory = await backend.reloadContexts();
+    setData((current) => applyInventory(current, inventory));
+    if (contextName && !inventory.contexts.some((item) => item.name === contextName)) {
+      const fallback =
+        inventory.contexts.find((item) => item.current)?.name ||
+        inventory.contexts[0]?.name ||
+        "";
+      if (fallback) {
+        await changeContext(fallback);
+      } else {
+        setContextName("");
+      }
+    }
+    return inventory;
+  }
+
+  async function addKubeconfig() {
+    setUIError("");
+    const inventory = await backend.addKubeconfig();
+    setData((current) => applyInventory(current, inventory));
+    return inventory;
+  }
+
+  async function removeKubeconfig(path: string) {
+    setUIError("");
+    const inventory = await backend.removeKubeconfig(path);
+    setData((current) => applyInventory(current, inventory));
+    if (contextName && !inventory.contexts.some((item) => item.name === contextName)) {
+      const fallback =
+        inventory.contexts.find((item) => item.current)?.name ||
+        inventory.contexts[0]?.name ||
+        "";
+      if (fallback) {
+        await changeContext(fallback);
+      } else {
+        setContextName("");
+      }
+    }
+    return inventory;
+  }
+
+  async function probeContext(name: string): Promise<ProbeResult> {
+    return backend.probeContext(name);
   }
 
   async function checkForUpdates() {
@@ -173,9 +251,15 @@ export function useSession() {
     ready,
     discovery,
     currentContext,
+    kubeconfigFiles,
     setNamespace: changeNamespace,
     changeContext,
     toggleConnection,
+    connectContext,
+    reloadContexts,
+    addKubeconfig,
+    removeKubeconfig,
+    probeContext,
     checkForUpdates,
     openUpdatePage,
   };

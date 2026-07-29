@@ -63,13 +63,25 @@ func (f *fakeProvider) ResolveServiceBackend(
 	}
 	return "api-0", 8080, nil
 }
-func (f *fakeProvider) Discover(context.Context, string) (cluster.Discovery, error) {
+func (f *fakeProvider) Discover(context.Context, string, []string) (cluster.Discovery, error) {
 	return f.discovery, f.err
 }
 func (f *fakeProvider) WatchInventory(
-	context.Context, string, func(cluster.InventorySnapshot),
+	context.Context, string, []string, func(cluster.InventorySnapshot),
 ) (io.Closer, error) {
 	return closerFunc(func() {}), f.err
+}
+func (f *fakeProvider) ProbeCapabilities(context.Context, string) (cluster.Capabilities, error) {
+	return cluster.Capabilities{
+		GatewayInstall: true, GatewayPortForward: true, ClusterNodes: true, InventoryCluster: true,
+		ServiceWrite: true, ServiceCreate: true,
+	}, nil
+}
+func (f *fakeProvider) GetGateway(context.Context, string) (cluster.GatewayInfo, error) {
+	if f.err != nil {
+		return cluster.GatewayInfo{}, f.err
+	}
+	return cluster.GatewayInfo{Name: "gateway-pod", IP: "10.244.0.8"}, nil
 }
 func (f *fakeProvider) EnsureGateway(context.Context, string, string) (cluster.GatewayInfo, error) {
 	if f.err != nil {

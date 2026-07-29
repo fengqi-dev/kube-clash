@@ -3,7 +3,6 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"sort"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -19,46 +18,34 @@ type PodPortInfo struct {
 	Protocol string `json:"protocol"`
 }
 
-// PodInfo is a running Pod shown in the port-forward UI.
+// PodInfo is a running Pod shown in the network and port-forward UI.
 type PodInfo struct {
 	Name      string        `json:"name"`
 	Namespace string        `json:"namespace"`
 	Phase     string        `json:"phase"`
 	Ready     bool          `json:"ready"`
+	IP        string        `json:"ip,omitempty"`
+	Node      string        `json:"node,omitempty"`
 	Ports     []PodPortInfo `json:"ports"`
 }
 
 func (p *Provider) ListPods(
 	ctx context.Context, contextName, namespace string,
 ) ([]PodInfo, error) {
-	if namespace == "" {
-		namespace = "default"
-	}
+	listNS := apiNamespace(namespace)
 	client, err := p.client(contextName)
 	if err != nil {
 		return nil, err
 	}
-	list, err := client.CoreV1().Pods(namespace).List(ctx, metav1.ListOptions{})
+	list, err := client.CoreV1().Pods(listNS).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list pods: %w", err)
 	}
-	items := make([]PodInfo, 0, len(list.Items))
-	for _, pod := range list.Items {
-		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
-			continue
-		}
-		items = append(items, PodInfo{
-			Name:      pod.Name,
-			Namespace: pod.Namespace,
-			Phase:     string(pod.Status.Phase),
-			Ready:     podReady(pod),
-			Ports:     collectPodPorts(pod),
-		})
+	refs := make([]*corev1.Pod, 0, len(list.Items))
+	for i := range list.Items {
+		refs = append(refs, &list.Items[i])
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].Name < items[j].Name
-	})
-	return items, nil
+	return podInfosFromList(refs), nil
 }
 
 // ResolveServiceBackend picks a ready Pod behind a Service and the container port.

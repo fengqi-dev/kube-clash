@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { ArrowRightLeft, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
+import { NamespaceSelect } from "@/components/network/namespace-select";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -27,12 +28,16 @@ const inputClassName =
 export function InterceptPanel({
   ready,
   contextName,
+  namespaces,
   namespace,
+  onNamespaceChange,
   embedded = false,
 }: {
   ready: boolean;
   contextName: string;
+  namespaces: string[];
   namespace: string;
+  onNamespaceChange(value: string): void;
   embedded?: boolean;
 }) {
   const { t } = useI18n();
@@ -189,7 +194,13 @@ export function InterceptPanel({
         </div>
       )}
 
-      <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[1.2fr_1fr_1fr_0.9fr_auto]">
+      <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[0.9fr_1.2fr_1fr_1fr_0.9fr_auto]">
+        <NamespaceSelect
+          value={namespace}
+          namespaces={namespaces}
+          disabled={!ready}
+          onChange={onNamespaceChange}
+        />
         <Field label={t("intercept.service")}>
           <Select
             value={serviceName || undefined}

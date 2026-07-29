@@ -7,11 +7,10 @@ import { useI18n, type TranslationKey } from "@/i18n";
 
 const headerKeys: Record<AppView, TranslationKey> = {
   overview: "header.overview",
+  clusters: "header.clusters",
   connections: "header.connections",
+  workload: "header.workload",
   network: "header.network",
-  "network-portfwd": "header.portfwd",
-  "network-exchange": "header.exchange",
-  "network-preview": "header.preview",
   logs: "header.logs",
   settings: "header.settings",
 };

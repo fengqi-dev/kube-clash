@@ -83,6 +83,66 @@ func (p *Provider) EnsureGateway(ctx context.Context, contextName, image string)
 	return waitForGatewayPod(ctx, client)
 }
 
+// GetGateway finds an already-running Gateway Pod without installing resources.
+func (p *Provider) GetGateway(ctx context.Context, contextName string) (GatewayInfo, error) {
+	client, err := p.client(contextName)
+	if err != nil {
+		return GatewayInfo{}, err
+	}
+	info, err := findReadyGatewayPod(ctx, client)
+	if err != nil {
+		return GatewayInfo{}, err
+	}
+	return info, nil
+}
+
+// GatewayInstallManifest returns a YAML snippet admins can apply when the user
+// lacks install RBAC.
+func GatewayInstallManifest(image string) string {
+	if image == "" {
+		image = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
+	}
+	return fmt.Sprintf(`apiVersion: v1
+kind: Namespace
+metadata:
+  name: %s
+  labels:
+    app.kubernetes.io/name: %s
+    app.kubernetes.io/part-of: kubeloop
+    app.kubernetes.io/managed-by: kubeloop
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: %s
+  namespace: %s
+  labels:
+    app.kubernetes.io/name: %s
+    app.kubernetes.io/part-of: kubeloop
+    app.kubernetes.io/managed-by: kubeloop
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: %s
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: %s
+        app.kubernetes.io/part-of: kubeloop
+        app.kubernetes.io/managed-by: kubeloop
+    spec:
+      automountServiceAccountToken: false
+      containers:
+        - name: gateway
+          image: %s
+          ports:
+            - name: tunnel
+              containerPort: %d
+              protocol: TCP
+`, GatewayNamespace, GatewayName, GatewayName, GatewayNamespace, GatewayName, GatewayName, GatewayName, image, GatewayPort)
+}
+
 func ensureNamespace(ctx context.Context, client kubernetes.Interface) error {
 	_, err := client.CoreV1().Namespaces().Get(ctx, GatewayNamespace, metav1.GetOptions{})
 	if err == nil {
@@ -181,24 +241,44 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 	}
 }
 
+func findReadyGatewayPod(ctx context.Context, client kubernetes.Interface) (GatewayInfo, error) {
+	list, err := client.CoreV1().Pods(GatewayNamespace).List(ctx, metav1.ListOptions{
+		LabelSelector: "app.kubernetes.io/name=" + GatewayName,
+	})
+	if err != nil {
+		return GatewayInfo{}, fmt.Errorf("list gateway pods: %w", err)
+	}
+	for _, pod := range list.Items {
+		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" {
+			continue
+		}
+		if !podReady(pod) {
+			continue
+		}
+		return GatewayInfo{Name: pod.Name, IP: pod.Status.PodIP}, nil
+	}
+	return GatewayInfo{}, errors.New("gateway pod not found; ask an admin to install kubeloop-gateway")
+}
+
 func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (GatewayInfo, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	var lastErr error
 	for {
-		list, err := client.CoreV1().Pods(GatewayNamespace).List(ctx, metav1.ListOptions{
-			LabelSelector: "app.kubernetes.io/name=" + GatewayName,
-		})
-		if err != nil {
-			return GatewayInfo{}, fmt.Errorf("list gateway pods: %w", err)
+		info, err := findReadyGatewayPod(ctx, client)
+		if err == nil {
+			return info, nil
 		}
-		for _, pod := range list.Items {
-			if pod.Status.Phase == corev1.PodRunning && podReady(pod) && pod.Status.PodIP != "" {
-				return GatewayInfo{Name: pod.Name, IP: pod.Status.PodIP}, nil
-			}
+		if apierrors.IsForbidden(err) {
+			return GatewayInfo{}, err
 		}
+		lastErr = err
 		select {
 		case <-ctx.Done():
-			return GatewayInfo{}, fmt.Errorf("wait for gateway: %w", ctx.Err())
+			if lastErr != nil {
+				return GatewayInfo{}, fmt.Errorf("wait for gateway: %w", lastErr)
+			}
+			return GatewayInfo{}, ctx.Err()
 		case <-ticker.C:
 		}
 	}

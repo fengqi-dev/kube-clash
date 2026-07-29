@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Workflows — KubeLoop Docs</title>
+    <meta
+      name="description"
+      content="Everyday KubeLoop workflows: open Services, debug Pods, Port Forward, and Exchange."
+    />
+    <link rel="icon" href="assets/appicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/styles.css" />
+  </head>
+  <body data-page="workflows">
+    <header class="topbar" id="site-header"></header>
+    <div class="sidebar-backdrop" id="sidebar-backdrop"></div>
+
+    <div class="docs-shell">
+      <aside class="sidebar" id="site-sidebar"></aside>
+      <main class="content">
+        <div class="content-inner">
+          <h1 class="page-title" data-i18n="workflows.title">Workflows</h1>
+          <p class="page-desc" data-i18n="workflows.desc">
+            Browse, debug, intercept, and preview without opening a terminal for
+            every Service.
+          </p>
+
+          <section class="section">
+            <h2 data-i18n="workflows.list.title">Everyday paths</h2>
+            <div class="rail">
+              <article class="rail-row">
+                <p class="label" data-i18n="workflows.w1.label">Internal API</p>
+                <div>
+                  <h3 data-i18n="workflows.w1.title">Open a Service in the browser</h3>
+                  <p data-i18n="workflows.w1.body">
+                    Connect, then use a ClusterIP or Service DNS name.
+                  </p>
+                </div>
+                <p class="hint" data-i18n="workflows.w1.hint">mysql.default.svc</p>
+              </article>
+              <article class="rail-row">
+                <p class="label" data-i18n="workflows.w2.label">Pod debug</p>
+                <div>
+                  <h3 data-i18n="workflows.w2.title">Hit a real Pod IP</h3>
+                  <p data-i18n="workflows.w2.body">
+                    Pod CIDR is routed locally after Connect.
+                  </p>
+                </div>
+                <p class="hint" data-i18n="workflows.w2.hint">10.244.x.x</p>
+              </article>
+              <article class="rail-row">
+                <p class="label" data-i18n="workflows.w3.label">Port forward</p>
+                <div>
+                  <h3 data-i18n="workflows.w3.title">Skip kubectl port-forward</h3>
+                  <p data-i18n="workflows.w3.body">
+                    Start from Workload or Network with a Namespace picker.
+                  </p>
+                </div>
+                <p class="hint" data-i18n="workflows.w3.hint">localhost:8080</p>
+              </article>
+              <article class="rail-row">
+                <p class="label" data-i18n="workflows.w4.label">Intercept</p>
+                <div>
+                  <h3 data-i18n="workflows.w4.title">Run a local process as a Service</h3>
+                  <p data-i18n="workflows.w4.body">
+                    Exchange keeps ClusterIP / DNS while traffic lands locally.
+                  </p>
+                </div>
+                <p class="hint" data-i18n="workflows.w4.hint">Exchange</p>
+              </article>
+            </div>
+          </section>
+
+          <div class="callout">
+            <div class="actions">
+              <a class="button button-primary" href="get-started.html" data-i18n="cta.getStarted"
+                >Get started</a
+              >
+              <a
+                class="button button-secondary"
+                href="architecture.html"
+                data-i18n="nav.architecture"
+                >Architecture</a
+              >
+            </div>
+          </div>
+
+          <p class="footer-note" data-i18n="footer.copy">
+            © KubeLoop contributors. Apache License 2.0.
+          </p>
+        </div>
+      </main>
+    </div>
+
+    <script src="assets/site.js" defer></script>
+  </body>
+</html>

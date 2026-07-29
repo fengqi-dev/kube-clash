@@ -6,7 +6,7 @@
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-**[Website](https://fengqi-dev.github.io/kube-loop/)** · **[Releases](https://github.com/fengqi-dev/kube-loop/releases)** · **[Design](docs/design.md)**
+**[Website](https://fengqi-dev.github.io/kube-loop/)** · **[Releases](https://github.com/fengqi-dev/kube-loop/releases)** · **[Design](docs/design.md)** · **[设计文档](docs/design.zh-CN.md)**
 
 KubeLoop is a desktop client that connects your laptop to a Kubernetes cluster
 like a VPN — so local apps can reach Pod IPs, ClusterIP Services, and
@@ -59,13 +59,29 @@ cluster. You do not need `kubectl` installed locally.
 1. Download a build from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
    (or build from source — see below).
 2. Ensure your machine can reach the cluster API with a normal kubeconfig.
-3. Open KubeLoop, choose **Context** and **Namespace**, click **Connect**.
+3. Open KubeLoop, choose a **Context**, click **Connect**.
 4. On first use, approve the **virtual network service** (privileged helper)
    once. Later connects should not ask again. You can install or remove it under
    **Settings**.
 
 After you are connected, open Overview for traffic and status, or Network for
-discovery, Port Forward, Exchange, and Preview.
+discovery. Port Forward, Exchange, and Preview each have their own Namespace
+picker.
+
+### Limited RBAC / single-namespace accounts
+
+KubeLoop supports developer kubeconfigs that cannot install the Gateway or list
+the whole cluster:
+
+1. **Admin preinstalls Gateway** in `kubeloop-system` (copy YAML from Overview when
+   install is forbidden and no Gateway is found).
+2. Grant the user `get/list` + `pods/portforward` on the Gateway Pod.
+3. Scope Pod/Service list/watch to the allowed Namespace(s).
+4. If the user cannot list Nodes / read CoreDNS, enter **Pod CIDR**, **Service
+   CIDR**, and **Cluster DNS** on Overview (saved per context; reconnect to apply).
+
+Exchange / Preview stay disabled when Service / EndpointSlice write is missing.
+See [docs/design.md](docs/design.md) §8 (or [中文](docs/design.zh-CN.md)) for example Roles.
 
 ## Security posture
 
@@ -128,7 +144,8 @@ Tag `v*` to cut a release (desktop packages, Gateway binaries + GHCR image).
 ## Documentation
 
 - [Project website](https://fengqi-dev.github.io/kube-loop/)
-- [Desktop design](docs/design.md)
+- [Desktop design (English)](docs/design.md)
+- [桌面客户端设计（简体中文）](docs/design.zh-CN.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License

@@ -1,0 +1,192 @@
+package cluster
+
+import (
+	"context"
+	"fmt"
+	"net/netip"
+	"strings"
+
+	authorizationv1 "k8s.io/api/authorization/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
+)
+
+// Capabilities describes what the current kubeconfig identity can do.
+type Capabilities struct {
+	GatewayInstall     bool     `json:"gatewayInstall"`
+	GatewayPortForward bool     `json:"gatewayPortForward"`
+	ClusterNodes       bool     `json:"clusterNodes"`
+	InventoryCluster   bool     `json:"inventoryCluster"`
+	ServiceWrite       bool     `json:"serviceWrite"`
+	ServiceCreate      bool     `json:"serviceCreate"`
+	ScopeNamespaces    []string `json:"scopeNamespaces,omitempty"`
+	Issues             []string `json:"issues,omitempty"`
+}
+
+// ManualNetwork is user-supplied discovery when cluster-wide reads are forbidden.
+type ManualNetwork struct {
+	PodCIDRs     []string `json:"podCIDRs,omitempty"`
+	ServiceCIDRs []string `json:"serviceCIDRs,omitempty"`
+	DNSServer    string   `json:"dnsServer,omitempty"`
+}
+
+func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (Capabilities, error) {
+	client, err := p.client(contextName)
+	if err != nil {
+		return Capabilities{}, err
+	}
+	caps := Capabilities{}
+
+	caps.GatewayInstall = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: GatewayNamespace, Group: "apps", Resource: "deployments", Verb: "create",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: GatewayNamespace, Group: "apps", Resource: "deployments", Verb: "update",
+	})
+
+	caps.GatewayPortForward = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: GatewayNamespace, Resource: "pods", Subresource: "portforward", Verb: "create",
+	})
+
+	caps.ClusterNodes = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Resource: "nodes", Verb: "list",
+	})
+
+	caps.InventoryCluster = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Resource: "pods", Verb: "list",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Resource: "services", Verb: "list",
+	})
+
+	probeNS := "default"
+	if names, listErr := p.Namespaces(ctx, contextName); listErr == nil && len(names) > 0 {
+		probeNS = names[0]
+		if !caps.InventoryCluster {
+			caps.ScopeNamespaces = append([]string{}, names...)
+		}
+	} else if !caps.InventoryCluster {
+		for _, candidate := range []string{"default", "dev", "development", "staging", "prod"} {
+			if canAccess(ctx, client, authorizationv1.ResourceAttributes{
+				Namespace: candidate, Resource: "pods", Verb: "list",
+			}) {
+				caps.ScopeNamespaces = append(caps.ScopeNamespaces, candidate)
+			}
+		}
+		if len(caps.ScopeNamespaces) > 0 {
+			probeNS = caps.ScopeNamespaces[0]
+		}
+	}
+
+	caps.ServiceWrite = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Resource: "services", Verb: "update",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "create",
+	})
+
+	caps.ServiceCreate = canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Resource: "services", Verb: "create",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "create",
+	})
+
+	if !caps.GatewayPortForward {
+		caps.Issues = append(caps.Issues, "缺少 kubeloop-system 的 pods/portforward 权限（无法连接）")
+	}
+	if !caps.GatewayInstall {
+		caps.Issues = append(caps.Issues, "无 Gateway 安装权限；将尝试使用管理员预装的 Gateway")
+	}
+	if !caps.InventoryCluster && len(caps.ScopeNamespaces) == 0 {
+		caps.Issues = append(caps.Issues, "无法在任何 Namespace 中 list Pod/Service")
+	}
+	if !caps.ClusterNodes {
+		caps.Issues = append(caps.Issues, "无法 list Nodes；Pod CIDR 可能需要在 Overview 手动填写")
+	}
+	return caps, nil
+}
+
+func canAccess(ctx context.Context, client kubernetes.Interface, attrs authorizationv1.ResourceAttributes) bool {
+	review := &authorizationv1.SelfSubjectAccessReview{
+		Spec: authorizationv1.SelfSubjectAccessReviewSpec{ResourceAttributes: &attrs},
+	}
+	result, err := client.AuthorizationV1().SelfSubjectAccessReviews().Create(ctx, review, metav1.CreateOptions{})
+	if err != nil {
+		return false
+	}
+	return result.Status.Allowed
+}
+
+// FormatForbidden returns a readable message for API Forbidden errors.
+func FormatForbidden(err error, hint string) string {
+	if err == nil {
+		return ""
+	}
+	if apierrors.IsForbidden(err) {
+		if hint != "" {
+			return fmt.Sprintf("permission denied: %s (%v)", hint, err)
+		}
+		return fmt.Sprintf("permission denied: %v", err)
+	}
+	return err.Error()
+}
+
+// MergeManualNetwork fills empty auto-discovery fields from manual values.
+func MergeManualNetwork(auto Discovery, manual ManualNetwork) Discovery {
+	out := auto
+	if len(out.PodCIDRs) == 0 && len(manual.PodCIDRs) > 0 {
+		out.PodCIDRs = append([]string{}, manual.PodCIDRs...)
+	}
+	if len(out.ServiceCIDRs) == 0 && len(manual.ServiceCIDRs) > 0 {
+		out.ServiceCIDRs = append([]string{}, manual.ServiceCIDRs...)
+	}
+	if out.DNSServer == "" && manual.DNSServer != "" {
+		out.DNSServer = manual.DNSServer
+	}
+	return out
+}
+
+// NormalizeManualNetwork validates and normalizes user-supplied CIDRs / DNS.
+func NormalizeManualNetwork(network ManualNetwork) (ManualNetwork, error) {
+	out := ManualNetwork{}
+	for _, item := range network.PodCIDRs {
+		cidrs, err := parseCIDRList(item)
+		if err != nil {
+			return ManualNetwork{}, fmt.Errorf("pod CIDR: %w", err)
+		}
+		out.PodCIDRs = append(out.PodCIDRs, cidrs...)
+	}
+	for _, item := range network.ServiceCIDRs {
+		cidrs, err := parseCIDRList(item)
+		if err != nil {
+			return ManualNetwork{}, fmt.Errorf("service CIDR: %w", err)
+		}
+		out.ServiceCIDRs = append(out.ServiceCIDRs, cidrs...)
+	}
+	dns := strings.TrimSpace(network.DNSServer)
+	if dns != "" {
+		addr, err := netip.ParseAddr(dns)
+		if err != nil {
+			return ManualNetwork{}, fmt.Errorf("dns server: invalid IP %q", dns)
+		}
+		out.DNSServer = addr.String()
+	}
+	return out, nil
+}
+
+func parseCIDRList(raw string) ([]string, error) {
+	parts := strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == '\n' || r == '\r' || r == ';'
+	})
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		prefix, err := netip.ParsePrefix(part)
+		if err != nil {
+			return nil, fmt.Errorf("invalid CIDR %q", part)
+		}
+		out = append(out, prefix.Masked().String())
+	}
+	return out, nil
+}

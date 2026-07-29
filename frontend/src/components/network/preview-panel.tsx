@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import { Eye, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
+import { NamespaceSelect } from "@/components/network/namespace-select";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -19,11 +20,15 @@ const inputClassName =
 
 export function PreviewPanel({
   ready,
+  namespaces,
   namespace,
+  onNamespaceChange,
   embedded = false,
 }: {
   ready: boolean;
+  namespaces: string[];
   namespace: string;
+  onNamespaceChange(value: string): void;
   embedded?: boolean;
 }) {
   const { t } = useI18n();
@@ -154,7 +159,13 @@ export function PreviewPanel({
         </div>
       )}
 
-      <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[1.2fr_0.8fr_0.7fr_1fr_0.9fr_auto]">
+      <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[0.9fr_1.2fr_0.8fr_0.7fr_1fr_0.9fr_auto]">
+        <NamespaceSelect
+          value={namespace}
+          namespaces={namespaces}
+          disabled={!ready}
+          onChange={onNamespaceChange}
+        />
         <Field label={t("preview.serviceName")}>
           <input
             className={inputClassName}

@@ -18,12 +18,15 @@ var version = "dev"
 func main() {
 	app := NewApp()
 	if err := wails.Run(&options.App{
-		Title:     "KubeLoop",
-		Width:     1080,
-		Height:    720,
-		MinWidth:  840,
-		MinHeight: 580,
-		Frameless: true,
+		Title:         "KubeLoop",
+		Width:         1080,
+		Height:        720,
+		MinWidth:      1080,
+		MinHeight:     720,
+		MaxWidth:      1080,
+		MaxHeight:     720,
+		DisableResize: true,
+		Frameless:     true,
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "dev.fengqi.kube-loop",
 			OnSecondInstanceLaunch: func(options.SecondInstanceData) {

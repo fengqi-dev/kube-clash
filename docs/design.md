@@ -1,149 +1,149 @@
-# KubeLoop 桌面客户端设计
+# KubeLoop Desktop Client Design
 
-> 状态：Draft v0.2（产品边界已确认）
-> 目标：让开发者像连接 VPN 一样连接 Kubernetes 集群，并从本机透明访问 Pod IP、Service IP 和集群域名。
+[English](design.md) | [简体中文](design.zh-CN.md)
 
-## 0. 已确认的产品决策
+> Status: Draft v0.2 (product boundaries confirmed)  
+> Goal: Let developers connect to a Kubernetes cluster like a VPN, and transparently reach Pod IPs, Service IPs, and cluster DNS from the local machine.
 
-- 产品目标为 macOS、Windows、Linux 多平台，优先交付 macOS；
-- Gateway 由桌面客户端自动检查、安装和升级；
-- 第一阶段只完成 Pod、Service 和集群 DNS 的透明访问；
-- M2 支持用本地服务替换集群 Service（TCP/UDP），断开时完整恢复 Endpoints。
-- 使用 sing-box 作为 TUN、DNS 和规则路由内核。
+## 0. Confirmed product decisions
 
-## 1. 产品定位
+- Target platforms are macOS, Windows, and Linux, with macOS first;
+- The desktop client automatically checks, installs, and upgrades the Gateway;
+- Phase one delivers transparent access to Pods, Services, and cluster DNS only;
+- M2 supports replacing a cluster Service with a local process (TCP/UDP) and fully restores Endpoints on disconnect;
+- Use sing-box as the TUN, DNS, and rule-routing core.
 
-KubeLoop 是桌面网络客户端，而不是命令行工具。用户不需要理解路由、TUN、端口转发或
-Kubernetes 网络细节，只需要选择集群并点击连接。
+## 1. Product positioning
 
-它借鉴 Clash 的使用体验：
+KubeLoop is a desktop network client, not a CLI. Users should not need to understand routes, TUN, port-forwarding, or Kubernetes networking details — they select a cluster and click Connect.
 
-- 常驻系统托盘；
-- 一键连接和断开；
-- TUN 透明接管，无需给每个应用配置代理；
-- 实时展示连接状态、路由、请求和错误；
-- 自动检测网段冲突；
-- 设置开机启动和自动重连。
+It aims for a familiar desktop network-client experience:
 
-它解决的是 Kubernetes 开发网络问题，而不是公网代理问题：
+- Lives in the system tray;
+- One-click connect and disconnect;
+- Transparent TUN takeover — no per-app proxy configuration;
+- Live connection status, routes, requests, and errors;
+- Automatic CIDR conflict detection;
+- Optional launch-at-login and auto-reconnect.
 
-- 访问 Pod IP；
-- 访问 ClusterIP Service；
-- 解析并访问 `*.svc.cluster.local`；
-- 将本地进程映射为集群内 Service 的目标（Service Local Intercept）。
+It solves Kubernetes development networking problems, not public proxy problems:
 
-## 2. 首版范围
+- Reach Pod IPs;
+- Reach ClusterIP Services;
+- Resolve and reach `*.svc.cluster.local`;
+- Map a local process as the backend of a cluster Service (Service Local Intercept).
 
-### 2.1 MVP 包含
+## 2. First-release scope
 
-1. 读取本机 kubeconfig，并展示 Context、集群和 Namespace。
-2. 通过 Kubernetes API 获取 Pod CIDR、Service IP 和集群 DNS 信息。
-3. 创建系统 TUN 设备，只接管目标集群网段。
-4. 自动安装或复用集群内 Gateway。
-5. 通过 Kubernetes API Server 的 port-forward 通道连接 Gateway，不暴露公网端口。
-6. 支持 TCP 和 UDP。
-7. 将 `cluster.local` DNS 查询转发给集群 CoreDNS。
-8. 展示连接时长、上下行流量、活动连接和诊断信息。
-9. 从 UI 完成连接、断开、Gateway 安装和卸载。
+### 2.1 MVP includes
 
-### 2.2 M2：Service Local Intercept
+1. Read the local kubeconfig and show Context, cluster, and Namespace.
+2. Discover Pod CIDR, Service IPs, and cluster DNS via the Kubernetes API.
+3. Create a system TUN that only takes over the target cluster ranges.
+4. Automatically install or reuse the in-cluster Gateway.
+5. Reach the Gateway through Kubernetes API Server port-forward — no public ports.
+6. Support TCP and UDP.
+7. Forward `cluster.local` DNS queries to in-cluster CoreDNS.
+8. Show connection duration, upload/download, active connections, and diagnostics.
+9. Complete connect, disconnect, Gateway install, and uninstall from the UI.
 
-在已连接会话中，用户可将现有 ClusterIP Service 替换为本地进程：
+### 2.2 M2: Service Local Intercept
 
-1. 桌面通过控制通道在 Gateway 上注册唯一 listen 端口（TCP/UDP）；
-2. 清空 Service selector，写入托管 EndpointSlice，后端指向 Gateway Pod IP:listenPort；
-3. 集群客户端仍使用原 ClusterIP / DNS；kube-proxy 将流量送到 Gateway；
-4. Gateway 发出 `InboundReady`，桌面 `Accept` 后转发到 `127.0.0.1`（或指定本地地址）；
-5. 停止拦截或断开连接时恢复 selector、删除托管 EndpointSlice，并注销 Gateway 监听。
+While connected, users can replace an existing ClusterIP Service with a local process:
 
-Gateway 仍无 kube API、无特权、无 hostNetwork。EndpointSlice 变更由桌面 kubeconfig 完成。
+1. The desktop registers a unique listen port (TCP/UDP) on the Gateway over the control channel;
+2. Clear the Service selector and write a managed EndpointSlice pointing at Gateway Pod IP:listenPort;
+3. Cluster clients keep the original ClusterIP / DNS; kube-proxy sends traffic to the Gateway;
+4. The Gateway emits `InboundReady`; the desktop `Accept`s and forwards to `127.0.0.1` (or a configured local address);
+5. On stop or disconnect, restore the selector, delete the managed EndpointSlice, and unregister the Gateway listener.
 
-### 2.3 MVP 暂不包含
+The Gateway still has no kube API access, no privilege, and no hostNetwork. EndpointSlice changes are performed with the desktop kubeconfig.
 
-- 全局公网代理和 Clash 规则订阅；
-- 多集群同时连接；
-- ICMP/Ping 的完整语义；
-- Headless / ExternalName Service 拦截；
-- Service Mesh 流量身份模拟；
-- Windows 客户端。
+### 2.3 Out of MVP
 
-产品架构从第一天保持跨平台，交付顺序为：
+- Global public proxying and rule subscriptions;
+- Simultaneous multi-cluster connect;
+- Full ICMP/Ping semantics;
+- Headless / ExternalName Service intercept;
+- Service Mesh traffic identity simulation;
+- Windows client (in MVP delivery order).
 
-1. macOS；
-2. Windows；
-3. Linux。
+Architecture stays cross-platform from day one. Delivery order:
 
-核心网络栈、Kubernetes 访问、隧道协议和 Gateway 必须跨平台复用。系统网络配置由平台适配
-层实现，不允许平台逻辑进入通用连接流程。
+1. macOS;
+2. Windows;
+3. Linux.
 
-## 3. 用户体验
+The core network stack, Kubernetes access, tunnel protocol, and Gateway must be shared across platforms. System network configuration lives in a platform adapter layer and must not enter the common connect flow.
 
-### 3.1 首页
+## 3. User experience
+
+### 3.1 Home
 
 ```text
 ┌──────────────────────────────────────────────────────┐
-│ KubeLoop                                设置  —  □ │
+│ KubeLoop                              Settings  —  □ │
 ├──────────────────────────────────────────────────────┤
 │                                                      │
-│             ● 已连接                                  │
+│             ● Connected                              │
 │             dev-cluster / default                    │
 │             00:42:18                                 │
 │                                                      │
-│               [ 断开连接 ]                            │
+│               [ Disconnect ]                         │
 │                                                      │
-│  Pod 网络         Service         DNS                │
-│  10.244.0.0/16    32 个 IP        cluster.local      │
+│  Pod network      Service         DNS                │
+│  10.244.0.0/16    32 IPs          cluster.local      │
 │                                                      │
-│  ↓ 18.2 MB        ↑ 4.7 MB        12 个活动连接       │
+│  ↓ 18.2 MB        ↑ 4.7 MB        12 active conns    │
 ├──────────────────────────────────────────────────────┤
-│  概览        连接        网络        日志              │
+│  Overview    Connections    Network    Logs          │
 └──────────────────────────────────────────────────────┘
 ```
 
-未连接状态下，主区域展示：
+When disconnected, the main area shows:
 
-1. kubeconfig 选择；
-2. Context 选择；
-3. Namespace 选择；
-4. “连接”主按钮；
-5. 首次连接时的 Gateway 安装提示。
+1. kubeconfig selection;
+2. Context selection;
+3. Namespace selection;
+4. Primary Connect button;
+5. First-connect Gateway install prompt.
 
-### 3.2 连接状态
+### 3.2 Connection states
 
-状态机必须对用户可解释：
+The state machine must be explainable to users:
 
 ```text
-未连接
-  → 检查 kubeconfig
-  → 检查集群权限
-  → 检查/安装 Gateway
-  → 发现 Pod 与 Service 网络
-  → 检查本地网段冲突
-  → 请求系统网络权限
-  → 创建安全通道
-  → 已连接
+Disconnected
+  → Check kubeconfig
+  → Check cluster permissions
+  → Check/install Gateway
+  → Discover Pod and Service networks
+  → Check local CIDR conflicts
+  → Request system network permission
+  → Create secure channel
+  → Connected
 ```
 
-任何一步失败时，UI 展示：
+On any failure, the UI shows:
 
-- 人能读懂的错误原因；
-- 受影响的能力；
-- “重试”按钮；
-- 可复制的诊断详情。
+- A human-readable reason;
+- Which capabilities are affected;
+- A Retry button;
+- Copyable diagnostic details.
 
-### 3.3 系统托盘
+### 3.3 System tray
 
-托盘菜单提供：
+The tray menu provides:
 
-- 当前连接状态；
-- 最近使用的集群；
-- 连接/断开；
-- 打开主窗口；
-- 退出。
+- Current connection status;
+- Recently used clusters;
+- Connect / Disconnect;
+- Open main window;
+- Quit.
 
-关闭主窗口不等于断开连接，退出应用时需要明确提示。
+Closing the main window does not disconnect. Quitting the app must ask for confirmation.
 
-## 4. 总体架构
+## 4. Architecture
 
 ```text
 ┌──────────────── macOS Desktop ─────────────────┐
@@ -180,100 +180,94 @@ Gateway 仍无 kube API、无特权、无 hostNetwork。EndpointSlice 变更由�
                          Pod / Service / CoreDNS
 ```
 
-### 4.1 桌面 UI
+### 4.1 Desktop UI
 
-推荐使用 Wails + React：
+Recommended stack: Wails + React:
 
-- Go 适合 Kubernetes 客户端、网络控制和并发任务；
-- UI 可以保持现代桌面客户端体验；
-- 相比 Electron，安装包和常驻内存更小；
-- 核心逻辑可以复用于 Windows 和 Linux。
+- Go fits Kubernetes clients, network control, and concurrency;
+- UI can stay a modern desktop experience;
+- Smaller install size and resident memory than Electron;
+- Core logic can be reused on Windows and Linux.
 
-UI 进程不直接持有 root 权限。
+The UI process does not hold root privileges.
 
 ### 4.2 Core Service
 
-运行在普通用户权限下，负责：
+Runs as a normal user and owns:
 
-- kubeconfig 与 Context 管理；
-- 使用 Kubernetes API 做资源发现；
-- 安装、升级和检查 Gateway；
-- 建立 port-forward；
-- 管理连接状态机；
-- 运行用户态 TCP/IP 栈；
-- 汇总指标和结构化日志；
-- 通过本地 RPC 向 UI 推送状态。
+- kubeconfig and Context management;
+- Kubernetes API resource discovery;
+- Gateway install, upgrade, and health checks;
+- port-forward setup;
+- Connection state machine;
+- Userspace TCP/IP stack orchestration;
+- Metrics and structured logs;
+- Status push to the UI over local RPC.
 
-首版不调用外部 `kubectl`，直接使用 Kubernetes client-go，避免用户机器上的版本差异和
-命令行窗口闪烁。
+MVP does not invoke external `kubectl`; it uses client-go directly to avoid version skew and flashing terminal windows.
 
-### 4.3 sing-box Core 与 Privileged Helper
+### 4.3 sing-box Core and Privileged Helper
 
-sing-box 作为客户端托管的独立进程随平台安装包分发，负责：
+sing-box ships as a managed independent process in the platform package and is responsible for:
 
-- 创建 TUN 和接收目标集群流量；
-- DNS 劫持与 `cluster.local` nameserver policy；
-- 根据 Pod CIDR 和 Service IP 执行规则路由；
-- 将集群流量发送到本地 `KUBERNETES` SOCKS5 桥；
-- 让所有非集群流量保持 `DIRECT`。
+- Creating the TUN and receiving target cluster traffic;
+- DNS hijack / `cluster.local` nameserver policy;
+- Rule routing from Pod CIDR and Service IPs;
+- Sending cluster traffic to the local `KUBERNETES` SOCKS5 bridge;
+- Keeping all non-cluster traffic `DIRECT`.
 
-桌面客户端生成最小配置，不接受代理订阅，也不接管公网流量。sing-box 通过只监听
-`127.0.0.1` 的 External Controller 接受健康检查，Controller Secret 每个 Session 随机
-生成。
+The desktop generates a minimal config — no proxy subscriptions and no takeover of public internet traffic. sing-box exposes a health External Controller on `127.0.0.1` only; the Controller Secret is random per session.
 
-Privileged Helper 是独立、最小权限的系统服务，只接受本机签名客户端的 IPC 请求，负责：
+The Privileged Helper is a separate, least-privilege system service that accepts IPC only from a signed local client. It:
 
-- 创建和销毁 utun/TUN；
-- 添加和删除明确的 Pod/Service 路由；
-- 配置 `cluster.local` split DNS；
-- 崩溃恢复时清理残留网络配置。
+- Creates and destroys utun/TUN;
+- Adds and removes explicit Pod/Service routes;
+- Configures `cluster.local` split DNS;
+- Cleans residual network config on crash recovery.
 
-Helper 不读取 kubeconfig，不持有 Kubernetes 凭证，也不连接互联网。
+The Helper does not read kubeconfig, hold Kubernetes credentials, or connect to the internet.
 
-sing-box 使用 GPLv3。分发安装包时必须同时保留许可证、版权声明，并按许可证要求提供对应
-源码。sing-box 保持为独立进程，不修改其源码；项目仍需在发布流程中生成第三方许可证和源码
-获取说明。
+sing-box is GPLv3. Distributions that bundle it must keep license and copyright notices and provide corresponding source as required. sing-box stays an unmodified separate process; the release pipeline still produces third-party notices and source-access instructions.
 
-平台实现：
+Platform mapping:
 
-| 平台 | TUN | 权限服务 | DNS |
+| Platform | TUN | Privilege service | DNS |
 | --- | --- | --- | --- |
-| macOS | Network Extension 或 utun | LaunchDaemon + Authorization Services | DNS Settings / split DNS |
-| Windows | Wintun | Windows Service | NRPT / DNS 配置 |
-| Linux | `/dev/net/tun` | systemd service 或 polkit | systemd-resolved |
+| macOS | Network Extension or utun | LaunchDaemon + Authorization Services | DNS Settings / split DNS |
+| Windows | Wintun | Windows Service | NRPT / DNS config |
+| Linux | `/dev/net/tun` | systemd service or polkit | systemd-resolved |
 
-用户只在首次安装或升级 Helper 时授权，而不是每次连接都输入密码。
+Users authorize only on first Helper install or upgrade, not on every Connect.
 
-macOS 原型阶段可以使用 utun 快速验证数据通路；正式发布前优先评估 Packet Tunnel Network
-Extension，以获得更稳定的系统生命周期和签名分发体验。
+For the macOS prototype, utun is acceptable to validate the data path; before GA, prefer evaluating a Packet Tunnel Network Extension for a more stable system lifecycle and signed distribution.
 
 ### 4.4 In-cluster Gateway
 
-Gateway 是一个普通 Deployment：
+The Gateway is a normal Deployment:
 
-- 默认 1 个副本；
-- 不创建公网 LoadBalancer；
-- 只通过 Kubernetes API Server port-forward 访问；
-- 接收多路复用的 TCP/UDP 会话；
-- 在 Pod 网络内连接目标 Pod、Service 或 CoreDNS；
-- 暴露健康检查和协议版本；
-- 不需要 `hostNetwork`、`privileged` 或 `NET_ADMIN`。
+- One replica by default;
+- No public LoadBalancer;
+- Reached only via Kubernetes API Server port-forward;
+- Accepts multiplexed TCP/UDP sessions;
+- Dials target Pods, Services, or CoreDNS inside the Pod network;
+- Exposes health checks and protocol version;
+- Needs no `hostNetwork`, `privileged`, or `NET_ADMIN`.
 
-这比在集群内创建 TUN 并修改 iptables 更安全，也更容易被企业集群接受。
+This is safer than creating a TUN inside the cluster and rewriting iptables, and easier for enterprise clusters to accept.
 
-### 4.5 跨平台边界
+### 4.5 Cross-platform boundary
 
-通用模块：
+Shared modules:
 
-- Kubernetes API 与 kubeconfig；
-- Gateway 安装器；
-- 连接状态机；
-- 用户态 TCP/IP 栈；
-- 隧道协议；
-- 路由规划与冲突检测；
-- 指标、日志与诊断。
+- Kubernetes API and kubeconfig;
+- Gateway installer;
+- Connection state machine;
+- Userspace TCP/IP stack;
+- Tunnel protocol;
+- Route planning and conflict detection;
+- Metrics, logs, and diagnostics.
 
-平台模块仅实现以下接口：
+Platform modules only implement:
 
 ```text
 EnsureHelper()
@@ -284,40 +278,39 @@ WatchNetworkChanges()
 RestoreSystemNetwork()
 ```
 
-平台模块返回结构化错误，UI 不直接解析系统命令输出。
+Platform modules return structured errors; the UI does not parse raw system command output.
 
-## 5. 数据通路
+## 5. Data path
 
 ### 5.1 Pod IP / Service IP
 
-1. 应用向 Pod IP 或 ClusterIP 发起连接。
-2. 系统路由将数据包送入 KubeLoop 的 TUN。
-3. sing-box 根据动态生成的 IP-CIDR 规则选择 `KUBERNETES` outbound。
-4. sing-box 将 TCP/UDP 会话发送到本地 SOCKS5 桥。
-5. SOCKS5 桥把 TCP 和 UDP 都封装进可靠的多路复用流。
-6. 流量通过 API Server port-forward 到 Gateway。
-7. Gateway 在集群内连接真实目标。
-8. 返回流量沿原通道和 sing-box TUN 返回应用。
+1. An app connects to a Pod IP or ClusterIP.
+2. The system route sends packets into the KubeLoop TUN.
+3. sing-box selects the `KUBERNETES` outbound from dynamically generated IP-CIDR rules.
+4. sing-box sends the TCP/UDP session to the local SOCKS5 bridge.
+5. The SOCKS5 bridge multiplexes TCP and UDP onto a reliable stream.
+6. Traffic reaches the Gateway through API Server port-forward.
+7. The Gateway dials the real target in-cluster.
+8. Return traffic follows the same path back through sing-box TUN to the app.
 
-使用 sing-box 网络栈的好处：
+Benefits of the sing-box network stack:
 
-- 集群 Gateway 不需要网络管理权限；
-- 不依赖集群 CNI 的回程路由能力；
-- 本机真实 IP 不会泄漏到 Pod 网络；
-- TCP/UDP 的错误和超时可以正确返回给本地应用。
+- The cluster Gateway needs no network-admin privileges;
+- No dependency on CNI return-path behavior;
+- The laptop’s real IP is not leaked into the Pod network;
+- TCP/UDP errors and timeouts return correctly to local apps.
 
 ### 5.2 DNS
 
-客户端使用 split DNS，只接管：
+The client uses split DNS and only takes over:
 
-- `cluster.local`；
-- `svc.cluster.local`；
-- 用户显式配置的集群域。
+- `cluster.local`;
+- `svc.cluster.local`;
+- User-configured cluster domains.
 
-查询通过现有隧道转发到 kube-system 中的 CoreDNS Service。其他域名继续使用用户原来的
-DNS，不受 KubeLoop 影响。
+Queries are forwarded through the existing tunnel to the kube-system CoreDNS Service. All other names keep using the user’s original DNS.
 
-短名称如 `my-service` 存在 Namespace 语义，首版采用当前 Namespace 生成搜索域：
+Short names such as `my-service` are namespace-sensitive. MVP builds a search list from the current Namespace:
 
 ```text
 <namespace>.svc.cluster.local
@@ -325,68 +318,67 @@ svc.cluster.local
 cluster.local
 ```
 
-UI 需要明确展示当前 DNS Namespace。
+The UI must clearly show the current DNS Namespace.
 
-## 6. 集群网络发现
+## 6. Cluster network discovery
 
-### 6.1 Pod 网络
+### 6.1 Pod network
 
-优先读取 Node：
+Prefer Node fields:
 
-- `spec.podCIDR`；
-- `spec.podCIDRs`（双栈）。
+- `spec.podCIDR`;
+- `spec.podCIDRs` (dual-stack).
 
-如果 CNI 不写 Node PodCIDR，则回退为读取现有 Pod IP 并安装精确路由。UI 会提示这种模式
-无法自动覆盖尚未创建的新 Pod。
+If the CNI does not populate Node PodCIDR, fall back to reading existing Pod IPs and installing precise routes. The UI should warn that this mode cannot automatically cover Pods that do not exist yet.
 
-### 6.2 Service 网络
+### 6.2 Service network
 
-Kubernetes API 通常不直接暴露 Service CIDR。首版采用两级策略：
+The Kubernetes API often does not expose Service CIDR directly. MVP uses a two-level strategy:
 
-1. 获取所有 Service 的 `clusterIPs`，安装精确 `/32` 或 `/128` 路由；
-2. 监听 Service 变更并增量更新路由。
+1. Collect all Service `clusterIPs` and install precise `/32` or `/128` routes;
+2. Watch Service changes and update routes incrementally.
 
-如果用户或集群元数据提供 Service CIDR，则可以直接安装网段路由。
+If the user or cluster metadata provides a Service CIDR, install a range route instead.
 
-必须忽略：
+Must ignore:
 
-- Headless Service（`clusterIP: None`）；
-- ExternalName；
-- 空地址；
-- 用户明确排除的 Namespace。
+- Headless Services (`clusterIP: None`);
+- ExternalName;
+- Empty addresses;
+- Namespaces the user explicitly excludes.
 
-### 6.3 网段冲突
+### 6.3 CIDR conflicts
 
-连接前比较目标路由与本机：
+Before connect, compare target routes with local:
 
-- LAN 路由；
-- VPN 路由；
-- Docker/虚拟机网络；
-- 其他已连接集群路由。
+- LAN routes;
+- VPN routes;
+- Docker / VM networks;
+- Routes from other connected clusters.
 
-发现冲突时不应静默覆盖。UI 展示冲突双方、可能影响，并提供：
+Conflicts must not be overwritten silently. The UI shows both sides, likely impact, and offers:
 
-- 取消连接；
-- 只添加精确 Pod/Service IP 路由；
-- 用户确认后的强制优先路由。
+- Cancel connect;
+- Add only precise Pod/Service IP routes;
+- Force preferred routes after explicit user confirmation.
 
-## 7. 隧道协议
+## 7. Tunnel protocol
 
-协议运行在单个可靠字节流上，使用多路复用减少 port-forward 数量。
+The protocol runs on a single reliable byte stream and multiplexes sessions to reduce port-forward count.
 
-### 7.1 握手
+### 7.1 Handshake
 
-客户端发送：
+The client sends:
 
-- 协议版本；
-- 客户端版本；
-- 集群 Session ID；
-- 支持的能力：TCP、UDP、IPv6、DNS；
-- 最大帧长度。
+- Protocol version;
+- Client version;
+- Cluster session ID;
+- Capabilities: TCP, UDP, IPv6, DNS;
+- Max frame length.
 
-Gateway 返回协商后的能力和限制。不兼容时返回明确的升级信息。
+The Gateway returns negotiated capabilities and limits. Incompatible versions return a clear upgrade message.
 
-### 7.2 帧类型
+### 7.2 Frame types
 
 - `OPEN_TCP`
 - `TCP_DATA`
@@ -398,173 +390,211 @@ Gateway 返回协商后的能力和限制。不兼容时返回明确的升级信
 - `DNS_QUERY` / `DNS_RESPONSE`
 - `WINDOW_UPDATE`
 
-每个流包含独立 Stream ID。TCP 必须有流量控制，避免单个大下载阻塞全部连接。UDP 会话按
-源地址、目标地址和空闲时间管理。
+Each stream has an independent Stream ID. TCP must have flow control so one large download cannot stall everything. UDP sessions are keyed by source, destination, and idle timeout.
 
-协议负载不自行加密，因为底层经过 Kubernetes API Server 的 TLS 通道，但每个会话仍需
-随机令牌，防止 Gateway Pod 内其他进程复用监听端口。
+Payloads are not encrypted separately because the path already uses the API Server TLS channel, but each session still needs a random token so other processes inside the Gateway Pod cannot reuse the listen port.
 
-## 8. Kubernetes 权限
+## 8. Kubernetes permissions
 
-客户端至少需要：
+Before connect, the client probes capabilities with `SelfSubjectAccessReview` and degrades accordingly:
 
-- 读取 Node（用于 Pod CIDR）；
-- 读取/监听 Pod 和 Service；
-- 读取 Namespace；
-- 读取 Gateway Pod；
-- 对 Gateway Pod 创建 port-forward。
+| Capability | When missing |
+| --- | --- |
+| Gateway install (`kubeloop-system` Deployment) | Only look for a preinstalled Gateway; otherwise show copyable admin YAML |
+| Gateway `pods/portforward` | **Hard fail** (cannot build TUN) |
+| list nodes / kube-dns / ServiceCIDR sources | Overview allows manual Pod/Service CIDR and CoreDNS, persisted per Context |
+| Cluster-wide list pods/services | Degrade to visible Namespace list (one or many) |
+| Service update + EndpointSlice | Exchange disabled |
+| Service create + EndpointSlice | Preview disabled |
 
-Service Local Intercept 额外需要：
+### 8.0 Admin preinstall + minimal developer permissions
 
-- 更新目标 Service（清空/恢复 selector）；
-- 创建、更新、删除 EndpointSlice。
+The Gateway is **always** installed in `kubeloop-system` (not split per app Namespace). Developers at least need `get/list` and `pods/portforward` on the Gateway Pod.
 
-安装 Gateway 还需要在指定 Namespace 创建：
+A developer scoped to one app Namespace (for example `dev`) roughly needs:
 
-- Deployment；
-- ServiceAccount；
-- Role / RoleBinding。
+```yaml
+# Gateway path (cluster-scoped or kubeloop-system Role)
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list"]
+- apiGroups: [""]
+  resources: ["pods/portforward"]
+  verbs: ["create"]
+# App Namespace
+- apiGroups: [""]
+  resources: ["pods", "services"]
+  verbs: ["get", "list", "watch"]
+# Strongly recommended (otherwise fill CIDR/DNS manually on Overview)
+- apiGroups: [""]
+  resources: ["nodes"]
+  verbs: ["list"]
+- apiGroups: [""]
+  resources: ["services"]
+  resourceNames: ["kube-dns", "coredns"]
+  verbs: ["get"]
+  # Scope: kube-system
+# Exchange / Preview additionally need services update/create and endpointslices *
+```
 
-建议默认安装在 `kubeloop-system`。企业环境可以由管理员预装，普通开发者只保留发现和
-port-forward 权限；若启用 Intercept，还需 EndpointSlice 写权限。
+Hard client dependencies (connect):
 
-Gateway 本身不需要读取 Kubernetes API，因此默认 ServiceAccount 不授予额外权限。
+- Read the Gateway Pod;
+- Create port-forward to the Gateway Pod.
 
-### 8.1 Gateway 自动安装流程
+Automatic network discovery (fill Overview when present, else manual):
 
-1. 客户端检查 `kubeloop-system` Namespace；
-2. 使用 server-side apply 提交带版本标签的资源；
-3. 等待 Deployment Available；
-4. 校验镜像 digest、协议版本和健康状态；
-5. 建立 port-forward；
-6. 客户端升级时先判断协议兼容性，再决定是否滚动升级 Gateway。
+- Read Nodes (Pod CIDR);
+- Read kube-dns/coredns Service in `kube-system`;
+- Read ServiceCIDR sources (for example servicecidrs / kubeadm-config).
 
-自动安装必须是幂等的。客户端只管理带以下标识的资源：
+Inventory:
+
+- List/watch Pods and Services in allowed Namespaces.
+
+Service Local Intercept / Preview additionally need in the target Namespace:
+
+- Update or create Services;
+- Create, update, and delete EndpointSlices.
+
+Installing the Gateway also needs create rights for Deployment / ServiceAccount / Role / RoleBinding in `kubeloop-system`. Enterprises can preinstall; accounts without install rights reuse an existing Gateway.
+
+The Gateway itself does not need Kubernetes API access, so its default ServiceAccount gets no extra permissions.
+
+### 8.1 Gateway auto-install flow
+
+1. Client checks the `kubeloop-system` Namespace;
+2. Server-side apply version-labeled resources;
+3. Wait until the Deployment is Available;
+4. Verify image digest, protocol version, and health;
+5. Establish port-forward;
+6. On client upgrade, check protocol compatibility before rolling the Gateway.
+
+Install must be idempotent. The client only manages resources with:
 
 ```text
 app.kubernetes.io/managed-by: kube-loop
 app.kubernetes.io/part-of: kube-loop
 ```
 
-如果用户没有安装权限，UI 展示缺少的 RBAC 权限和可复制的管理员安装清单，但不会降级为
-执行外部命令。
+If the user lacks install rights, the UI shows missing RBAC and a copyable admin manifest, and never falls back to running external commands.
 
-卸载 Gateway 是独立的设置操作。断开连接不会删除 Gateway，以便下次快速连接。
+Uninstalling the Gateway is a separate Settings action. Disconnect does not delete the Gateway, so the next connect is fast.
 
-## 9. 安全设计
+## 9. Security design
 
-- kubeconfig 凭证只由 Core Service 在内存中读取，不传给 UI、Helper 或 Gateway；
-- 日志默认脱敏 token、证书和 kubeconfig 内容；
-- Gateway 不暴露 NodePort、LoadBalancer 或 Ingress；
-- Helper IPC 校验调用进程签名和用户身份；
-- Helper 只允许操作 KubeLoop 自己创建的接口、路由和 DNS 配置；
-- 网络配置写入恢复日志，应用异常退出后自动回滚；
-- Gateway 镜像固定 digest，并在 UI 中展示版本；
-- 支持管理员禁用任意目标访问，限制到集群 CIDR。
+- kubeconfig credentials are read only by Core Service in memory — never sent to UI, Helper, or Gateway;
+- Logs redact tokens, certificates, and kubeconfig content by default;
+- The Gateway is not published as NodePort, LoadBalancer, or Ingress;
+- Helper IPC verifies caller process signature and user identity;
+- Helper may only operate interfaces, routes, and DNS config created by KubeLoop;
+- Network changes are written to a recovery log and rolled back after abnormal exit;
+- Gateway images are pinned by digest and shown in the UI;
+- Admins can disable arbitrary-target access and limit routes to cluster CIDRs.
 
-## 10. 故障恢复
+## 10. Failure recovery
 
-客户端要处理：
+The client must handle:
 
-- 电脑睡眠与唤醒；
-- Wi-Fi 切换；
-- API Server 短暂断线；
-- Gateway 重建；
-- kubeconfig 凭证刷新；
-- 应用崩溃；
-- Helper 或 Core Service 版本不一致。
+- Sleep and wake;
+- Wi-Fi changes;
+- Brief API Server outages;
+- Gateway recreation;
+- kubeconfig credential refresh;
+- App crashes;
+- Helper or Core Service version mismatch.
 
-断线时先保留会话并指数退避重连。超过阈值后移除 TUN 路由，避免应用流量持续黑洞。
+On disconnect, keep the session and reconnect with exponential backoff first. After a threshold, remove TUN routes so application traffic does not black-hole forever.
 
-## 11. 可观测性
+## 11. Observability
 
-UI 中展示：
+The UI shows:
 
-- 当前阶段和连接时长；
-- Gateway 版本与延迟；
-- Pod/Service 路由数量；
-- TCP/UDP 活动连接；
-- 上下行字节数；
-- DNS 成功率和最近错误；
-- 重连次数。
+- Current phase and connection duration;
+- Gateway version and latency;
+- Pod/Service route counts;
+- Active TCP/UDP connections;
+- Upload/download bytes;
+- DNS success rate and recent errors;
+- Reconnect count.
 
-诊断包仅包含：
+Diagnostic bundles include only:
 
-- 脱敏后的客户端日志；
-- 网络路由快照；
-- 版本和平台信息；
-- Gateway 状态；
-- 权限检查结果。
+- Redacted client logs;
+- Network route snapshots;
+- Version and platform info;
+- Gateway status;
+- Permission check results.
 
-默认不包含流量内容、DNS 查询明细或 Kubernetes Secret。
+By default they exclude traffic payloads, DNS query details, and Kubernetes Secrets.
 
-## 12. 版本里程碑
+## 12. Milestones
 
-### M0：交互原型
+### M0: Interaction prototype
 
-- 首页、集群选择、连接状态、网络与日志页面；
-- 使用模拟数据验证产品流程；
-- 确定品牌、信息层级和错误体验。
+- Home, cluster selection, connection status, network and logs pages;
+- Validate product flow with mock data;
+- Settle brand, information hierarchy, and error UX.
 
-### M1：开发者预览版
+### M1: Developer preview
 
-- macOS arm64；
-- 单集群；
-- Pod/Service IPv4；
-- TCP、UDP 和 cluster.local DNS；
-- Gateway 自动安装；
-- 基础诊断和自动恢复。
+- macOS arm64;
+- Single cluster;
+- Pod/Service IPv4;
+- TCP, UDP, and cluster.local DNS;
+- Automatic Gateway install;
+- Basic diagnostics and auto-recovery.
 
-### M2：可试用版
+### M2: Trialable release
 
-- macOS amd64；
-- IPv6/双栈；
-- 系统托盘、开机启动、自动更新；
-- 企业预装 Gateway；
-- 性能和稳定性优化。
+- macOS amd64;
+- IPv6 / dual-stack;
+- System tray, launch-at-login, auto-update;
+- Enterprise preinstalled Gateway;
+- Performance and stability work.
 
-### M3：Windows
+### M3: Windows
 
-- Windows 10/11；
-- Wintun 与 Windows Service；
-- NRPT split DNS；
-- 与 macOS 共用协议和 Gateway。
+- Windows 10/11;
+- Wintun and Windows Service;
+- NRPT split DNS;
+- Shared protocol and Gateway with macOS.
 
-### M4：Linux
+### M4: Linux
 
-- 主流桌面发行版；
-- `/dev/net/tun`；
-- systemd-resolved；
-- deb/rpm/AppImage 分发评估。
+- Mainstream desktop distributions;
+- `/dev/net/tun`;
+- systemd-resolved;
+- Evaluate deb/rpm/AppImage distribution.
 
-多集群和规则路由放在三平台基础访问能力稳定之后。Service Local Intercept 见 §2.2。
+Multi-cluster and advanced rule routing come after the three platforms have stable basic access. Service Local Intercept is in §2.2.
 
-## 13. MVP 验收标准
+## 13. MVP acceptance criteria
 
-在一个标准 Kubernetes 集群中，用户可从桌面 UI：
+On a standard Kubernetes cluster, from the desktop UI a user can:
 
-1. 选择 Context 并完成连接；
-2. 用浏览器或本地应用访问 Pod IP；
-3. 访问 ClusterIP Service；
-4. 访问 `service.namespace.svc.cluster.local`；
-5. 断开后系统路由和 DNS 完整恢复；
-6. 应用被强制结束后，Helper 能清理残留配置；
-7. 整个过程不打开终端、不要求用户安装 kubectl、不暴露集群公网端口。
+1. Select a Context and complete connect;
+2. Reach a Pod IP from a browser or local app;
+3. Reach a ClusterIP Service;
+4. Reach `service.namespace.svc.cluster.local`;
+5. Fully restore system routes and DNS after disconnect;
+6. Have the Helper clean residual config if the app is force-quit;
+7. Do all of the above without a terminal, without installing kubectl, and without exposing the cluster on the public internet.
 
-性能初始目标：
+Initial performance targets:
 
-- 新建 TCP 连接额外延迟低于 30 ms（不含集群基础网络延迟）；
-- 单连接吞吐达到 100 Mbps；
-- 空闲常驻内存低于 150 MB；
-- 1000 条并发 TCP 连接下客户端保持可操作。
+- Extra TCP connect latency under 30 ms (excluding baseline cluster latency);
+- Single-connection throughput at least 100 Mbps;
+- Idle resident memory under 150 MB;
+- Client remains usable with 1000 concurrent TCP connections.
 
-## 14. 后续决策
+## 14. Open decisions
 
-以下问题不阻塞交互原型，但需要在 M1 开发前确认：
+These do not block the interaction prototype, but should be confirmed before M1 development:
 
-1. 是否需要兼容多个 kubeconfig 文件以及 `KUBECONFIG` 合并规则；
-2. macOS 正式版采用 Network Extension 还是独立 utun Helper；
-3. Gateway 镜像仓库和签名/供应链方案；
-4. 是否需要提供企业管理员离线安装清单；
-5. Service 数量很大时，使用精确路由还是要求管理员提供 Service CIDR；
-6. 客户端自动更新和代码签名渠道。
+1. Whether to support multiple kubeconfig files and `KUBECONFIG` merge rules;
+2. Whether macOS GA uses Network Extension or a standalone utun Helper;
+3. Gateway image registry and signing / supply-chain plan;
+4. Whether to ship an offline admin install manifest for enterprises;
+5. Whether large Service counts should use precise routes or require an admin-provided Service CIDR;
+6. Client auto-update and code-signing channels.
