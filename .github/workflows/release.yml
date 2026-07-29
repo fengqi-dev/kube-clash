@@ -237,13 +237,22 @@ jobs:
           cd dist
           sha256sum ./* > SHA256SUMS
 
-      - name: Create GitHub Release
+      - name: Publish GitHub Release assets
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" dist/* \
-            --repo "${GITHUB_REPOSITORY}" \
-            --verify-tag \
-            --generate-notes \
-            --title "KubeLoop ${GITHUB_REF_NAME}"
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            # Re-runs / rebuilt matrices: replace assets on the existing release.
+            gh release upload "${tag}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --clobber
+          else
+            gh release create "${tag}" dist/* \
+              --repo "${GITHUB_REPOSITORY}" \
+              --verify-tag \
+              --generate-notes \
+              --title "KubeLoop ${tag}"
+          fi
