@@ -12,8 +12,6 @@ KubeLoop 是一款桌面客户端：像连 VPN 一样连上 Kubernetes 集群，
 Pod IP、ClusterIP Service 和 `*.cluster.local`——不必再为每个服务做端口转发，也不用给
 每个应用配代理。
 
-> 早期体验版（M1）。连接编排、TUN 网络与特权 Helper 已可用；签名安装包仍在打磨。
-
 ---
 
 ## 你能得到什么
@@ -51,8 +49,13 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载
-   （或按下方说明自行构建）。
+1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载对应平台压缩包
+   （`kubeloop-darwin-*.tar.gz` / `kubeloop-windows-*.zip` / `kubeloop-linux-*.tar.gz`；
+   或按下方说明自行构建）。
+   - **macOS**：解压后打开 `KubeLoop.app`。若被 Gatekeeper 拦截，可右键 → **打开**，
+     或执行 `xattr -cr KubeLoop.app`。
+   - **Windows**：解压 zip。若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
+   - **Linux**：解压后直接运行。
 2. 确认本机 kubeconfig 能正常访问目标集群 API。
 3. 打开 KubeLoop，选择 **Context**，点击 **连接**。
 4. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；

@@ -12,9 +12,6 @@ KubeLoop is a desktop client that connects your laptop to a Kubernetes cluster
 like a VPN — so local apps can reach Pod IPs, ClusterIP Services, and
 `*.cluster.local` without port-forwards, proxy env vars, or per-app setup.
 
-> Early access (M1). Core connect / disconnect, TUN networking, and the
-> privileged helper are available; signed installers are still being polished.
-
 ---
 
 ## What you get
@@ -56,8 +53,14 @@ cluster. You do not need `kubectl` installed locally.
 
 ## Get started
 
-1. Download a build from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-   (or build from source — see below).
+1. Download a platform archive from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+   (`kubeloop-darwin-*.tar.gz`, `kubeloop-windows-*.zip`, or `kubeloop-linux-*.tar.gz`;
+   or build from source — see below).
+   - **macOS**: extract, then open `KubeLoop.app`. If Gatekeeper blocks it, right-click
+     → **Open**, or run `xattr -cr KubeLoop.app`.
+   - **Windows**: extract the zip. If SmartScreen appears, choose **More info** →
+     **Run anyway**.
+   - **Linux**: extract and run the binary.
 2. Ensure your machine can reach the cluster API with a normal kubeconfig.
 3. Open KubeLoop, choose a **Context**, click **Connect**.
 4. On first use, approve the **virtual network service** (privileged helper)
