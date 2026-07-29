@@ -120,6 +120,7 @@ export interface SessionState {
   services?: ServiceInfo[];
   events?: LogEvent[];
   coreVersion?: string;
+  kubernetesVersion?: string;
   connectedAt?: string;
   metrics?: Metrics;
   /** Bumps on Informer inventory changes only; not on metrics ticks. */

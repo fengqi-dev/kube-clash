@@ -612,6 +612,7 @@ export namespace session {
 	    connectedAt?: any;
 	    metrics?: singbox.Metrics;
 	    inventoryRevision: number;
+	    kubernetesVersion?: string;
 	    // Go type: time
 	    updatedAt: any;
 	
@@ -637,6 +638,7 @@ export namespace session {
 	        this.connectedAt = this.convertValues(source["connectedAt"], null);
 	        this.metrics = this.convertValues(source["metrics"], singbox.Metrics);
 	        this.inventoryRevision = source["inventoryRevision"];
+	        this.kubernetesVersion = source["kubernetesVersion"];
 	        this.updatedAt = this.convertValues(source["updatedAt"], null);
 	    }
 	

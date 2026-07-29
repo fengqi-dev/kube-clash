@@ -218,7 +218,11 @@ func (a *App) ProbeContext(contextName string) (cluster.ProbeResult, error) {
 	}
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
-	return a.provider.Probe(probeCtx, contextName), nil
+	result := a.provider.Probe(probeCtx, contextName)
+	if result.OK && result.Version != "" {
+		a.manager.SetKubernetesVersion(result.Version)
+	}
+	return result, nil
 }
 
 func (a *App) RememberSelection(contextName, namespace string) error {

@@ -60,13 +60,15 @@ type State struct {
 	// InventoryRevision increments only on Informer-driven inventory snapshots
 	// (pod/service/deployment add/update/delete). UI lists should key off this
 	// instead of UpdatedAt, which also advances on the metrics ticker.
-	InventoryRevision int64     `json:"inventoryRevision"`
-	UpdatedAt         time.Time `json:"updatedAt"`
+	InventoryRevision  int64     `json:"inventoryRevision"`
+	KubernetesVersion  string    `json:"kubernetesVersion,omitempty"`
+	UpdatedAt          time.Time `json:"updatedAt"`
 }
 
 type ClusterProvider interface {
 	Contexts() ([]cluster.ContextInfo, error)
 	Namespaces(context.Context, string) ([]string, error)
+	ServerVersion(context.Context, string) (string, error)
 	ListServices(context.Context, string, string) ([]cluster.ServiceInfo, error)
 	ListPods(context.Context, string, string) ([]cluster.PodInfo, error)
 	Discover(context.Context, string, []string) (cluster.Discovery, error)
@@ -203,6 +205,22 @@ func (m *Manager) State() State {
 	return m.state
 }
 
+// SetKubernetesVersion records the API server version for the sidebar/overview.
+func (m *Manager) SetKubernetesVersion(version string) {
+	if version == "" {
+		return
+	}
+	m.mu.Lock()
+	if m.state.KubernetesVersion == version {
+		m.mu.Unlock()
+		return
+	}
+	next := m.state
+	next.KubernetesVersion = version
+	m.mu.Unlock()
+	m.publish(next)
+}
+
 func (m *Manager) Subscribe(listener func(State)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -246,9 +264,13 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		close(done)
 	}()
 
+	prev := m.State()
 	state := State{
 		Phase: PhaseChecking, Context: request.Context, Namespace: request.Namespace,
 		Message: "正在检查 Kubernetes 访问权限", CoreVersion: singbox.Version,
+		// Keep the last probed version so the Overview subtitle does not flash
+		// back to the cluster name while ServerVersion is re-fetched.
+		KubernetesVersion: prev.KubernetesVersion,
 	}
 	m.publish(state)
 	m.AppendLog("INFO", fmt.Sprintf("connecting to context %s", request.Context))
@@ -260,7 +282,15 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	state.Capabilities = &caps
 	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
+	if version, versionErr := m.provider.ServerVersion(ctx, request.Context); versionErr == nil {
+		state.KubernetesVersion = version
+	}
 	m.publish(state)
+	if state.KubernetesVersion != "" {
+		m.AppendLog("INFO", "kubernetes "+state.KubernetesVersion)
+	} else {
+		m.AppendLog("INFO", "kubernetes version unavailable")
+	}
 	for _, issue := range caps.Issues {
 		m.AppendLog("INFO", issue)
 	}
@@ -380,7 +410,12 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		case <-ctx.Done():
 			m.clearRecentConnections()
 			m.publish(State{
-				Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version,
+				Phase:             PhaseIdle,
+				Message:           "未连接",
+				CoreVersion:       singbox.Version,
+				KubernetesVersion: state.KubernetesVersion,
+				Context:           state.Context,
+				Namespace:         state.Namespace,
 			})
 			m.AppendLog("INFO", "disconnected")
 			return
@@ -577,7 +612,14 @@ func (m *Manager) disconnect(clearConnected bool) error {
 	cancel, done := m.cancel, m.done
 	m.mu.RUnlock()
 	if cancel == nil {
-		m.publish(State{Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version})
+		m.publish(State{
+			Phase:             PhaseIdle,
+			Message:           "未连接",
+			CoreVersion:       singbox.Version,
+			KubernetesVersion: state.KubernetesVersion,
+			Context:           state.Context,
+			Namespace:         state.Namespace,
+		})
 		if clearConnected {
 			m.markDisconnected(state.Context, state.Namespace)
 		}

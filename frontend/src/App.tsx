@@ -50,7 +50,6 @@ function App() {
       <AppSidebar
         view={view}
         ready={ready}
-        coreVersion={session.coreVersion}
         updateAvailable={data.update.available}
         onNavigate={setView}
       />
@@ -126,6 +125,8 @@ function App() {
           )}
           {view === "settings" && (
             <SettingsView
+              ready={ready}
+              coreVersion={session.coreVersion}
               update={data.update}
               checking={updateBusy}
               onCheck={() => void checkForUpdates()}

@@ -86,7 +86,11 @@ export function OverviewView({
               {contextName || t("overview.noContext")}
             </div>
             <div className="mt-0.5 truncate text-[11px] text-muted-foreground">
-              {clusterName || t("overview.noCluster")}
+              {session.kubernetesVersion
+                ? t("overview.kubernetesVersion", { version: session.kubernetesVersion })
+                : clusterName && clusterName !== contextName
+                  ? clusterName
+                  : t("overview.noCluster")}
             </div>
           </div>
           <Button type="button" variant="outline" size="sm" onClick={onManageClusters}>

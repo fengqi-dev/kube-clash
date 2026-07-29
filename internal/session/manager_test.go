@@ -25,6 +25,9 @@ type fakeProvider struct {
 }
 
 func (f *fakeProvider) Contexts() ([]cluster.ContextInfo, error) { return nil, nil }
+func (f *fakeProvider) ServerVersion(context.Context, string) (string, error) {
+	return "v1.29.0-fake", nil
+}
 func (f *fakeProvider) Namespaces(context.Context, string) ([]string, error) {
 	return []string{"default"}, nil
 }

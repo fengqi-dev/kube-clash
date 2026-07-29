@@ -7,12 +7,14 @@ import {
   Loader2,
   RefreshCw,
   Shield,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { PageShell } from "@/components/shared/page-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import {
@@ -24,14 +26,19 @@ import {
 } from "@/components/ui/select";
 import { useTheme, type ThemePreference } from "@/hooks/use-theme";
 import { useI18n, type Language } from "@/i18n";
+import { cn } from "@/lib/utils";
 import type { HelperStatus, UpdateInfo } from "@/types";
 
 export function SettingsView({
+  ready,
+  coreVersion,
   update,
   checking,
   onCheck,
   onOpen,
 }: {
+  ready: boolean;
+  coreVersion?: string;
   update: UpdateInfo;
   checking: boolean;
   onCheck(): void;
@@ -162,21 +169,46 @@ export function SettingsView({
         <CardContent className="flex items-start justify-between gap-6 p-5">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <Shield size={15} className="text-muted-foreground" />
-              <h3 className="text-[13px] font-semibold">{t("settings.helperTitle")}</h3>
+              <ShieldCheck size={15} className="text-muted-foreground" />
+              <h3 className="text-[13px] font-semibold">{t("settings.networkRuntimeTitle")}</h3>
             </div>
             <p className="mt-1 text-[11px] text-muted-foreground">
-              {t("settings.helperDescription")}
+              {t("settings.networkRuntimeDescription")}
             </p>
-            <div className="mt-3 text-[12px] font-medium">{helperLabel}</div>
-            {helper?.version ? (
-              <div className="mt-1 font-mono text-[10px] text-muted-foreground">
-                {t("settings.helperVersion", { version: helper.version })}
+
+            <div className="mt-4 space-y-2.5">
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t("settings.coreTitle")}
+                </span>
+                <span className="font-mono text-[12px] text-foreground">
+                  {coreVersion || t("settings.coreUnknown")}
+                </span>
+                <Badge
+                  variant="secondary"
+                  className={cn(
+                    "rounded-md px-1.5 py-0 text-[10px] font-medium",
+                    ready && "bg-success/15 text-success",
+                  )}
+                >
+                  {ready ? t("core.running") : t("core.onDemand")}
+                </Badge>
               </div>
-            ) : null}
-            {helper?.error ? (
-              <p className="mt-2 text-[11px] text-muted-foreground">{helper.error}</p>
-            ) : null}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  {t("settings.helperTitle")}
+                </span>
+                <span className="text-[12px] font-medium">{helperLabel}</span>
+                {helper?.version ? (
+                  <span className="font-mono text-[10px] text-muted-foreground">
+                    {t("settings.helperVersion", { version: helper.version })}
+                  </span>
+                ) : null}
+              </div>
+              {helper?.error ? (
+                <p className="text-[11px] text-muted-foreground">{helper.error}</p>
+              ) : null}
+            </div>
           </div>
           <div className="flex shrink-0 flex-col gap-2">
             <Button
