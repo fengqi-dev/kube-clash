@@ -1,4 +1,4 @@
-module github.com/fengqi-dev/kube-clash
+module github.com/fengqi-dev/kube-loop
 
 go 1.26.0
 
@@ -53,6 +53,7 @@ require (
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
 	github.com/pkg/browser v0.0.0-20240102092130-5ac0b6a4141c // indirect
 	github.com/pkg/errors v0.9.1 // indirect
+	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/rivo/uniseg v0.4.7 // indirect
 	github.com/samber/lo v1.53.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect

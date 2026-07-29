@@ -88,12 +88,19 @@ jobs:
         run: go test -tags webkit2_41 ./...
 
       - name: Run race detector
-        run: go test -race ./internal/gateway ./internal/mihomo ./internal/session ./internal/socksbridge ./internal/tunnel
+        run: go test -race ./internal/gateway ./internal/singbox ./internal/session ./internal/socksbridge ./internal/tunnel
 
       - name: Build Gateway binaries
         shell: bash
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-            go build -trimpath -o /tmp/kube-clash-gateway-amd64 ./cmd/kube-clash-gateway
+            go build -trimpath -o /tmp/kubeloop-gateway-amd64 ./cmd/kubeloop-gateway
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-            go build -trimpath -o /tmp/kube-clash-gateway-arm64 ./cmd/kube-clash-gateway
+            go build -trimpath -o /tmp/kubeloop-gateway-arm64 ./cmd/kubeloop-gateway
+
+      - name: Cross-compile sing-box package
+        shell: bash
+        run: |
+          for pair in darwin/amd64 darwin/arm64 linux/amd64 linux/arm64 windows/amd64 windows/arm64; do
+            GOOS=${pair%/*} GOARCH=${pair#*/} go build ./internal/singbox
+          done

@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-clash/internal/cluster"
-	"github.com/fengqi-dev/kube-clash/internal/mihomo"
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"golang.org/x/net/proxy"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 )
 
 func TestMinikubeSessionConnectsSOCKSDataPath(t *testing.T) {
-	if os.Getenv("KUBE_CLASH_MINIKUBE_TEST") != "1" {
-		t.Skip("set KUBE_CLASH_MINIKUBE_TEST=1 to run against the local minikube context")
+	if os.Getenv("KUBELOOP_MINIKUBE_TEST") != "1" {
+		t.Skip("set KUBELOOP_MINIKUBE_TEST=1 to run against the local minikube context")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
@@ -28,7 +28,7 @@ func TestMinikubeSessionConnectsSOCKSDataPath(t *testing.T) {
 	manager := NewManager(
 		provider,
 		WithCore(core),
-		WithGatewayImage("kube-clash-gateway:dev"),
+		WithGatewayImage("kube-loop-gateway:dev"),
 	)
 	connected := make(chan State, 1)
 	failed := make(chan State, 1)
@@ -97,7 +97,7 @@ func (r *recordingCore) Start(
 	_ cluster.Discovery,
 	bridgeAddress string,
 	_ string,
-) (mihomo.RunningCore, error) {
+) (singbox.RunningCore, error) {
 	r.bridgeAddress = bridgeAddress
 	return r.process, nil
 }
@@ -108,8 +108,8 @@ type recordingProcess struct {
 
 func (r *recordingProcess) Done() <-chan struct{} { return r.done }
 func (r *recordingProcess) Err() error            { return nil }
-func (r *recordingProcess) Snapshot(context.Context) (mihomo.Metrics, error) {
-	return mihomo.Metrics{}, nil
+func (r *recordingProcess) Snapshot(context.Context) (singbox.Metrics, error) {
+	return singbox.Metrics{Connections: []singbox.Connection{}}, nil
 }
 func (r *recordingProcess) Close() error {
 	select {

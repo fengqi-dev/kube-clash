@@ -3,7 +3,7 @@ package cluster
 import "testing"
 
 func TestGatewayDeploymentIsUnprivileged(t *testing.T) {
-	deployment := gatewayDeployment("kube-clash-gateway:test")
+	deployment := gatewayDeployment("kube-loop-gateway:test")
 	pod := deployment.Spec.Template.Spec
 	if pod.AutomountServiceAccountToken == nil || *pod.AutomountServiceAccountToken {
 		t.Fatal("service account token must not be mounted")
@@ -20,7 +20,7 @@ func TestGatewayDeploymentIsUnprivileged(t *testing.T) {
 }
 
 func TestGatewayLatestImageIsAlwaysPulled(t *testing.T) {
-	deployment := gatewayDeployment("ghcr.io/fengqi-dev/kube-clash/gateway:latest")
+	deployment := gatewayDeployment("ghcr.io/fengqi-dev/kube-loop/gateway:latest")
 	container := deployment.Spec.Template.Spec.Containers[0]
 	if container.ImagePullPolicy != "Always" {
 		t.Fatalf("latest Gateway image pull policy = %q, want Always", container.ImagePullPolicy)

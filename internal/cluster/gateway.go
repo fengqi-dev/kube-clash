@@ -23,15 +23,15 @@ import (
 )
 
 const (
-	GatewayNamespace = "kube-clash-system"
-	GatewayName      = "kube-clash-gateway"
+	GatewayNamespace = "kubeloop-system"
+	GatewayName      = "kubeloop-gateway"
 	GatewayPort      = 1080
 )
 
 var gatewayLabels = map[string]string{
 	"app.kubernetes.io/name":       GatewayName,
-	"app.kubernetes.io/part-of":    "kube-clash",
-	"app.kubernetes.io/managed-by": "kube-clash",
+	"app.kubernetes.io/part-of":    "kubeloop",
+	"app.kubernetes.io/managed-by": "kubeloop",
 }
 
 type Forwarder struct {
@@ -107,8 +107,8 @@ func ensureDeployment(ctx context.Context, client kubernetes.Interface, image st
 	case err != nil:
 		return fmt.Errorf("get gateway deployment: %w", err)
 	default:
-		if existing.Labels["app.kubernetes.io/managed-by"] != "kube-clash" {
-			return errors.New("gateway deployment exists but is not managed by kube-clash")
+		if existing.Labels["app.kubernetes.io/managed-by"] != "kubeloop" {
+			return errors.New("gateway deployment exists but is not managed by kube-loop")
 		}
 		expected.ResourceVersion = existing.ResourceVersion
 		_, err = client.AppsV1().Deployments(GatewayNamespace).Update(

@@ -7,12 +7,13 @@ import (
 	"io"
 	"net"
 	"os"
+	"sort"
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-clash/internal/cluster"
-	"github.com/fengqi-dev/kube-clash/internal/mihomo"
-	"github.com/fengqi-dev/kube-clash/internal/socksbridge"
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 )
 
 type Phase string
@@ -27,7 +28,7 @@ const (
 	PhaseError       Phase = "error"
 )
 
-const DefaultGatewayImage = "ghcr.io/fengqi-dev/kube-clash/gateway:latest"
+const DefaultGatewayImage = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
 
 type Request struct {
 	Context   string
@@ -43,7 +44,7 @@ type State struct {
 	Discovery   *cluster.Discovery `json:"discovery,omitempty"`
 	CoreVersion string             `json:"coreVersion,omitempty"`
 	ConnectedAt *time.Time         `json:"connectedAt,omitempty"`
-	Metrics     *mihomo.Metrics    `json:"metrics,omitempty"`
+	Metrics     *singbox.Metrics   `json:"metrics,omitempty"`
 	UpdatedAt   time.Time          `json:"updatedAt"`
 }
 
@@ -51,6 +52,11 @@ type ClusterProvider interface {
 	Contexts() ([]cluster.ContextInfo, error)
 	Namespaces(context.Context, string) ([]string, error)
 	Discover(context.Context, string) (cluster.Discovery, error)
+	WatchInventory(
+		context.Context,
+		string,
+		func(cluster.InventorySnapshot),
+	) (io.Closer, error)
 	EnsureGateway(context.Context, string, string) (string, error)
 	StartPortForward(context.Context, string, string, uint16) (cluster.PortForward, error)
 }
@@ -61,7 +67,7 @@ type Core interface {
 		cluster.Discovery,
 		string,
 		string,
-	) (mihomo.RunningCore, error)
+	) (singbox.RunningCore, error)
 }
 
 type BridgeFactory func(context.Context, string) (net.Listener, error)
@@ -80,6 +86,17 @@ func WithGatewayImage(image string) Option {
 	return func(manager *Manager) { manager.gatewayImage = image }
 }
 
+type recentConnection struct {
+	connection singbox.Connection
+	lastSeen   time.Time
+}
+
+type connectionTraffic struct {
+	upload   int64
+	download int64
+	at       time.Time
+}
+
 type Manager struct {
 	provider      ClusterProvider
 	core          Core
@@ -91,20 +108,32 @@ type Manager struct {
 	cancel    context.CancelFunc
 	done      chan struct{}
 	listeners []func(State)
+
+	recentConnections map[string]recentConnection
+	lastTraffic       map[string]connectionTraffic
 }
 
+// Keep short-lived TUN connections visible between core snapshot polls.
+const connectionRetainFor = 30 * time.Second
+
+// Bound retained/published rows so Wails/React are not flooded by bursty TUN flows.
+const (
+	maxRetainedConnections  = 500
+	maxPublishedConnections = 100
+)
+
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
-	image := os.Getenv("KUBE_CLASH_GATEWAY_IMAGE")
+	image := os.Getenv("KUBELOOP_GATEWAY_IMAGE")
 	if image == "" {
 		image = DefaultGatewayImage
 	}
 	manager := &Manager{
 		provider:      provider,
-		core:          &mihomo.Runtime{},
+		core:          &singbox.Runtime{},
 		bridgeFactory: socksbridge.Listen,
 		gatewayImage:  image,
 		state: State{
-			Phase: PhaseIdle, Message: "未连接", CoreVersion: mihomo.Version, UpdatedAt: time.Now(),
+			Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
 		},
 	}
 	for _, option := range options {
@@ -172,7 +201,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 
 	state := State{
 		Phase: PhaseChecking, Context: request.Context, Namespace: request.Namespace,
-		Message: "正在检查 Kubernetes 访问权限", CoreVersion: mihomo.Version,
+		Message: "正在检查 Kubernetes 访问权限", CoreVersion: singbox.Version,
 	}
 	m.publish(state)
 
@@ -214,11 +243,11 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	resources = append(resources, bridge)
 
 	state.Phase = PhaseStarting
-	state.Message = "正在安装并启动 Mihomo TUN"
+	state.Message = "正在安装并启动 sing-box TUN"
 	m.publish(state)
 	core, err := m.core.Start(ctx, discovery, bridge.Addr().String(), request.Namespace)
 	if err != nil {
-		m.fail(ctx, state, "无法启动 Mihomo TUN", err)
+		m.fail(ctx, state, "无法启动 sing-box TUN", err)
 		return
 	}
 	resources = append(resources, core)
@@ -227,43 +256,202 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Phase = PhaseConnected
 	state.Message = "已连接，可访问 Pod、Service 和集群 DNS"
 	state.ConnectedAt = &connectedAt
-	state.Metrics = &mihomo.Metrics{}
+	state.Metrics = &singbox.Metrics{}
 	m.publish(state)
 
-	ticker := time.NewTicker(time.Second)
+	inventory, err := m.provider.WatchInventory(ctx, request.Context, func(snap cluster.InventorySnapshot) {
+		m.applyInventory(snap)
+	})
+	if err != nil {
+		m.fail(ctx, state, "无法监听集群资源变化", err)
+		return
+	}
+	resources = append(resources, inventory)
+
+	ticker := time.NewTicker(singbox.DefaultMetricsInterval)
 	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
+			m.clearRecentConnections()
 			m.publish(State{
-				Phase: PhaseIdle, Message: "未连接", CoreVersion: mihomo.Version,
+				Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version,
 			})
 			return
 		case <-core.Done():
+			m.clearRecentConnections()
 			if ctx.Err() == nil {
 				err := core.Err()
 				if err == nil {
-					err = errors.New("mihomo stopped unexpectedly")
+					err = errors.New("sing-box stopped unexpectedly")
 				}
-				m.fail(ctx, state, "Mihomo TUN 意外退出", err)
+				m.fail(ctx, state, "sing-box TUN 意外退出", err)
 			}
 			return
 		case <-ticker.C:
 			metrics, err := core.Snapshot(ctx)
-			if err == nil {
-				state.Metrics = &metrics
-				m.publish(state)
+			if err != nil {
+				continue
 			}
+			retained := m.retainMetrics(metrics)
+			m.mu.RLock()
+			next := m.state
+			m.mu.RUnlock()
+			if next.Phase != PhaseConnected {
+				continue
+			}
+			next.Metrics = retained
+			m.publish(next)
 		}
 	}
 }
 
+func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
+	m.mu.Lock()
+	if m.state.Phase != PhaseConnected || m.state.Discovery == nil {
+		m.mu.Unlock()
+		return
+	}
+	next := m.state
+	discovery := *next.Discovery
+	discovery.Pods = snap.Pods
+	discovery.Services = snap.Services
+	discovery.Deployments = snap.Deployments
+	discovery.ServiceIPs = append([]string{}, snap.ServiceIPs...)
+	if snap.DNSServer != "" {
+		discovery.DNSServer = snap.DNSServer
+	}
+	next.Discovery = &discovery
+	m.mu.Unlock()
+	m.publish(next)
+}
+
+func (m *Manager) retainMetrics(metrics singbox.Metrics) *singbox.Metrics {
+	now := time.Now()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.recentConnections == nil {
+		m.recentConnections = make(map[string]recentConnection)
+	}
+	for _, connection := range metrics.Connections {
+		m.recentConnections[connection.ID] = recentConnection{
+			connection: connection,
+			lastSeen:   now,
+		}
+	}
+	for id, item := range m.recentConnections {
+		if now.Sub(item.lastSeen) > connectionRetainFor {
+			delete(m.recentConnections, id)
+		}
+	}
+	m.pruneRecentConnections(maxRetainedConnections)
+
+	if len(m.recentConnections) == 0 {
+		metrics.Connections = []singbox.Connection{}
+		m.lastTraffic = nil
+		return &metrics
+	}
+	live := make(map[string]singbox.Connection, len(metrics.Connections))
+	for _, connection := range metrics.Connections {
+		live[connection.ID] = connection
+	}
+	merged := make([]singbox.Connection, 0, len(m.recentConnections))
+	for id, item := range m.recentConnections {
+		if connection, ok := live[id]; ok {
+			merged = append(merged, connection)
+			continue
+		}
+		merged = append(merged, item.connection)
+	}
+	metrics.Connections = limitConnections(
+		m.annotateSpeeds(merged, now),
+		maxPublishedConnections,
+	)
+	return &metrics
+}
+
+func (m *Manager) pruneRecentConnections(limit int) {
+	if limit <= 0 || len(m.recentConnections) <= limit {
+		return
+	}
+	items := make([]recentConnection, 0, len(m.recentConnections))
+	for _, item := range m.recentConnections {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return connectionRank(items[i].connection) > connectionRank(items[j].connection)
+	})
+	m.recentConnections = make(map[string]recentConnection, limit)
+	for _, item := range items[:limit] {
+		m.recentConnections[item.connection.ID] = item
+	}
+}
+
+func limitConnections(connections []singbox.Connection, limit int) []singbox.Connection {
+	if limit <= 0 || len(connections) <= limit {
+		return connections
+	}
+	sort.SliceStable(connections, func(i, j int) bool {
+		return connectionRank(connections[i]) > connectionRank(connections[j])
+	})
+	return connections[:limit]
+}
+
+func connectionRank(connection singbox.Connection) int64 {
+	return connection.DownloadSpeed + connection.UploadSpeed + connection.Download + connection.Upload
+}
+
+func (m *Manager) annotateSpeeds(connections []singbox.Connection, now time.Time) []singbox.Connection {
+	if m.lastTraffic == nil {
+		m.lastTraffic = make(map[string]connectionTraffic)
+	}
+	next := make(map[string]connectionTraffic, len(connections))
+	for i := range connections {
+		connection := &connections[i]
+		next[connection.ID] = connectionTraffic{
+			upload:   connection.Upload,
+			download: connection.Download,
+			at:       now,
+		}
+		previous, ok := m.lastTraffic[connection.ID]
+		if !ok {
+			continue
+		}
+		elapsed := now.Sub(previous.at).Seconds()
+		if elapsed <= 0 {
+			continue
+		}
+		if connection.DownloadSpeed == 0 {
+			speed := int64(float64(connection.Download-previous.download) / elapsed)
+			if speed > 0 {
+				connection.DownloadSpeed = speed
+			}
+		}
+		if connection.UploadSpeed == 0 {
+			speed := int64(float64(connection.Upload-previous.upload) / elapsed)
+			if speed > 0 {
+				connection.UploadSpeed = speed
+			}
+		}
+	}
+	m.lastTraffic = next
+	return connections
+}
+
+func (m *Manager) clearRecentConnections() {
+	m.mu.Lock()
+	m.recentConnections = nil
+	m.lastTraffic = nil
+	m.mu.Unlock()
+}
+
 func (m *Manager) Disconnect() error {
+	m.clearRecentConnections()
 	m.mu.RLock()
 	cancel, done := m.cancel, m.done
 	m.mu.RUnlock()
 	if cancel == nil {
-		m.publish(State{Phase: PhaseIdle, Message: "未连接", CoreVersion: mihomo.Version})
+		m.publish(State{Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version})
 		return nil
 	}
 	cancel()
