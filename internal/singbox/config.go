@@ -235,8 +235,10 @@ func validatePort(port int, label string) error {
 func errLabel(label string) string { return label }
 
 // ResolverDomains returns split-DNS match domains routed to the local dns-in.
+// "svc" is included so macOS /etc/resolver/svc catches short names like
+// static-web.default.svc (search domains alone query the primary resolver).
 func ResolverDomains(namespace string, hosts ...HostAlias) []string {
-	domains := []string{"cluster.local", "svc.cluster.local"}
+	domains := []string{"cluster.local", "svc.cluster.local", "svc"}
 	if namespace != "" {
 		domains = append(domains, namespace+".svc.cluster.local")
 	}

@@ -91,13 +91,24 @@ func TestGenerateRejectsInvalidDiscovery(t *testing.T) {
 
 func TestResolverDomains(t *testing.T) {
 	got := ResolverDomains("demo")
-	want := []string{"cluster.local", "svc.cluster.local", "demo.svc.cluster.local"}
+	want := []string{"cluster.local", "svc.cluster.local", "svc", "demo.svc.cluster.local"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ResolverDomains = %v, want %v", got, want)
 	}
 	withHosts := ResolverDomains("demo", HostAlias{Domain: "app.dev", IP: "10.96.0.50"})
 	if !strings.Contains(strings.Join(withHosts, ","), "app.dev") {
 		t.Fatalf("ResolverDomains missing host alias: %v", withHosts)
+	}
+}
+
+func TestDNSSearchCandidates(t *testing.T) {
+	got := dnsSearchCandidates("static-web.default.svc.", SearchDomains("default"))
+	joined := strings.Join(got, ",")
+	if !strings.Contains(joined, "static-web.default.svc.cluster.local.") {
+		t.Fatalf("missing FQDN candidate: %v", got)
+	}
+	if got[0] != "static-web.default.svc." {
+		t.Fatalf("original name should be first: %v", got)
 	}
 }
 

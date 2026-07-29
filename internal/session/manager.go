@@ -585,7 +585,7 @@ func (m *Manager) disconnect(clearConnected bool) error {
 			m.markDisconnected(state.Context, state.Namespace)
 		}
 		return nil
-	case <-time.After(8 * time.Second):
+	case <-time.After(25 * time.Second):
 		return errors.New("timed out cleaning up the active connection")
 	}
 }
