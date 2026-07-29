@@ -19,13 +19,36 @@ import (
 )
 
 func ensureEchoNamespace(ctx context.Context, client kubernetes.Interface) error {
-	_, err := client.CoreV1().Namespaces().Get(ctx, echoNamespace, metav1.GetOptions{})
-	if apierrors.IsNotFound(err) {
-		_, err = client.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
-			ObjectMeta: metav1.ObjectMeta{Name: echoNamespace},
-		}, metav1.CreateOptions{})
+	deadline := time.Now().Add(2 * time.Minute)
+	for {
+		ns, err := client.CoreV1().Namespaces().Get(ctx, echoNamespace, metav1.GetOptions{})
+		switch {
+		case err == nil && ns.DeletionTimestamp == nil:
+			return nil
+		case err == nil:
+			// Namespace is terminating; wait until it is gone before recreating.
+		case apierrors.IsNotFound(err):
+			_, createErr := client.CoreV1().Namespaces().Create(ctx, &corev1.Namespace{
+				ObjectMeta: metav1.ObjectMeta{Name: echoNamespace},
+			}, metav1.CreateOptions{})
+			if createErr == nil || apierrors.IsAlreadyExists(createErr) {
+				return nil
+			}
+			if !apierrors.IsForbidden(createErr) || !strings.Contains(createErr.Error(), "being terminated") {
+				return createErr
+			}
+		default:
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("namespace %s still terminating", echoNamespace)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+		}
 	}
-	return err
 }
 
 func ensureEchoWorkload(ctx context.Context, client kubernetes.Interface) error {
