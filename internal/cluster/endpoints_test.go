@@ -6,6 +6,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 )
@@ -22,6 +23,13 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 				}},
 			},
 		},
+		&corev1.Endpoints{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
+			Subsets: []corev1.EndpointSubset{{
+				Addresses: []corev1.EndpointAddress{{IP: "10.244.0.5"}},
+				Ports:     []corev1.EndpointPort{{Name: "http", Port: 8080, Protocol: corev1.ProtocolTCP}},
+			}},
+		},
 		&discoveryv1.EndpointSlice{
 			ObjectMeta: metav1.ObjectMeta{
 				Name:      "api-xyz",
@@ -33,7 +41,7 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 		},
 	)
 
-	snapshot := ServiceInterceptSnapshot{
+	snapshot := &ServiceInterceptSnapshot{
 		Namespace: "default",
 		Service:   "api",
 		Selector:  map[string]string{"app": "api"},
@@ -56,6 +64,17 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 	if service.Annotations[annotationInterceptID] != "id-1" {
 		t.Fatalf("missing intercept annotation")
 	}
+	if !snapshot.HasEndpoints || len(snapshot.EndpointsSubsets) != 1 {
+		t.Fatalf("endpoints not snapshotted: %#v", snapshot)
+	}
+	if snapshot.EndpointsSubsets[0].Addresses[0].IP != "10.244.0.5" {
+		t.Fatalf("unexpected snapshotted address: %#v", snapshot.EndpointsSubsets)
+	}
+
+	_, err = client.CoreV1().Endpoints("default").Get(context.Background(), "api", metav1.GetOptions{})
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("classic endpoints should be deleted, got %v", err)
+	}
 
 	slices, err := client.DiscoveryV1().EndpointSlices("default").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
@@ -71,7 +90,7 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 		t.Fatalf("listen port=%d", *slices.Items[0].Ports[0].Port)
 	}
 
-	if err := restoreServiceIntercept(context.Background(), client, snapshot); err != nil {
+	if err := restoreServiceIntercept(context.Background(), client, *snapshot); err != nil {
 		t.Fatal(err)
 	}
 	service, err = client.CoreV1().Services("default").Get(context.Background(), "api", metav1.GetOptions{})
@@ -83,6 +102,21 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 	}
 	if service.Annotations[annotationInterceptID] != "" {
 		t.Fatalf("intercept annotation still present")
+	}
+
+	endpoints, err := client.CoreV1().Endpoints("default").Get(context.Background(), "api", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(endpoints.Subsets) != 1 || endpoints.Subsets[0].Addresses[0].IP != "10.244.0.5" {
+		t.Fatalf("endpoints not restored: %#v", endpoints.Subsets)
+	}
+
+	_, err = client.DiscoveryV1().EndpointSlices("default").Get(
+		context.Background(), managedEndpointSliceName("api"), metav1.GetOptions{},
+	)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("managed slice should be deleted, got %v", err)
 	}
 }
 

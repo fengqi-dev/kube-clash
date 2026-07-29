@@ -49,7 +49,7 @@ type Info struct {
 
 type ClusterAPI interface {
 	GetService(context.Context, string, string, string) (*corev1.Service, error)
-	ApplyServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot, string) error
+	ApplyServiceIntercept(context.Context, string, *cluster.ServiceInterceptSnapshot, string) error
 	RestoreServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot) error
 	CreatePreviewService(context.Context, string, cluster.PreviewServiceSnapshot, string) (*corev1.Service, error)
 	DeletePreviewService(context.Context, string, cluster.PreviewServiceSnapshot) error
@@ -208,7 +208,7 @@ func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, er
 	for k, v := range service.Spec.Selector {
 		selector[k] = v
 	}
-	snapshot := cluster.ServiceInterceptSnapshot{
+	snapshot := &cluster.ServiceInterceptSnapshot{
 		Namespace: mapping.Namespace,
 		Service:   mapping.Service,
 		Selector:  selector,
@@ -228,7 +228,7 @@ func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, er
 		Locals:    locals,
 	}
 	m.mu.Lock()
-	m.byID[interceptID] = &runtimeIntercept{info: info, snapshot: snapshot, portKeys: portKeys}
+	m.byID[interceptID] = &runtimeIntercept{info: info, snapshot: *snapshot, portKeys: portKeys}
 	m.byKey[key] = interceptID
 	m.mu.Unlock()
 	return info, nil

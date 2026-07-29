@@ -82,7 +82,7 @@ type ClusterProvider interface {
 	StartPortForward(context.Context, string, string, uint16) (cluster.PortForward, error)
 	StartPodPortForward(context.Context, string, string, string, uint16, uint16) (cluster.PortForward, error)
 	ResolveServiceBackend(context.Context, string, string, string, int32) (string, uint16, error)
-	ApplyServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot, string) error
+	ApplyServiceIntercept(context.Context, string, *cluster.ServiceInterceptSnapshot, string) error
 	RestoreServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot) error
 	CreatePreviewService(context.Context, string, cluster.PreviewServiceSnapshot, string) (*corev1.Service, error)
 	DeletePreviewService(context.Context, string, cluster.PreviewServiceSnapshot) error

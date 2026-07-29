@@ -52,10 +52,10 @@ It solves Kubernetes development networking problems, not public proxy problems:
 While connected, users can replace an existing ClusterIP Service with a local process:
 
 1. The desktop registers a unique listen port (TCP/UDP) on the Gateway over the control channel;
-2. Clear the Service selector and write a managed EndpointSlice pointing at Gateway Pod IP:listenPort;
+2. Clear the Service selector, snapshot and delete classic Endpoints, replace EndpointSlices with a managed slice pointing at Gateway Pod IP:listenPort;
 3. Cluster clients keep the original ClusterIP / DNS; kube-proxy sends traffic to the Gateway;
 4. The Gateway emits `InboundReady`; the desktop `Accept`s and forwards to `127.0.0.1` (or a configured local address);
-5. On stop or disconnect, restore the selector, delete the managed EndpointSlice, and unregister the Gateway listener.
+5. On stop or disconnect, restore the selector, recreate Endpoints from the snapshot, delete the managed EndpointSlice, and unregister the Gateway listener.
 
 The Gateway still has no kube API access, no privilege, and no hostNetwork. EndpointSlice changes are performed with the desktop kubeconfig.
 
@@ -434,7 +434,7 @@ A developer scoped to one app Namespace (for example `dev`) roughly needs:
   resourceNames: ["kube-dns", "coredns"]
   verbs: ["get"]
   # Scope: kube-system
-# Exchange / Preview additionally need services update/create and endpointslices *
+# Exchange / Preview additionally need services update/create, endpointslices *, and endpoints *
 ```
 
 Hard client dependencies (connect):
@@ -455,7 +455,8 @@ Inventory:
 Service Local Intercept / Preview additionally need in the target Namespace:
 
 - Update or create Services;
-- Create, update, and delete EndpointSlices.
+- Create, update, and delete EndpointSlices;
+- Get, delete, and create Endpoints (Exchange snapshots and restores classic Endpoints).
 
 Installing the Gateway also needs create rights for Deployment / ServiceAccount / Role / RoleBinding in `kubeloop-system`. Enterprises can preinstall; accounts without install rights reuse an existing Gateway.
 
