@@ -33,7 +33,7 @@ Pod IP、ClusterIP Service 和 `*.cluster.local`——不必再为每个服务�
 | --- | --- |
 | 浏览器打开集群内 Service / 调内部 API | 连接后使用 ClusterIP 或 `*.svc.cluster.local` |
 | 直接访问真实 Pod IP 做排查 | 连接后本机已路由 Pod 网段 |
-| 不想敲 `kubectl port-forward` | 网络页的 **端口转发**（未开 TUN 也能用） |
+| 不想敲 `kubectl port-forward` | 网络页的 **端口转发** |
 | 用本机进程顶替某个集群 Service | **流量交换**（Service Local Intercept）：集群侧仍用原 ClusterIP / DNS，流量落到本机 |
 | 把本机进程临时暴露成新的 ClusterIP | **预览**：创建临时 Service 指向本地应用 |
 
