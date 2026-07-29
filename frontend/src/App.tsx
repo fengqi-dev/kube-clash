@@ -1,24 +1,21 @@
 import { AppHeader } from "@/components/layout/app-header";
 import { AppSidebar } from "@/components/layout/app-sidebar";
 import { StatusBar } from "@/components/layout/status-bar";
+import { ClustersView } from "@/components/clusters/clusters-view";
 import { ConnectionsView } from "@/components/connections/connections-view";
 import { LogsView } from "@/components/logs/logs-view";
-import { InterceptPanel } from "@/components/network/intercept-panel";
 import { NetworkView } from "@/components/network/network-view";
-import { PortForwardPanel } from "@/components/network/portfwd-panel";
-import { PreviewPanel } from "@/components/network/preview-panel";
+import { WorkloadView } from "@/components/network/workload-view";
 import { OverviewView } from "@/components/overview/overview-view";
 import { SettingsView } from "@/components/settings/settings-view";
-import { PageShell } from "@/components/shared/page-shell";
 import { useSession } from "@/hooks/use-session";
-import { useI18n } from "@/i18n";
+import { cn } from "@/lib/utils";
+import { useMemo } from "react";
 
 function App() {
-  const { t } = useI18n();
   const {
     data,
     contextName,
-    namespace,
     view,
     setView,
     loading,
@@ -27,14 +24,25 @@ function App() {
     session,
     busy,
     ready,
-    discovery,
     currentContext,
-    setNamespace,
+    kubeconfigFiles,
     changeContext,
     toggleConnection,
+    connectContext,
+    reloadContexts,
+    addKubeconfig,
+    removeKubeconfig,
+    probeContext,
     checkForUpdates,
     openUpdatePage,
   } = useSession();
+
+  const scopedNamespaces = session.scopeNamespaces ?? [];
+  const inventoryNamespaces = useMemo(
+    () => (scopedNamespaces.length > 0 ? scopedNamespaces : data.namespaces),
+    [data.namespaces, scopedNamespaces],
+  );
+  const namespaceScoped = scopedNamespaces.length > 0;
 
   return (
     <div className="flex h-screen min-h-[580px] overflow-hidden bg-background text-foreground">
@@ -52,63 +60,62 @@ function App() {
           onOpenSettings={() => setView("settings")}
         />
 
-        <main className="min-h-0 flex-1 overflow-y-auto px-6 py-5">
+        <main
+          className={cn(
+            "min-h-0 flex-1 overflow-y-auto px-6 py-5",
+            view === "overview" && "scrollbar-none",
+          )}
+        >
           {view === "overview" && (
             <OverviewView
-              contexts={data.contexts}
-              namespaces={data.namespaces}
               contextName={contextName}
-              namespace={namespace}
               clusterName={currentContext?.cluster ?? ""}
               session={session}
-              discovery={discovery}
               loading={loading}
               error={uiError || session.error || ""}
               busy={busy}
               ready={ready}
-              onContextChange={(value) => void changeContext(value)}
-              onNamespaceChange={setNamespace}
               onToggle={() => void toggleConnection()}
+              onManageClusters={() => setView("clusters")}
+            />
+          )}
+          {view === "clusters" && (
+            <ClustersView
+              contexts={data.contexts}
+              files={kubeconfigFiles}
+              contextName={contextName}
+              session={session}
+              busy={busy}
+              ready={ready}
+              loading={loading}
+              onSelect={(value) => void changeContext(value)}
+              onConnect={(value) => void connectContext(value)}
+              onReload={reloadContexts}
+              onAddFile={addKubeconfig}
+              onRemoveFile={removeKubeconfig}
+              onProbe={probeContext}
             />
           )}
           {view === "connections" && (
             <ConnectionsView ready={ready} metrics={session.metrics} />
           )}
+          {view === "workload" && (
+            <WorkloadView
+              contextName={contextName}
+              namespaces={inventoryNamespaces}
+              namespaceScoped={namespaceScoped}
+              ready={ready}
+              session={session}
+            />
+          )}
           {view === "network" && (
-            <NetworkView discovery={discovery} ready={ready} />
-          )}
-          {view === "network-portfwd" && (
-            <PageShell
-              title={t("portfwd.title")}
-              description={t("portfwd.description")}
-            >
-              <PortForwardPanel
-                embedded
-                contextName={contextName}
-                namespace={namespace}
-              />
-            </PageShell>
-          )}
-          {view === "network-exchange" && (
-            <PageShell
-              title={t("intercept.title")}
-              description={t("intercept.description")}
-            >
-              <InterceptPanel
-                embedded
-                ready={ready}
-                contextName={contextName}
-                namespace={namespace}
-              />
-            </PageShell>
-          )}
-          {view === "network-preview" && (
-            <PageShell
-              title={t("preview.title")}
-              description={t("preview.description")}
-            >
-              <PreviewPanel embedded ready={ready} namespace={namespace} />
-            </PageShell>
+            <NetworkView
+              contextName={contextName}
+              namespaces={inventoryNamespaces}
+              namespaceScoped={namespaceScoped}
+              ready={ready}
+              session={session}
+            />
           )}
           {view === "logs" && (
             <LogsView session={session} error={uiError || session.error || ""} />
@@ -127,7 +134,6 @@ function App() {
           phase={session.phase}
           clusterName={currentContext?.cluster || session.context}
           contextName={session.context || contextName}
-          namespace={session.namespace || namespace}
           message={uiError || session.error || session.message}
         />
       </div>

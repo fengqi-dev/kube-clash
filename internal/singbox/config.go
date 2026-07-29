@@ -205,11 +205,24 @@ func validatePort(port int, label string) error {
 
 func errLabel(label string) string { return label }
 
-// ResolverDomains returns macOS /etc/resolver domains for split DNS.
+// ResolverDomains returns split-DNS match domains routed to the local dns-in.
 func ResolverDomains(namespace string) []string {
 	domains := []string{"cluster.local", "svc.cluster.local"}
 	if namespace != "" {
 		domains = append(domains, namespace+".svc.cluster.local")
 	}
 	return domains
+}
+
+// SearchDomains returns Kubernetes-style DNS search suffixes for short names
+// such as mysql, mysql.default, and mysql.default.svc.
+func SearchDomains(namespace string) []string {
+	if namespace == "" {
+		namespace = "default"
+	}
+	return []string{
+		namespace + ".svc.cluster.local",
+		"svc.cluster.local",
+		"cluster.local",
+	}
 }

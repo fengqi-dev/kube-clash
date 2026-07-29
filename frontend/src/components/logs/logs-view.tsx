@@ -15,29 +15,40 @@ export function LogsView({
   error: string;
 }) {
   const { locale, t } = useI18n();
-  const time = new Date(session.updatedAt).toLocaleTimeString(locale, { hour12: false });
-  const lines = [
-    { time, level: error ? ("ERROR" as const) : ("INFO" as const), text: error || t(phaseKeys[session.phase]) },
-    ...(session.discovery
-      ? [
-          {
-            time,
-            level: "INFO" as const,
-            text: t("logs.podCIDRsFound", { count: session.discovery.podCIDRs.length }),
-          },
-          {
-            time,
-            level: "INFO" as const,
-            text: t("logs.servicesFound", { count: session.discovery.serviceIPs.length }),
-          },
-          {
-            time,
-            level: "INFO" as const,
-            text: `CoreDNS ${session.discovery.dnsServer || t("network.notFound")}`,
-          },
-        ]
-      : []),
-  ];
+
+  const lines = (session.events ?? []).map((event) => ({
+    time: new Date(event.time).toLocaleTimeString(locale, { hour12: false }),
+    level: (event.level === "ERROR" ? "ERROR" : "INFO") as "INFO" | "ERROR",
+    text: event.message,
+  }));
+
+  if (lines.length === 0) {
+    const time = new Date(session.updatedAt).toLocaleTimeString(locale, { hour12: false });
+    lines.push({
+      time,
+      level: error ? "ERROR" : "INFO",
+      text: error || t(phaseKeys[session.phase]),
+    });
+    if (session.discovery) {
+      lines.push(
+        {
+          time,
+          level: "INFO",
+          text: t("logs.podCIDRsFound", { count: session.discovery.podCIDRs.length }),
+        },
+        {
+          time,
+          level: "INFO",
+          text: t("logs.servicesFound", { count: session.discovery.serviceIPs.length }),
+        },
+        {
+          time,
+          level: "INFO",
+          text: `CoreDNS ${session.discovery.dnsServer || t("network.notFound")}`,
+        },
+      );
+    }
+  }
 
   async function copyDiagnostics() {
     const payload = lines.map((line) => `${line.time} ${line.level} ${line.text}`).join("\n");
@@ -62,7 +73,7 @@ export function LogsView({
       <div className="overflow-hidden rounded-lg border bg-[var(--console)] font-mono text-[11px]">
         <ScrollArea className="h-[420px]">
           {lines.map((line, index) => (
-            <LogLine key={`${line.text}-${index}`} {...line} />
+            <LogLine key={`${line.time}-${line.text}-${index}`} {...line} />
           ))}
         </ScrollArea>
       </div>

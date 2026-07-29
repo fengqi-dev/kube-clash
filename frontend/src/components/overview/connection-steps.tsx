@@ -78,28 +78,24 @@ export function ConnectionSteps({ phase }: { phase: SessionState["phase"] }) {
                   ) : active ? (
                     <LoaderCircle size={14} strokeWidth={2.4} className="animate-spin" />
                   ) : (
-                    <span className="size-1.5 rounded-full bg-current" />
+                    <span className="text-[11px] font-semibold">{index + 1}</span>
                   )}
                 </div>
               </div>
-
-              <div
-                className={cn(
-                  "mt-3 text-[11px] font-medium transition-colors duration-300",
-                  active && "text-primary",
-                  done && "text-foreground",
-                  !done && !active && "text-muted-foreground",
-                )}
-              >
-                {step.label}
-              </div>
-              <div
-                className={cn(
-                  "mt-0.5 hidden text-[9px] transition-colors duration-300 xl:block",
-                  active ? "text-primary/80" : "text-muted-foreground",
-                )}
-              >
-                {step.detail}
+              <div className="mt-2.5 text-center">
+                <div
+                  className={cn(
+                    "text-[12px] font-medium tracking-tight",
+                    active && "text-primary",
+                    done && "text-foreground",
+                    !done && !active && "text-muted-foreground",
+                  )}
+                >
+                  {step.label}
+                </div>
+                <div className="mt-0.5 text-[10px] leading-snug text-muted-foreground">
+                  {step.detail}
+                </div>
               </div>
             </div>
           );

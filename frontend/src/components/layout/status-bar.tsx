@@ -8,13 +8,11 @@ export function StatusBar({
   phase,
   clusterName,
   contextName,
-  namespace,
   message,
 }: {
   phase: SessionState["phase"];
   clusterName?: string;
   contextName: string;
-  namespace: string;
   message?: string;
 }) {
   const { t } = useI18n();
@@ -22,10 +20,7 @@ export function StatusBar({
   const working = isBusyPhase(phase);
   const error = phase === "error";
   const cluster = clusterName || contextName;
-  const detail =
-    ready || working || error
-      ? [cluster, namespace].filter(Boolean).join(" · ")
-      : cluster || t("statusbar.noCluster");
+  const detail = cluster || t("statusbar.noCluster");
 
   return (
     <footer className="flex h-8 shrink-0 items-center justify-end gap-3 border-t border-border bg-muted/30 px-4 text-[11px]">

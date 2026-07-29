@@ -19,6 +19,7 @@ import (
 
 type App struct {
 	ctx         context.Context
+	provider    *cluster.Provider
 	manager     *session.Manager
 	store       *store.Store
 	updater     *update.Checker
@@ -29,12 +30,13 @@ type App struct {
 }
 
 type BootstrapData struct {
-	Contexts           []cluster.ContextInfo `json:"contexts"`
-	Namespaces         []string              `json:"namespaces"`
-	Session            session.State         `json:"session"`
-	Update             update.Info           `json:"update"`
-	PreferredContext   string                `json:"preferredContext,omitempty"`
-	PreferredNamespace string                `json:"preferredNamespace,omitempty"`
+	Contexts           []cluster.ContextInfo        `json:"contexts"`
+	Namespaces         []string                     `json:"namespaces"`
+	Session            session.State                `json:"session"`
+	Update             update.Info                  `json:"update"`
+	PreferredContext   string                       `json:"preferredContext,omitempty"`
+	PreferredNamespace string                       `json:"preferredNamespace,omitempty"`
+	KubeconfigFiles    []cluster.KubeconfigFileInfo `json:"kubeconfigFiles,omitempty"`
 }
 
 func NewApp() *App {
@@ -47,14 +49,18 @@ func NewApp() *App {
 		log.Printf("open state store: %v", err)
 		stateStore = nil
 	}
+	if stateStore != nil {
+		provider.SetExtraKubeconfigFiles(stateStore.KubeconfigFiles())
+	}
 	options := []session.Option{}
 	if stateStore != nil {
 		options = append(options, session.WithStore(stateStore))
 	}
 	return &App{
-		manager: session.NewManager(provider, options...),
-		store:   stateStore,
-		updater: &update.Checker{CurrentVersion: version},
+		provider: provider,
+		manager:  session.NewManager(provider, options...),
+		store:    stateStore,
+		updater:  &update.Checker{CurrentVersion: version},
 		updateState: update.Info{
 			CurrentVersion: version,
 			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
@@ -125,7 +131,93 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 		Update:             updateState,
 		PreferredContext:   preferredContext,
 		PreferredNamespace: preferredNamespace,
+		KubeconfigFiles:    a.provider.KubeconfigFiles(),
 	}, nil
+}
+
+func (a *App) ReloadContexts() (cluster.ClusterInventory, error) {
+	return a.provider.Inventory()
+}
+
+func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
+	if a.ctx == nil {
+		return cluster.ClusterInventory{}, errors.New("application is not ready")
+	}
+	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
+		Title: "Select kubeconfig",
+		Filters: []runtime.FileFilter{
+			{DisplayName: "Kubeconfig", Pattern: "*.yaml;*.yml;*.conf;*"},
+		},
+	})
+	if err != nil {
+		return cluster.ClusterInventory{}, err
+	}
+	if path == "" {
+		return a.provider.Inventory()
+	}
+	if err := cluster.ValidateKubeconfigFile(path); err != nil {
+		return cluster.ClusterInventory{}, err
+	}
+	if a.store != nil {
+		if err := a.store.AddKubeconfigFile(path); err != nil {
+			return cluster.ClusterInventory{}, err
+		}
+		a.provider.SetExtraKubeconfigFiles(a.store.KubeconfigFiles())
+	} else {
+		files := append(a.provider.ExtraKubeconfigFiles(), path)
+		a.provider.SetExtraKubeconfigFiles(files)
+	}
+	return a.provider.Inventory()
+}
+
+func (a *App) RemoveKubeconfig(path string) (cluster.ClusterInventory, error) {
+	if path == "" {
+		return cluster.ClusterInventory{}, errors.New("kubeconfig path is required")
+	}
+	state := a.manager.State()
+	if state.Phase == session.PhaseConnected ||
+		state.Phase == session.PhaseChecking ||
+		state.Phase == session.PhaseInstalling ||
+		state.Phase == session.PhaseDiscovering ||
+		state.Phase == session.PhaseStarting {
+		contexts, err := a.provider.Contexts()
+		if err != nil {
+			return cluster.ClusterInventory{}, err
+		}
+		for _, item := range contexts {
+			if item.Name == state.Context && item.Source == path {
+				return cluster.ClusterInventory{}, errors.New("disconnect before removing the active kubeconfig")
+			}
+		}
+	}
+	if a.store != nil {
+		if err := a.store.RemoveKubeconfigFile(path); err != nil {
+			return cluster.ClusterInventory{}, err
+		}
+		a.provider.SetExtraKubeconfigFiles(a.store.KubeconfigFiles())
+	} else {
+		remaining := make([]string, 0)
+		for _, existing := range a.provider.ExtraKubeconfigFiles() {
+			if existing != path {
+				remaining = append(remaining, existing)
+			}
+		}
+		a.provider.SetExtraKubeconfigFiles(remaining)
+	}
+	return a.provider.Inventory()
+}
+
+func (a *App) ProbeContext(contextName string) (cluster.ProbeResult, error) {
+	if contextName == "" {
+		return cluster.ProbeResult{}, errors.New("context is required")
+	}
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+	return a.provider.Probe(probeCtx, contextName), nil
 }
 
 func (a *App) RememberSelection(contextName, namespace string) error {
@@ -171,6 +263,18 @@ func (a *App) Connect(contextName, namespace string) error {
 
 func (a *App) Disconnect() error {
 	return a.manager.Disconnect()
+}
+
+func (a *App) GetManualNetwork(contextName string) cluster.ManualNetwork {
+	return a.manager.ManualNetwork(contextName)
+}
+
+func (a *App) SetManualNetwork(contextName string, network cluster.ManualNetwork) error {
+	return a.manager.SetManualNetwork(contextName, network)
+}
+
+func (a *App) GatewayInstallManifest() string {
+	return a.manager.GatewayInstallManifest()
 }
 
 func (a *App) StartIntercept(mapping intercept.Mapping) (intercept.Info, error) {

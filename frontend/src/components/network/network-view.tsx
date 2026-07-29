@@ -1,17 +1,23 @@
+import { useEffect, useMemo, useState } from "react";
+import { Circle, Network } from "lucide-react";
+import { toast } from "sonner";
+import { backend } from "@/backend";
 import {
-  Boxes,
-  CheckCircle2,
-  CircleDot,
-  Globe2,
-  Network,
-  RefreshCw,
-  Route,
-  type LucideIcon,
-} from "lucide-react";
+  ActionIconButton,
+  exchangeIcon,
+  portForwardIcon,
+  previewIcon,
+} from "@/components/network/action-icons";
+import { ActiveSessions } from "@/components/network/active-sessions";
+import { ExchangeDialog } from "@/components/network/exchange-dialog";
+import { PortForwardDialog } from "@/components/network/portfwd-dialog";
+import { PreviewCreateDialog } from "@/components/network/preview-create-dialog";
+import {
+  ALL_NAMESPACES,
+  ResourceToolbar,
+} from "@/components/network/resource-toolbar";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
   Table,
   TableBody,
@@ -21,171 +27,297 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
-import type { SessionState } from "@/types";
+import { cn } from "@/lib/utils";
+import type { ServiceInfo, SessionState } from "@/types";
+
+type ServiceBinding = "exchange" | "preview" | "portForward" | "idle";
 
 export function NetworkView({
-  discovery,
+  contextName,
+  namespaces,
+  namespaceScoped = false,
   ready,
+  session,
 }: {
-  discovery?: SessionState["discovery"];
+  contextName: string;
+  namespaces: string[];
+  namespaceScoped?: boolean;
   ready: boolean;
+  session: SessionState;
 }) {
   const { t } = useI18n();
+  const [namespace, setNamespace] = useState(
+    namespaceScoped && namespaces[0] ? namespaces[0] : ALL_NAMESPACES,
+  );
+  const [query, setQuery] = useState("");
+  const [services, setServices] = useState<ServiceInfo[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [refreshKey, setRefreshKey] = useState(0);
+  const [pfOpen, setPfOpen] = useState(false);
+  const [exOpen, setExOpen] = useState(false);
+  const [previewOpen, setPreviewOpen] = useState(false);
+  const [selected, setSelected] = useState<ServiceInfo | null>(null);
+  const [bindings, setBindings] = useState<Record<string, ServiceBinding>>({});
+
+  const connected = session.phase === "connected";
+  const liveServices = session.services;
+  const canExchange = session.capabilities?.serviceWrite !== false;
+  const canPreview = session.capabilities?.serviceCreate !== false;
+
+  useEffect(() => {
+    if (!namespaceScoped) return;
+    if (namespaces.length === 0) return;
+    if (namespace === ALL_NAMESPACES || !namespaces.includes(namespace)) {
+      setNamespace(namespaces[0]);
+    }
+  }, [namespace, namespaceScoped, namespaces]);
+
+  async function reload() {
+    if (!contextName) {
+      setServices([]);
+      return;
+    }
+    if (connected && liveServices) {
+      setServices(liveServices);
+      return;
+    }
+    setLoading(true);
+    try {
+      setServices(await backend.listServices(contextName, namespace));
+    } catch (error) {
+      toast.error(t("network.loadFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (connected && liveServices) {
+      setServices(liveServices);
+      return;
+    }
+    void reload();
+  }, [connected, contextName, liveServices, namespace]);
+
+  useEffect(() => {
+    let active = true;
+    Promise.all([
+      backend.listPortForwards(),
+      ready ? backend.listIntercepts() : Promise.resolve([]),
+      ready ? backend.listPreviews() : Promise.resolve([]),
+    ])
+      .then(([forwards, exchanges, previews]) => {
+        if (!active) return;
+        const next: Record<string, ServiceBinding> = {};
+        for (const item of forwards) {
+          if (item.kind !== "service") continue;
+          next[`${item.namespace}/${item.name}`] = "portForward";
+        }
+        for (const item of exchanges) {
+          next[`${item.namespace}/${item.service}`] = "exchange";
+        }
+        for (const item of previews) {
+          next[`${item.namespace}/${item.service}`] = "preview";
+        }
+        setBindings(next);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [ready, refreshKey, session.updatedAt]);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return services.filter((item) => {
+      if (namespace !== ALL_NAMESPACES && item.namespace !== namespace) {
+        return false;
+      }
+      if (!q) return true;
+      return (
+        item.name.toLowerCase().includes(q) ||
+        item.namespace.toLowerCase().includes(q) ||
+        item.clusterIP.toLowerCase().includes(q)
+      );
+    });
+  }, [namespace, query, services]);
+
+  function bumpActive() {
+    setRefreshKey((value) => value + 1);
+  }
 
   return (
-    <PageShell
-      title={t("network.title")}
-      description={t("network.description")}
-      action={
-        <Button type="button" variant="outline" size="sm">
-          <RefreshCw data-icon="inline-start" />
-          {t("network.rediscover")}
-        </Button>
-      }
-    >
-      <div className="mb-5 grid grid-cols-3 gap-3">
-        <InfoCard
-          icon={Boxes}
-          label="Pods"
-          value={discovery?.pods ?? 0}
-          detail={discovery?.podCIDRs[0] ?? t("network.notFound")}
-        />
-        <InfoCard
-          icon={Route}
-          label="Services"
-          value={discovery?.services ?? 0}
-          detail={t("network.clusterIPs", {
-            count: discovery?.serviceIPs.length ?? 0,
-          })}
-        />
-        <InfoCard
-          icon={Globe2}
-          label="Deployments"
-          value={discovery?.deployments ?? 0}
-          detail={t("overview.liveInventory")}
-        />
-      </div>
-      {!discovery ? (
+    <PageShell title={t("network.title")} description={t("network.description")}>
+      <ResourceToolbar
+        namespaces={namespaces}
+        namespace={namespace}
+        onNamespaceChange={setNamespace}
+        query={query}
+        onQueryChange={setQuery}
+        searchPlaceholder={t("network.searchServices")}
+        count={filtered.length}
+        loading={loading}
+        disabled={!contextName}
+        onRefresh={() => void reload()}
+        allowAllNamespaces={!namespaceScoped}
+        actions={
+          <ActionIconButton
+            label={
+              canPreview ? t("network.createPreview") : t("network.previewDenied")
+            }
+            icon={previewIcon}
+            disabled={!ready || !canPreview}
+            onClick={() => setPreviewOpen(true)}
+          />
+        }
+      />
+
+      {!contextName ? (
         <EmptyState
           icon={Network}
           title={t("network.waitingTitle")}
-          detail={t("network.waitingDetail")}
+          detail={t("network.selectContext")}
         />
       ) : (
         <div className="overflow-hidden rounded-lg border bg-card">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40 hover:bg-muted/40">
-                <TableHead className="text-[10px] tracking-wide uppercase">
-                  {t("network.type")}
-                </TableHead>
-                <TableHead className="text-[10px] tracking-wide uppercase">
-                  {t("network.target")}
-                </TableHead>
-                <TableHead className="text-[10px] tracking-wide uppercase">
-                  {t("network.source")}
-                </TableHead>
-                <TableHead className="text-[10px] tracking-wide uppercase">
-                  {t("network.status")}
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {discovery.podCIDRs.map((item) => (
-                <NetworkRow
-                  key={item}
-                  type="Pod CIDR"
-                  target={item}
-                  source="Node spec.podCIDR"
-                  ready={ready}
-                />
-              ))}
-              <NetworkRow
-                type="Pods"
-                target={String(discovery.pods ?? 0)}
-                source="Informer core/v1.Pod"
-                ready={ready}
-              />
-              <NetworkRow
-                type="Services"
-                target={String(discovery.services ?? 0)}
-                source="Informer core/v1.Service"
-                ready={ready}
-              />
-              <NetworkRow
-                type="Deployments"
-                target={String(discovery.deployments ?? 0)}
-                source="Informer apps/v1.Deployment"
-                ready={ready}
-              />
-              {discovery.dnsServer && (
-                <NetworkRow
-                  type="CoreDNS"
-                  target={discovery.dnsServer}
-                  source="kube-system/kube-dns"
-                  ready={ready}
-                />
-              )}
-            </TableBody>
-          </Table>
+          {!loading && filtered.length === 0 ? (
+            <div className="px-4 py-12 text-center text-[12px] text-muted-foreground">
+              {t("network.emptyServices")}
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                    {t("network.colName")}
+                  </TableHead>
+                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                    {t("network.colNamespace")}
+                  </TableHead>
+                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                    {t("network.colClusterIP")}
+                  </TableHead>
+                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                    {t("network.colPorts")}
+                  </TableHead>
+                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                    {t("network.colStatus")}
+                  </TableHead>
+                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
+                    {t("network.actions")}
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filtered.map((item) => (
+                  <TableRow key={`${item.namespace}/${item.name}`}>
+                    <TableCell className="font-medium">{item.name}</TableCell>
+                    <TableCell className="text-primary">{item.namespace}</TableCell>
+                    <TableCell className="font-mono text-[12px]">{item.clusterIP}</TableCell>
+                    <TableCell className="font-mono text-[12px] text-muted-foreground">
+                      <div className="flex flex-col gap-0.5">
+                        {item.ports.map((port) => (
+                          <span key={`${port.protocol}-${port.port}-${port.name || ""}`}>
+                            {port.protocol}/{port.port}
+                          </span>
+                        ))}
+                      </div>
+                    </TableCell>
+                    <TableCell>
+                      <ServiceStatus
+                        binding={bindings[`${item.namespace}/${item.name}`] ?? "idle"}
+                      />
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-1">
+                        <ActionIconButton
+                          label={t("network.tabPortForward")}
+                          icon={portForwardIcon}
+                          disabled={!ready}
+                          onClick={() => {
+                            setSelected(item);
+                            setPfOpen(true);
+                          }}
+                        />
+                        <ActionIconButton
+                          label={
+                            canExchange
+                              ? t("network.tabExchange")
+                              : t("network.exchangeDenied")
+                          }
+                          icon={exchangeIcon}
+                          disabled={!ready || !canExchange}
+                          onClick={() => {
+                            setSelected(item);
+                            setExOpen(true);
+                          }}
+                        />
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </div>
       )}
+
+      <ActiveSessions
+        ready={ready}
+        refreshKey={refreshKey}
+        sessionUpdatedAt={session.updatedAt}
+      />
+
+      <PortForwardDialog
+        open={pfOpen}
+        onOpenChange={setPfOpen}
+        contextName={contextName}
+        kind="service"
+        target={selected}
+        onStarted={bumpActive}
+      />
+      <ExchangeDialog
+        open={exOpen}
+        onOpenChange={setExOpen}
+        service={selected}
+        onStarted={bumpActive}
+      />
+      <PreviewCreateDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        namespaces={namespaces}
+        defaultNamespace={namespace}
+        onStarted={bumpActive}
+      />
     </PageShell>
   );
 }
 
-function InfoCard({
-  icon: Icon,
-  label,
-  value,
-  detail,
-}: {
-  icon: LucideIcon;
-  label: string;
-  value: number;
-  detail: string;
-}) {
-  return (
-    <Card className="gap-0 py-0 shadow-none">
-      <CardContent className="p-4">
-        <div className="flex items-center justify-between">
-          <span className="text-[10px] font-medium text-muted-foreground">{label}</span>
-          <Icon size={15} className="text-muted-foreground" />
-        </div>
-        <div className="mt-3 text-2xl font-semibold tracking-tight">{value}</div>
-        <div className="mt-1 truncate font-mono text-[10px] text-muted-foreground">{detail}</div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function NetworkRow({
-  type,
-  target,
-  source,
-  ready,
-}: {
-  type: string;
-  target: string;
-  source: string;
-  ready: boolean;
-}) {
+function ServiceStatus({ binding }: { binding: ServiceBinding }) {
   const { t } = useI18n();
+  const label =
+    binding === "exchange"
+      ? t("network.tabExchange")
+      : binding === "preview"
+        ? t("network.tabPreview")
+        : binding === "portForward"
+          ? t("network.tabPortForward")
+          : t("network.idle");
+  const ok = binding !== "idle";
   return (
-    <TableRow>
-      <TableCell className="font-medium">{type}</TableCell>
-      <TableCell className="font-mono text-primary">{target}</TableCell>
-      <TableCell className="text-muted-foreground">{source}</TableCell>
-      <TableCell>
-        <span
-          className={`inline-flex items-center gap-1.5 ${
-            ready ? "text-success" : "text-muted-foreground"
-          }`}
-        >
-          {ready ? <CheckCircle2 size={13} /> : <CircleDot size={13} />}
-          {ready ? t("network.applied") : t("network.discovered")}
-        </span>
-      </TableCell>
-    </TableRow>
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 text-[12px]",
+        ok ? "text-success" : "text-muted-foreground",
+      )}
+    >
+      <Circle
+        size={8}
+        className={ok ? "fill-success text-success" : "fill-muted-foreground/50 text-muted-foreground/50"}
+      />
+      {label}
+    </span>
   );
 }

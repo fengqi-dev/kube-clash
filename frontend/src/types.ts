@@ -10,7 +10,29 @@ export type Phase =
 export interface ContextInfo {
   name: string;
   cluster: string;
+  server?: string;
+  user?: string;
+  namespace?: string;
+  source?: string;
   current: boolean;
+}
+
+export interface KubeconfigFileInfo {
+  path: string;
+  default: boolean;
+}
+
+export interface ClusterInventory {
+  contexts: ContextInfo[];
+  files: KubeconfigFileInfo[];
+}
+
+export interface ProbeResult {
+  context: string;
+  ok: boolean;
+  version?: string;
+  latencyMs?: number;
+  error?: string;
 }
 
 export interface Discovery {
@@ -21,6 +43,23 @@ export interface Discovery {
   pods: number;
   services: number;
   deployments: number;
+}
+
+export interface Capabilities {
+  gatewayInstall: boolean;
+  gatewayPortForward: boolean;
+  clusterNodes: boolean;
+  inventoryCluster: boolean;
+  serviceWrite: boolean;
+  serviceCreate: boolean;
+  scopeNamespaces?: string[];
+  issues?: string[];
+}
+
+export interface ManualNetwork {
+  podCIDRs?: string[];
+  serviceCIDRs?: string[];
+  dnsServer?: string;
 }
 
 export interface Connection {
@@ -56,6 +95,12 @@ export interface UpdateInfo {
   error?: string;
 }
 
+export interface LogEvent {
+  time: string;
+  level: string;
+  message: string;
+}
+
 export interface SessionState {
   phase: Phase;
   context: string;
@@ -63,6 +108,12 @@ export interface SessionState {
   message: string;
   error?: string;
   discovery?: Discovery;
+  capabilities?: Capabilities;
+  scopeNamespaces?: string[];
+  gatewayManifest?: string;
+  pods?: PodInfo[];
+  services?: ServiceInfo[];
+  events?: LogEvent[];
   coreVersion?: string;
   connectedAt?: string;
   metrics?: Metrics;
@@ -76,6 +127,7 @@ export interface BootstrapData {
   update: UpdateInfo;
   preferredContext?: string;
   preferredNamespace?: string;
+  kubeconfigFiles?: KubeconfigFileInfo[];
 }
 
 export interface HelperStatus {
@@ -155,6 +207,8 @@ export interface PodInfo {
   namespace: string;
   phase: string;
   ready: boolean;
+  ip?: string;
+  node?: string;
   ports: PodPortInfo[];
 }
 

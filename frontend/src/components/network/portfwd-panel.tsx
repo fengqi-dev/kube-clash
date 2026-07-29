@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Cable, Copy, Loader2, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
+import { NamespaceSelect } from "@/components/network/namespace-select";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -28,11 +29,15 @@ type Kind = "pod" | "service";
 
 export function PortForwardPanel({
   contextName,
+  namespaces,
   namespace,
+  onNamespaceChange,
   embedded = false,
 }: {
   contextName: string;
+  namespaces: string[];
   namespace: string;
+  onNamespaceChange(value: string): void;
   embedded?: boolean;
 }) {
   const { t } = useI18n();
@@ -218,7 +223,13 @@ export function PortForwardPanel({
         </div>
       )}
 
-      <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[0.8fr_1.2fr_1fr_0.9fr_auto]">
+      <div className="grid gap-3 border-b px-4 py-4 md:grid-cols-[0.9fr_0.8fr_1.2fr_1fr_0.9fr_auto]">
+        <NamespaceSelect
+          value={namespace}
+          namespaces={namespaces}
+          disabled={!enabled}
+          onChange={onNamespaceChange}
+        />
         <Field label={t("portfwd.kind")}>
           <Select
             value={kind}

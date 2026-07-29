@@ -20,17 +20,26 @@ type State struct {
 
 // UIState remembers the last selected context in the desktop UI.
 type UIState struct {
-	LastContext   string `json:"lastContext,omitempty"`
-	LastNamespace string `json:"lastNamespace,omitempty"`
+	LastContext     string   `json:"lastContext,omitempty"`
+	LastNamespace   string   `json:"lastNamespace,omitempty"`
+	KubeconfigFiles []string `json:"kubeconfigFiles,omitempty"` // absolute paths, user-added
 }
 
 // ClusterState stores restore intents for one kubeconfig context.
 type ClusterState struct {
-	Namespace    string            `json:"namespace,omitempty"`
-	Connected    bool              `json:"connected,omitempty"`
-	PortForwards []PortForwardSpec `json:"portForwards,omitempty"`
-	Exchanges    []ExchangeSpec    `json:"exchanges,omitempty"`
-	Previews     []PreviewSpec     `json:"previews,omitempty"`
+	Namespace     string            `json:"namespace,omitempty"`
+	Connected     bool              `json:"connected,omitempty"`
+	PortForwards  []PortForwardSpec `json:"portForwards,omitempty"`
+	Exchanges     []ExchangeSpec    `json:"exchanges,omitempty"`
+	Previews      []PreviewSpec     `json:"previews,omitempty"`
+	ManualNetwork *ManualNetwork    `json:"manualNetwork,omitempty"`
+}
+
+// ManualNetwork is user-supplied Pod/Service CIDR and CoreDNS when auto-discovery fails.
+type ManualNetwork struct {
+	PodCIDRs     []string `json:"podCIDRs,omitempty"`
+	ServiceCIDRs []string `json:"serviceCIDRs,omitempty"`
+	DNSServer    string   `json:"dnsServer,omitempty"`
 }
 
 // PortForwardSpec is a port-forward intent (not runtime listen state).
@@ -150,6 +159,56 @@ func (s *Store) SetUI(contextName, namespace string) error {
 	return s.saveLocked()
 }
 
+// KubeconfigFiles returns a copy of user-added kubeconfig paths.
+func (s *Store) KubeconfigFiles() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return cloneStrings(s.state.UI.KubeconfigFiles)
+}
+
+// AddKubeconfigFile appends an absolute kubeconfig path if not already present.
+func (s *Store) AddKubeconfigFile(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path, err := normalizeStorePath(path)
+	if err != nil {
+		return err
+	}
+	for _, existing := range s.state.UI.KubeconfigFiles {
+		if existing == path {
+			return nil
+		}
+	}
+	s.state.UI.KubeconfigFiles = append(s.state.UI.KubeconfigFiles, path)
+	return s.saveLocked()
+}
+
+// RemoveKubeconfigFile removes a user-added kubeconfig path.
+func (s *Store) RemoveKubeconfigFile(path string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	path, err := normalizeStorePath(path)
+	if err != nil {
+		return err
+	}
+	files := s.state.UI.KubeconfigFiles
+	next := make([]string, 0, len(files))
+	for _, existing := range files {
+		if existing != path {
+			next = append(next, existing)
+		}
+	}
+	if len(next) == len(files) {
+		return fmt.Errorf("kubeconfig file not found: %s", path)
+	}
+	if len(next) == 0 {
+		s.state.UI.KubeconfigFiles = nil
+	} else {
+		s.state.UI.KubeconfigFiles = next
+	}
+	return s.saveLocked()
+}
+
 func (s *Store) SetConnected(contextName, namespace string, connected bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -209,6 +268,32 @@ func (s *Store) SetPreviews(contextName string, items []PreviewSpec) error {
 	return s.saveLocked()
 }
 
+func (s *Store) ManualNetwork(contextName string) ManualNetwork {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	item := s.state.Clusters[contextName]
+	if item == nil || item.ManualNetwork == nil {
+		return ManualNetwork{}
+	}
+	return cloneManualNetwork(*item.ManualNetwork)
+}
+
+func (s *Store) SetManualNetwork(contextName string, network ManualNetwork) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if contextName == "" {
+		return nil
+	}
+	cluster := s.ensureClusterLocked(contextName)
+	if len(network.PodCIDRs) == 0 && len(network.ServiceCIDRs) == 0 && network.DNSServer == "" {
+		cluster.ManualNetwork = nil
+	} else {
+		copyItem := cloneManualNetwork(network)
+		cluster.ManualNetwork = &copyItem
+	}
+	return s.saveLocked()
+}
+
 func (s *Store) Cluster(contextName string) ClusterState {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -257,8 +342,12 @@ func (s *Store) saveLocked() error {
 
 func cloneState(state State) State {
 	out := State{
-		Version:  state.Version,
-		UI:       state.UI,
+		Version: state.Version,
+		UI: UIState{
+			LastContext:     state.UI.LastContext,
+			LastNamespace:   state.UI.LastNamespace,
+			KubeconfigFiles: cloneStrings(state.UI.KubeconfigFiles),
+		},
 		Clusters: make(map[string]*ClusterState, len(state.Clusters)),
 	}
 	for name, item := range state.Clusters {
@@ -271,13 +360,47 @@ func cloneState(state State) State {
 	return out
 }
 
+func cloneStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	out := make([]string, len(items))
+	copy(out, items)
+	return out
+}
+
+func normalizeStorePath(path string) (string, error) {
+	path = filepath.Clean(path)
+	if path == "" || path == "." {
+		return "", fmt.Errorf("kubeconfig path is required")
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", fmt.Errorf("resolve kubeconfig path: %w", err)
+	}
+	return abs, nil
+}
+
 func cloneCluster(item ClusterState) ClusterState {
-	return ClusterState{
+	out := ClusterState{
 		Namespace:    item.Namespace,
 		Connected:    item.Connected,
 		PortForwards: clonePortForwards(item.PortForwards),
 		Exchanges:    cloneExchanges(item.Exchanges),
 		Previews:     clonePreviews(item.Previews),
+	}
+	if item.ManualNetwork != nil {
+		copyItem := cloneManualNetwork(*item.ManualNetwork)
+		out.ManualNetwork = &copyItem
+	}
+	return out
+}
+
+func cloneManualNetwork(item ManualNetwork) ManualNetwork {
+	return ManualNetwork{
+		PodCIDRs:     cloneStrings(item.PodCIDRs),
+		ServiceCIDRs: cloneStrings(item.ServiceCIDRs),
+		DNSServer:    item.DNSServer,
 	}
 }
 

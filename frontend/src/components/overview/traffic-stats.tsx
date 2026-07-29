@@ -3,7 +3,6 @@ import {
   ArrowUp,
   CloudDownload,
   CloudUpload,
-  Gauge,
   Link2,
   Microchip,
   type LucideIcon,
@@ -30,118 +29,92 @@ export function TrafficStats({
   const traffic = useTrafficHistory(ready, metrics, updatedAt);
 
   return (
-    <section className="mt-5">
-      <div className="mb-3 flex items-center gap-2">
-        <div className="grid size-7 place-items-center rounded-md bg-amber-500/10 text-amber-600 dark:text-amber-400">
-          <Gauge size={15} strokeWidth={1.8} />
+    <section>
+      <div className="mb-2.5 flex items-end justify-between gap-3">
+        <h3 className="text-[13px] font-semibold tracking-tight">{t("traffic.title")}</h3>
+        <div className="flex items-center gap-3 text-[11px] text-muted-foreground">
+          <LegendDot color={uploadColor} label={t("traffic.upload")} />
+          <LegendDot color={downloadColor} label={t("traffic.download")} />
+          <span className="hidden rounded-md border px-1.5 py-0.5 text-[10px] sm:inline">
+            {t("traffic.window")}
+          </span>
         </div>
-        <h3 className="text-sm font-semibold tracking-tight">
-          {t("traffic.title")}
-        </h3>
       </div>
 
-      <Card className="gap-0 py-0 shadow-none">
-        <CardContent className="p-4">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <span className="rounded-md border bg-muted/40 px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-              {t("traffic.window")}
-            </span>
-            <div className="flex items-center gap-3 text-[11px]">
-              <LegendDot color={uploadColor} label={t("traffic.upload")} />
-              <LegendDot color={downloadColor} label={t("traffic.download")} />
-            </div>
-          </div>
+      <Card className="gap-0 overflow-hidden py-0 shadow-none">
+        <CardContent className="p-4 pb-3">
           <TrafficChart
             history={traffic.history}
             windowMs={traffic.windowMs}
             language={language}
           />
         </CardContent>
-      </Card>
 
-      <div className="mt-3 grid grid-cols-2 gap-3 md:grid-cols-3">
-        <StatCard
-          icon={ArrowUp}
-          tone="amber"
-          label={t("traffic.uploadSpeed")}
-          value={formatSpeed(traffic.uploadSpeed)}
-        />
-        <StatCard
-          icon={ArrowDown}
-          tone="blue"
-          label={t("traffic.downloadSpeed")}
-          value={formatSpeed(traffic.downloadSpeed)}
-        />
-        <StatCard
-          icon={Link2}
-          tone="green"
-          label={t("traffic.activeConnections")}
-          value={String(traffic.connections)}
-        />
-        <StatCard
-          icon={CloudUpload}
-          tone="amber"
-          label={t("traffic.uploadTotal")}
-          value={formatBytes(traffic.uploadTotal)}
-        />
-        <StatCard
-          icon={CloudDownload}
-          tone="blue"
-          label={t("traffic.downloadTotal")}
-          value={formatBytes(traffic.downloadTotal)}
-        />
-        <StatCard
-          icon={Microchip}
-          tone="red"
-          label={t("traffic.memory")}
-          value={formatBytes(traffic.memory)}
-        />
-      </div>
+        <div className="grid grid-cols-2 gap-px border-t bg-border/60 sm:grid-cols-3 lg:grid-cols-6">
+          <StatCell
+            icon={ArrowUp}
+            label={t("traffic.uploadSpeed")}
+            value={formatSpeed(traffic.uploadSpeed)}
+          />
+          <StatCell
+            icon={ArrowDown}
+            label={t("traffic.downloadSpeed")}
+            value={formatSpeed(traffic.downloadSpeed)}
+          />
+          <StatCell
+            icon={Link2}
+            label={t("traffic.activeConnections")}
+            value={String(traffic.connections)}
+          />
+          <StatCell
+            icon={CloudUpload}
+            label={t("traffic.uploadTotal")}
+            value={formatBytes(traffic.uploadTotal)}
+          />
+          <StatCell
+            icon={CloudDownload}
+            label={t("traffic.downloadTotal")}
+            value={formatBytes(traffic.downloadTotal)}
+          />
+          <StatCell
+            icon={Microchip}
+            label={t("traffic.memory")}
+            value={formatBytes(traffic.memory)}
+          />
+        </div>
+      </Card>
     </section>
   );
 }
 
 function LegendDot({ color, label }: { color: string; label: string }) {
   return (
-    <span className="inline-flex items-center gap-1.5 text-muted-foreground">
-      <span className="size-2 rounded-full" style={{ background: color }} />
+    <span className="inline-flex items-center gap-1.5">
+      <span className="size-1.5 rounded-full" style={{ background: color }} />
       {label}
     </span>
   );
 }
 
-function StatCard({
+function StatCell({
   icon: Icon,
-  tone,
   label,
   value,
 }: {
   icon: LucideIcon;
-  tone: "amber" | "blue" | "green" | "red";
   label: string;
   value: string;
 }) {
-  const tones = {
-    amber: "bg-amber-500/10 text-amber-600 dark:text-amber-400",
-    blue: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
-    green: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
-    red: "bg-rose-500/10 text-rose-600 dark:text-rose-400",
-  } as const;
-
   return (
-    <Card className="gap-0 py-0 shadow-none">
-      <CardContent className="flex items-center gap-3 p-3.5">
-        <div className={`grid size-9 shrink-0 place-items-center rounded-full ${tones[tone]}`}>
-          <Icon size={16} strokeWidth={1.8} />
+    <div className="flex min-w-0 items-center gap-2.5 bg-card px-3.5 py-3">
+      <Icon size={14} strokeWidth={1.8} className="shrink-0 text-muted-foreground" />
+      <div className="min-w-0">
+        <div className="truncate text-[10px] text-muted-foreground">{label}</div>
+        <div className="mt-0.5 truncate font-mono text-[13px] font-semibold tabular-nums tracking-tight">
+          {value}
         </div>
-        <div className="min-w-0">
-          <div className="text-[11px] text-muted-foreground">{label}</div>
-          <div className="mt-0.5 truncate font-mono text-[15px] font-semibold tracking-tight">
-            {value}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 }
 
@@ -155,7 +128,7 @@ function TrafficChart({
   language: string;
 }) {
   const width = 720;
-  const height = 180;
+  const height = 160;
   const pad = { top: 12, right: 12, bottom: 28, left: 52 };
   const innerW = width - pad.left - pad.right;
   const innerH = height - pad.top - pad.bottom;
@@ -167,10 +140,8 @@ function TrafficChart({
   );
   const yMax = niceCeil(maxSpeed);
 
-  const toX = (at: number) =>
-    pad.left + ((at - start) / windowMs) * innerW;
-  const toY = (value: number) =>
-    pad.top + innerH - (value / yMax) * innerH;
+  const toX = (at: number) => pad.left + ((at - start) / windowMs) * innerW;
+  const toY = (value: number) => pad.top + innerH - (value / yMax) * innerH;
 
   const uploadPath = polyline(history, toX, toY, "upload");
   const downloadPath = polyline(history, toX, toY, "download");
@@ -188,7 +159,7 @@ function TrafficChart({
     <div className="relative w-full overflow-hidden rounded-md bg-muted/20">
       <svg
         viewBox={`0 0 ${width} ${height}`}
-        className="h-[180px] w-full"
+        className="h-[160px] w-full"
         role="img"
         aria-label="traffic chart"
       >
@@ -228,7 +199,7 @@ function TrafficChart({
             {formatAxisTime(tick.at, language)}
           </text>
         ))}
-        {downloadPath && (
+        {downloadPath ? (
           <path
             d={downloadPath}
             fill="none"
@@ -237,8 +208,8 @@ function TrafficChart({
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-        )}
-        {uploadPath && (
+        ) : null}
+        {uploadPath ? (
           <path
             d={uploadPath}
             fill="none"
@@ -247,13 +218,13 @@ function TrafficChart({
             strokeLinejoin="round"
             strokeLinecap="round"
           />
-        )}
+        ) : null}
       </svg>
-      {history.length === 0 && (
+      {history.length === 0 ? (
         <div className="pointer-events-none absolute inset-0 grid place-items-center text-xs text-muted-foreground">
           —
         </div>
-      )}
+      ) : null}
     </div>
   );
 }
@@ -277,8 +248,7 @@ function niceCeil(value: number) {
   if (value <= 0) return 1024;
   const exponent = Math.floor(Math.log10(value));
   const fraction = value / 10 ** exponent;
-  const nice =
-    fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
+  const nice = fraction <= 1 ? 1 : fraction <= 2 ? 2 : fraction <= 5 ? 5 : 10;
   return nice * 10 ** exponent;
 }
 

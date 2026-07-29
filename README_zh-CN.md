@@ -6,7 +6,7 @@
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-**[官网](https://fengqi-dev.github.io/kube-loop/)** · **[下载](https://github.com/fengqi-dev/kube-loop/releases)** · **[设计文档](docs/design.md)**
+**[官网](https://fengqi-dev.github.io/kube-loop/)** · **[下载](https://github.com/fengqi-dev/kube-loop/releases)** · **[设计文档](docs/design.zh-CN.md)** · **[Design](docs/design.md)**
 
 KubeLoop 是一款桌面客户端：像连 VPN 一样连上 Kubernetes 集群，让本机应用直接访问
 Pod IP、ClusterIP Service 和 `*.cluster.local`——不必再为每个服务做端口转发，也不用给
@@ -54,11 +54,12 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载
    （或按下方说明自行构建）。
 2. 确认本机 kubeconfig 能正常访问目标集群 API。
-3. 打开 KubeLoop，选择 **Context** 与 **Namespace**，点击 **连接**。
+3. 打开 KubeLoop，选择 **Context**，点击 **连接**。
 4. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
    可在 **设置** 中安装或卸载该服务。
 
-连接成功后，可在概览查看流量与状态，在网络页使用发现、端口转发、流量交换与预览。
+连接成功后，可在概览查看流量与状态，在网络页使用发现。端口转发、流量交换与预览各自
+带有 Namespace 选择器。
 
 ## 安全设计
 
@@ -116,7 +117,8 @@ go test ./...
 ## 文档
 
 - [项目网站](https://fengqi-dev.github.io/kube-loop/)
-- [桌面客户端设计](docs/design.md)
+- [桌面客户端设计（简体中文）](docs/design.zh-CN.md)
+- [Desktop design (English)](docs/design.md)
 - [第三方软件声明](THIRD_PARTY_NOTICES.md)
 
 ## 许可证

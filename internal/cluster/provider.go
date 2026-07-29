@@ -8,17 +8,12 @@ import (
 	"strings"
 
 	"go.yaml.in/yaml/v3"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 )
-
-type ContextInfo struct {
-	Name    string `json:"name"`
-	Cluster string `json:"cluster"`
-	Current bool   `json:"current"`
-}
 
 type Discovery struct {
 	PodCIDRs     []string `json:"podCIDRs"`
@@ -45,37 +40,9 @@ type ServiceInfo struct {
 	Ports     []ServicePortInfo `json:"ports"`
 }
 
-type Provider struct {
-	rules *clientcmd.ClientConfigLoadingRules
-}
-
-func NewProvider() *Provider {
-	return &Provider{rules: clientcmd.NewDefaultClientConfigLoadingRules()}
-}
-
-func (p *Provider) Contexts() ([]ContextInfo, error) {
-	cfg, err := p.rules.Load()
-	if err != nil {
-		return nil, fmt.Errorf("load kubeconfig: %w", err)
-	}
-	items := make([]ContextInfo, 0, len(cfg.Contexts))
-	for name, value := range cfg.Contexts {
-		items = append(items, ContextInfo{
-			Name: name, Cluster: value.Cluster, Current: name == cfg.CurrentContext,
-		})
-	}
-	sort.Slice(items, func(i, j int) bool {
-		if items[i].Current != items[j].Current {
-			return items[i].Current
-		}
-		return items[i].Name < items[j].Name
-	})
-	return items, nil
-}
-
 func (p *Provider) RESTConfig(contextName string) (*rest.Config, error) {
 	overrides := &clientcmd.ConfigOverrides{CurrentContext: contextName}
-	cfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(p.rules, overrides)
+	cfg := clientcmd.NewNonInteractiveDeferredLoadingClientConfig(p.loadingRules(), overrides)
 	restConfig, err := cfg.ClientConfig()
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextName, err)
@@ -116,88 +83,96 @@ func (p *Provider) Namespaces(ctx context.Context, contextName string) ([]string
 func (p *Provider) ListServices(
 	ctx context.Context, contextName, namespace string,
 ) ([]ServiceInfo, error) {
-	if namespace == "" {
-		namespace = "default"
-	}
+	listNS := apiNamespace(namespace)
 	client, err := p.client(contextName)
 	if err != nil {
 		return nil, err
 	}
-	list, err := client.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	list, err := client.CoreV1().Services(listNS).List(ctx, metav1.ListOptions{})
 	if err != nil {
 		return nil, fmt.Errorf("list services: %w", err)
 	}
-	items := make([]ServiceInfo, 0, len(list.Items))
-	for _, service := range list.Items {
-		if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == "None" {
-			continue
-		}
-		if strings.EqualFold(string(service.Spec.Type), "ExternalName") {
-			continue
-		}
-		ports := make([]ServicePortInfo, 0, len(service.Spec.Ports))
-		for _, port := range service.Spec.Ports {
-			protocol := string(port.Protocol)
-			if protocol == "" {
-				protocol = "TCP"
-			}
-			ports = append(ports, ServicePortInfo{
-				Name: port.Name, Port: port.Port, Protocol: protocol,
-			})
-		}
-		if len(ports) == 0 {
-			continue
-		}
-		items = append(items, ServiceInfo{
-			Name:      service.Name,
-			Namespace: service.Namespace,
-			ClusterIP: service.Spec.ClusterIP,
-			Ports:     ports,
-		})
+	refs := make([]*corev1.Service, 0, len(list.Items))
+	for i := range list.Items {
+		refs = append(refs, &list.Items[i])
 	}
-	sort.Slice(items, func(i, j int) bool {
-		return items[i].Name < items[j].Name
-	})
-	return items, nil
+	return serviceInfosFromList(refs), nil
 }
 
-func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery, error) {
+// apiNamespace maps UI namespace selection to the Kubernetes API namespace.
+// "*" means all namespaces; empty falls back to default.
+func apiNamespace(namespace string) string {
+	if namespace == "*" {
+		return ""
+	}
+	if namespace == "" {
+		return "default"
+	}
+	return namespace
+}
+
+// Discover collects routable CIDRs / ClusterIPs. namespaces empty = all namespaces.
+// Node / deployment / kube-system reads are best-effort so ns-scoped users can connect.
+func (p *Provider) Discover(ctx context.Context, contextName string, namespaces []string) (Discovery, error) {
 	client, err := p.client(contextName)
 	if err != nil {
 		return Discovery{}, err
 	}
-	nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return Discovery{}, fmt.Errorf("list nodes: %w", err)
-	}
-	services, err := client.CoreV1().Services("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return Discovery{}, fmt.Errorf("list services: %w", err)
-	}
-	pods, err := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return Discovery{}, fmt.Errorf("list pods: %w", err)
-	}
-	deployments, err := client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return Discovery{}, fmt.Errorf("list deployments: %w", err)
-	}
 
 	podCIDRs := make(map[string]struct{})
-	for _, node := range nodes.Items {
-		for _, cidr := range node.Spec.PodCIDRs {
-			if prefix, parseErr := netip.ParsePrefix(cidr); parseErr == nil {
-				podCIDRs[prefix.Masked().String()] = struct{}{}
+	if nodes, nodeErr := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); nodeErr == nil {
+		for _, node := range nodes.Items {
+			for _, cidr := range node.Spec.PodCIDRs {
+				if prefix, parseErr := netip.ParsePrefix(cidr); parseErr == nil {
+					podCIDRs[prefix.Masked().String()] = struct{}{}
+				}
 			}
-		}
-		if node.Spec.PodCIDR != "" {
-			if prefix, parseErr := netip.ParsePrefix(node.Spec.PodCIDR); parseErr == nil {
-				podCIDRs[prefix.Masked().String()] = struct{}{}
+			if node.Spec.PodCIDR != "" {
+				if prefix, parseErr := netip.ParsePrefix(node.Spec.PodCIDR); parseErr == nil {
+					podCIDRs[prefix.Masked().String()] = struct{}{}
+				}
 			}
 		}
 	}
+
+	var pods []corev1.Pod
+	var services []corev1.Service
+	if len(namespaces) == 0 {
+		podList, podErr := client.CoreV1().Pods("").List(ctx, metav1.ListOptions{})
+		if podErr != nil {
+			return Discovery{}, fmt.Errorf("list pods: %w", podErr)
+		}
+		pods = podList.Items
+		svcList, svcErr := client.CoreV1().Services("").List(ctx, metav1.ListOptions{})
+		if svcErr != nil {
+			return Discovery{}, fmt.Errorf("list services: %w", svcErr)
+		}
+		services = svcList.Items
+	} else {
+		for _, ns := range namespaces {
+			podList, podErr := client.CoreV1().Pods(ns).List(ctx, metav1.ListOptions{})
+			if podErr != nil {
+				return Discovery{}, fmt.Errorf("list pods in %s: %w", ns, podErr)
+			}
+			pods = append(pods, podList.Items...)
+			svcList, svcErr := client.CoreV1().Services(ns).List(ctx, metav1.ListOptions{})
+			if svcErr != nil {
+				return Discovery{}, fmt.Errorf("list services in %s: %w", ns, svcErr)
+			}
+			services = append(services, svcList.Items...)
+		}
+		// Best-effort CoreDNS lookup outside scoped namespaces.
+		for _, dnsNS := range []string{"kube-system"} {
+			if svc, getErr := client.CoreV1().Services(dnsNS).Get(ctx, "kube-dns", metav1.GetOptions{}); getErr == nil {
+				services = append(services, *svc)
+			} else if svc, getErr := client.CoreV1().Services(dnsNS).Get(ctx, "coredns", metav1.GetOptions{}); getErr == nil {
+				services = append(services, *svc)
+			}
+		}
+	}
+
 	if len(podCIDRs) == 0 {
-		for _, pod := range pods.Items {
+		for _, pod := range pods {
 			for _, raw := range pod.Status.PodIPs {
 				if ip, parseErr := netip.ParseAddr(raw.IP); parseErr == nil {
 					podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
@@ -213,7 +188,7 @@ func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery,
 
 	serviceIPs := make(map[string]struct{})
 	dnsServer := ""
-	for _, service := range services.Items {
+	for _, service := range services {
 		for _, raw := range service.Spec.ClusterIPs {
 			if ip, parseErr := netip.ParseAddr(raw); parseErr == nil {
 				serviceIPs[ip.String()] = struct{}{}
@@ -225,16 +200,19 @@ func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery,
 		}
 	}
 
-	serviceCIDRs := discoverServiceCIDRs(ctx, client)
+	deployments := 0
+	if list, depErr := client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); depErr == nil {
+		deployments = len(list.Items)
+	}
 
 	return Discovery{
 		PodCIDRs:     sortedKeys(podCIDRs),
-		ServiceCIDRs: serviceCIDRs,
+		ServiceCIDRs: discoverServiceCIDRs(ctx, client),
 		ServiceIPs:   sortedKeys(serviceIPs),
 		DNSServer:    dnsServer,
-		Pods:         len(pods.Items),
-		Services:     len(services.Items),
-		Deployments:  len(deployments.Items),
+		Pods:         len(pods),
+		Services:     len(services),
+		Deployments:  deployments,
 	}, nil
 }
 
