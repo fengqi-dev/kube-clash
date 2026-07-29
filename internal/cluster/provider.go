@@ -47,7 +47,13 @@ func (p *Provider) RESTConfig(contextName string) (*rest.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextName, err)
 	}
-	restConfig.UserAgent = "kube-loop/0.1"
+	p.mu.RLock()
+	userAgent := p.userAgent
+	p.mu.RUnlock()
+	if userAgent == "" {
+		userAgent = "kube-loop/dev"
+	}
+	restConfig.UserAgent = userAgent
 	return restConfig, nil
 }
 
