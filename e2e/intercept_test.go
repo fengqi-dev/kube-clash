@@ -20,11 +20,6 @@ func TestServiceInterceptTCPAndUDP(t *testing.T) {
 	provider := newProvider(t)
 	gateway, forwarder := ensureGateway(t, ctx, provider)
 	client := kubeClient(t, provider)
-	t.Cleanup(func() {
-		_ = client.CoreV1().Namespaces().Delete(
-			context.Background(), echoNamespace, metav1.DeleteOptions{},
-		)
-	})
 
 	if err := ensureEchoWorkload(ctx, client); err != nil {
 		t.Fatal(err)
