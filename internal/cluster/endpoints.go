@@ -31,11 +31,11 @@ type InterceptPort struct {
 
 // ServiceInterceptSnapshot stores enough state to restore a Service after intercept.
 type ServiceInterceptSnapshot struct {
-	Namespace string              `json:"namespace"`
-	Service   string              `json:"service"`
-	Selector  map[string]string   `json:"selector,omitempty"`
-	Ports     []InterceptPort     `json:"ports"`
-	GatewayIP string              `json:"gatewayIP"`
+	Namespace string            `json:"namespace"`
+	Service   string            `json:"service"`
+	Selector  map[string]string `json:"selector,omitempty"`
+	Ports     []InterceptPort   `json:"ports"`
+	GatewayIP string            `json:"gatewayIP"`
 }
 
 func (p *Provider) ApplyServiceIntercept(

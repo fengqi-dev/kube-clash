@@ -58,16 +58,16 @@ type ClusterAPI interface {
 type Manager struct {
 	cluster ClusterAPI
 
-	mu        sync.Mutex
-	active    bool
-	ctx       context.Context
-	contextName string
-	gatewayIP string
+	mu             sync.Mutex
+	active         bool
+	ctx            context.Context
+	contextName    string
+	gatewayIP      string
 	gatewayAddress string
-	control   *controlClient
-	nextPort  uint32
-	byID      map[string]*runtimeIntercept
-	byKey     map[string]string // namespace/service -> id
+	control        *controlClient
+	nextPort       uint32
+	byID           map[string]*runtimeIntercept
+	byKey          map[string]string // namespace/service -> id
 }
 
 type runtimeIntercept struct {
