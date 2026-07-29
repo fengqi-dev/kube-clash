@@ -343,6 +343,7 @@ export namespace intercept {
 	    service: string;
 	    clusterIP?: string;
 	    preview?: boolean;
+	    mode?: string;
 	    ports: cluster.InterceptPort[];
 	    locals: PortMapping[];
 	
@@ -357,6 +358,7 @@ export namespace intercept {
 	        this.service = source["service"];
 	        this.clusterIP = source["clusterIP"];
 	        this.preview = source["preview"];
+	        this.mode = source["mode"];
 	        this.ports = this.convertValues(source["ports"], cluster.InterceptPort);
 	        this.locals = this.convertValues(source["locals"], PortMapping);
 	    }
@@ -383,6 +385,7 @@ export namespace intercept {
 	    namespace: string;
 	    service: string;
 	    ports: PortMapping[];
+	    mode?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new Mapping(source);
@@ -393,6 +396,7 @@ export namespace intercept {
 	        this.namespace = source["namespace"];
 	        this.service = source["service"];
 	        this.ports = this.convertValues(source["ports"], PortMapping);
+	        this.mode = source["mode"];
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {

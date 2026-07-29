@@ -5,6 +5,7 @@ import { backend } from "@/backend";
 import {
   ActionTypeBadge,
   exchangeIcon,
+  mirrorIcon,
   portForwardIcon,
   previewIcon,
 } from "@/components/network/action-icons";
@@ -30,20 +31,22 @@ export function ActiveSessions({
   refreshKey: number;
   /** Informer-driven; reload after reconcile may stop stale bindings. */
   inventoryRevision?: number;
-  /** Workload: pod PF only. Network: service PF + Exchange + Preview. */
+  /** Workload: pod PF only. Network: service PF + Exchange + Mirror + Preview. */
   scope?: "network" | "podPortForward";
 }) {
   const { t } = useI18n();
   const [forwards, setForwards] = useState<PortForwardInfo[]>([]);
   const [exchanges, setExchanges] = useState<InterceptInfo[]>([]);
+  const [mirrors, setMirrors] = useState<InterceptInfo[]>([]);
   const [previews, setPreviews] = useState<PreviewInfo[]>([]);
   const [busy, setBusy] = useState(false);
   const podOnly = scope === "podPortForward";
 
   async function reload() {
-    const [forwardItems, exchangeItems, previewItems] = await Promise.all([
+    const [forwardItems, exchangeItems, mirrorItems, previewItems] = await Promise.all([
       backend.listPortForwards(),
       !podOnly && ready ? backend.listIntercepts() : Promise.resolve([]),
+      !podOnly && ready ? backend.listMirrors() : Promise.resolve([]),
       !podOnly && ready ? backend.listPreviews() : Promise.resolve([]),
     ]);
     setForwards(
@@ -52,6 +55,7 @@ export function ActiveSessions({
       ),
     );
     setExchanges(exchangeItems);
+    setMirrors(mirrorItems);
     setPreviews(previewItems);
   }
 
@@ -98,6 +102,21 @@ export function ActiveSessions({
     }
   }
 
+  async function stopMirror(id: string) {
+    setBusy(true);
+    try {
+      await backend.stopIntercept(id);
+      await reload();
+      toast.success(t("mirror.stopped"));
+    } catch (error) {
+      toast.error(t("mirror.stopFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function stopPreview(id: string) {
     setBusy(true);
     try {
@@ -123,7 +142,10 @@ export function ActiveSessions({
   }
 
   const empty =
-    forwards.length === 0 && exchanges.length === 0 && previews.length === 0;
+    forwards.length === 0 &&
+    exchanges.length === 0 &&
+    mirrors.length === 0 &&
+    previews.length === 0;
 
   return (
     <section className="mt-5 overflow-hidden rounded-lg border bg-card">
@@ -218,6 +240,35 @@ export function ActiveSessions({
                     variant="ghost"
                     disabled={busy}
                     onClick={() => void stopExchange(item.id)}
+                  >
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                  </Button>
+                </TableCell>
+              </TableRow>
+            ))}
+            {mirrors.map((item) => (
+              <TableRow key={`mr-${item.id}`}>
+                <TableCell>
+                  <ActionTypeBadge
+                    label={t("network.tabMirror")}
+                    icon={mirrorIcon}
+                  />
+                </TableCell>
+                <TableCell className="font-medium">
+                  {item.namespace}/{item.service}
+                </TableCell>
+                <TableCell className="font-mono text-[12px] text-muted-foreground">
+                  {item.locals
+                    .map((port) => `${port.servicePort} → ${port.localHost}:${port.localPort}`)
+                    .join(", ")}
+                </TableCell>
+                <TableCell>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={busy}
+                    onClick={() => void stopMirror(item.id)}
                   >
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
                   </Button>

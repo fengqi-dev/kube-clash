@@ -34,10 +34,10 @@ const dictionary = {
     "overview.guides.title": "Guides",
     "overview.guides.product.title": "Product capabilities",
     "overview.guides.product.body":
-      "TUN, split DNS, Host Aliases, Exchange, Preview, and Port Forward.",
+      "TUN, split DNS, Host Aliases, Exchange, Mirror, Preview, and Port Forward.",
     "overview.guides.workflows.title": "Everyday workflows",
     "overview.guides.workflows.body":
-      "Open Services, map custom domains, debug Pods, intercept local processes.",
+      "Open Services, map custom domains, debug Pods, exchange, mirror, or preview locally.",
     "overview.guides.arch.title": "Architecture",
     "overview.guides.arch.body": "How traffic flows from your apps to the Gateway.",
     "overview.more.title": "Also useful",
@@ -66,7 +66,7 @@ const dictionary = {
       "On first use, approve the virtual network service. Later connects should not ask again.",
     "started.after.title": "After you are connected",
     "started.after.body":
-      "Use Overview for traffic and status, Workload / Network for Port Forward, Exchange, and Preview, and Host Aliases for custom domain → IP maps. Short names like mysql.default resolve via Kubernetes search domains.",
+      "Use Overview for traffic and status, Workload / Network for Port Forward, Exchange, Mirror, and Preview, and Host Aliases for custom domain → IP maps. Short names like mysql.default resolve via Kubernetes search domains.",
 
     "product.title": "Product",
     "product.desc":
@@ -85,6 +85,9 @@ const dictionary = {
     "product.tools.title": "Developer tools",
     "product.tools.exchange.title": "Exchange",
     "product.tools.exchange.body": "Replace a ClusterIP Service with a process on your machine.",
+    "product.tools.mirror.title": "Mirror",
+    "product.tools.mirror.body":
+      "Keep cluster Pods as the primary path and tee a copy of TCP requests to a local process.",
     "product.tools.preview.title": "Preview",
     "product.tools.preview.body": "Expose a local app as a temporary ClusterIP Service.",
     "product.tools.portfwd.title": "Port Forward",
@@ -95,7 +98,7 @@ const dictionary = {
 
     "workflows.title": "Workflows",
     "workflows.desc":
-      "Browse, debug, map domains, intercept, and preview without opening a terminal for every Service.",
+      "Browse, debug, map domains, exchange, mirror, and preview without opening a terminal for every Service.",
     "workflows.list.title": "Everyday paths",
     "workflows.w1.label": "Internal API",
     "workflows.w1.title": "Open a Service in the browser",
@@ -109,15 +112,20 @@ const dictionary = {
     "workflows.w3.title": "Skip kubectl port-forward",
     "workflows.w3.body": "Start from Workload or Network with a Namespace picker.",
     "workflows.w3.hint": "localhost:8080",
-    "workflows.w4.label": "Intercept",
+    "workflows.w4.label": "Exchange",
     "workflows.w4.title": "Run a local process as a Service",
     "workflows.w4.body": "Exchange keeps ClusterIP / DNS while traffic lands locally.",
     "workflows.w4.hint": "Exchange",
-    "workflows.w5.label": "Host alias",
-    "workflows.w5.title": "Map a custom domain to a cluster IP",
+    "workflows.w5.label": "Mirror",
+    "workflows.w5.title": "Debug without replacing the Service",
     "workflows.w5.body":
+      "Cluster Pods keep answering clients; a copy of each TCP request is sent to your local process.",
+    "workflows.w5.hint": "Mirror",
+    "workflows.w6.label": "Host alias",
+    "workflows.w6.title": "Map a custom domain to a cluster IP",
+    "workflows.w6.body":
       "On Host Aliases, bind app.dev to a Service or Pod IP. Reconnect so split DNS picks it up.",
-    "workflows.w5.hint": "app.dev → 10.96.x.x",
+    "workflows.w6.hint": "app.dev → 10.96.x.x",
 
     "arch.title": "Architecture",
     "arch.desc":
@@ -180,9 +188,10 @@ const dictionary = {
     "overview.guides.title": "指南",
     "overview.guides.product.title": "产品能力",
     "overview.guides.product.body":
-      "TUN、分流 DNS、主机别名、Exchange、Preview 与端口转发。",
+      "TUN、分流 DNS、主机别名、Exchange、Mirror、Preview 与端口转发。",
     "overview.guides.workflows.title": "使用场景",
-    "overview.guides.workflows.body": "打开 Service、映射自定义域名、调试 Pod、拦截本机进程。",
+    "overview.guides.workflows.body":
+      "打开 Service、映射自定义域名、调试 Pod，以及 Exchange / Mirror / Preview。",
     "overview.guides.arch.title": "架构",
     "overview.guides.arch.body": "流量如何从本机应用到达 Gateway。",
     "overview.more.title": "更多",
@@ -207,7 +216,7 @@ const dictionary = {
     "started.step4.body": "首次使用时批准虚拟网卡服务；之后连接通常不再要求授权。",
     "started.after.title": "连接之后",
     "started.after.body":
-      "在概览查看流量与状态；在工作负载 / 网络使用端口转发、Exchange 与 Preview；在主机别名配置域名 → IP。mysql.default 等短名通过 Kubernetes 搜索域解析。",
+      "在概览查看流量与状态；在工作负载 / 网络使用端口转发、Exchange、Mirror 与 Preview；在主机别名配置域名 → IP。mysql.default 等短名通过 Kubernetes 搜索域解析。",
 
     "product.title": "产品能力",
     "product.desc": "透明集群网络，加上你每天都会用到的工具。",
@@ -225,6 +234,8 @@ const dictionary = {
     "product.tools.title": "开发者工具",
     "product.tools.exchange.title": "Exchange",
     "product.tools.exchange.body": "用本机进程替换现有 ClusterIP Service。",
+    "product.tools.mirror.title": "Mirror",
+    "product.tools.mirror.body": "集群原 Pod 继续响应客户端，同时将 TCP 请求拷贝一份到本机进程。",
     "product.tools.preview.title": "Preview",
     "product.tools.preview.body": "把本机应用临时暴露为 ClusterIP Service。",
     "product.tools.portfwd.title": "端口转发",
@@ -234,7 +245,7 @@ const dictionary = {
       "无特权集群内 Deployment，仅经 API Server port-forward 访问；支持受限 RBAC 与管理员预装。",
 
     "workflows.title": "使用场景",
-    "workflows.desc": "浏览、排查、映射域名、拦截与预览，不必为每个 Service 再开终端。",
+    "workflows.desc": "浏览、排查、映射域名、Exchange / Mirror / Preview，不必为每个 Service 再开终端。",
     "workflows.list.title": "日常路径",
     "workflows.w1.label": "内部 API",
     "workflows.w1.title": "在浏览器打开 Service",
@@ -248,15 +259,19 @@ const dictionary = {
     "workflows.w3.title": "告别 kubectl port-forward",
     "workflows.w3.body": "在工作负载或网络页选择 Namespace 启动。",
     "workflows.w3.hint": "localhost:8080",
-    "workflows.w4.label": "拦截",
+    "workflows.w4.label": "Exchange",
     "workflows.w4.title": "本机进程充当 Service",
     "workflows.w4.body": "Exchange 保留 ClusterIP / DNS，流量落到本机。",
     "workflows.w4.hint": "Exchange",
-    "workflows.w5.label": "主机别名",
-    "workflows.w5.title": "把自定义域名指到集群 IP",
-    "workflows.w5.body":
+    "workflows.w5.label": "Mirror",
+    "workflows.w5.title": "不替换 Service 也能调试",
+    "workflows.w5.body": "集群原 Pod 继续响应客户端，同时将 TCP 请求拷贝到本机进程。",
+    "workflows.w5.hint": "Mirror",
+    "workflows.w6.label": "主机别名",
+    "workflows.w6.title": "把自定义域名指到集群 IP",
+    "workflows.w6.body":
       "在「主机别名」将 app.dev 映射到 Service 或 Pod IP，重新连接后分流 DNS 生效。",
-    "workflows.w5.hint": "app.dev → 10.96.x.x",
+    "workflows.w6.hint": "app.dev → 10.96.x.x",
 
     "arch.title": "架构",
     "arch.desc": "本地应用经 sing-box 进入。只有集群目标会穿过 SOCKS 桥到达 Gateway。",

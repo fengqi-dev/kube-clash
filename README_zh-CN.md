@@ -58,8 +58,8 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 4. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
    可在 **设置** 中安装或卸载该服务。
 
-连接成功后，可在概览查看流量与状态，在网络页使用发现。端口转发、流量交换与预览各自
-带有 Namespace 选择器。
+连接成功后，可在概览查看流量与状态，在网络页使用发现。端口转发、流量交换、流量镜像与预览各自
+带有 Namespace 选择器。Exchange 用本机进程替换 Service；Mirror 保留集群 Pod 为主路径，并将 TCP 请求拷贝到本机。
 
 ## 安全设计
 
@@ -67,7 +67,7 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 - Gateway 不使用 `privileged`、`hostNetwork`、`NET_ADMIN`，也不挂载 ServiceAccount
   Token；不以 Service / Ingress 对外发布。
 - 路由仅覆盖已发现的 Pod / Service 网段；非集群流量保持直连。
-- 流量交换 / 预览对 Service、Endpoints、EndpointSlice 的修改，在停止或断开时始终恢复。
+- 流量交换 / 镜像 / 预览对 Service、Endpoints、EndpointSlice 的修改，在停止或断开时始终恢复。
 - 特权 Helper 只接受本机 IPC，用于在 `~/.kubeloop` 会话目录下启停 TUN；它不访问
   Kubernetes API。
 

@@ -1,6 +1,7 @@
 import {
   ArrowRightLeft,
   Cable,
+  CopyPlus,
   Eye,
   type LucideIcon,
 } from "lucide-react";
@@ -13,13 +14,15 @@ import {
 
 export const portForwardIcon = Cable;
 export const exchangeIcon = ArrowRightLeft;
+export const mirrorIcon = CopyPlus;
 export const previewIcon = Eye;
 
-export type NetworkAction = "portForward" | "exchange" | "preview";
+export type NetworkAction = "portForward" | "exchange" | "mirror" | "preview";
 
 export const networkActionIcons: Record<NetworkAction, LucideIcon> = {
   portForward: portForwardIcon,
   exchange: exchangeIcon,
+  mirror: mirrorIcon,
   preview: previewIcon,
 };
 

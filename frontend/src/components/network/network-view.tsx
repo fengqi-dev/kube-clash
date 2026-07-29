@@ -5,11 +5,13 @@ import { backend } from "@/backend";
 import {
   ActionIconButton,
   exchangeIcon,
+  mirrorIcon,
   portForwardIcon,
   previewIcon,
 } from "@/components/network/action-icons";
 import { ActiveSessions } from "@/components/network/active-sessions";
 import { ExchangeDialog } from "@/components/network/exchange-dialog";
+import { MirrorDialog } from "@/components/network/mirror-dialog";
 import { PortForwardDialog } from "@/components/network/portfwd-dialog";
 import { PreviewCreateDialog } from "@/components/network/preview-create-dialog";
 import {
@@ -30,7 +32,7 @@ import { useI18n } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { ServiceInfo, SessionState } from "@/types";
 
-type ServiceBinding = "exchange" | "preview" | "portForward" | "idle";
+type ServiceBinding = "exchange" | "mirror" | "preview" | "portForward" | "idle";
 
 export function NetworkView({
   contextName,
@@ -55,6 +57,7 @@ export function NetworkView({
   const [refreshKey, setRefreshKey] = useState(0);
   const [pfOpen, setPfOpen] = useState(false);
   const [exOpen, setExOpen] = useState(false);
+  const [mirrorOpen, setMirrorOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selected, setSelected] = useState<ServiceInfo | null>(null);
   const [bindings, setBindings] = useState<Record<string, ServiceBinding>>({});
@@ -106,9 +109,10 @@ export function NetworkView({
     Promise.all([
       backend.listPortForwards(),
       ready ? backend.listIntercepts() : Promise.resolve([]),
+      ready ? backend.listMirrors() : Promise.resolve([]),
       ready ? backend.listPreviews() : Promise.resolve([]),
     ])
-      .then(([forwards, exchanges, previews]) => {
+      .then(([forwards, exchanges, mirrors, previews]) => {
         if (!active) return;
         const next: Record<string, ServiceBinding> = {};
         for (const item of forwards) {
@@ -117,6 +121,9 @@ export function NetworkView({
         }
         for (const item of exchanges) {
           next[`${item.namespace}/${item.service}`] = "exchange";
+        }
+        for (const item of mirrors) {
+          next[`${item.namespace}/${item.service}`] = "mirror";
         }
         for (const item of previews) {
           next[`${item.namespace}/${item.service}`] = "preview";
@@ -254,6 +261,19 @@ export function NetworkView({
                             setExOpen(true);
                           }}
                         />
+                        <ActionIconButton
+                          label={
+                            canExchange
+                              ? t("network.tabMirror")
+                              : t("network.mirrorDenied")
+                          }
+                          icon={mirrorIcon}
+                          disabled={!ready || !canExchange}
+                          onClick={() => {
+                            setSelected(item);
+                            setMirrorOpen(true);
+                          }}
+                        />
                       </div>
                     </TableCell>
                   </TableRow>
@@ -284,6 +304,12 @@ export function NetworkView({
         service={selected}
         onStarted={bumpActive}
       />
+      <MirrorDialog
+        open={mirrorOpen}
+        onOpenChange={setMirrorOpen}
+        service={selected}
+        onStarted={bumpActive}
+      />
       <PreviewCreateDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
@@ -300,11 +326,13 @@ function ServiceStatus({ binding }: { binding: ServiceBinding }) {
   const label =
     binding === "exchange"
       ? t("network.tabExchange")
-      : binding === "preview"
-        ? t("network.tabPreview")
-        : binding === "portForward"
-          ? t("network.tabPortForward")
-          : t("network.idle");
+      : binding === "mirror"
+        ? t("network.tabMirror")
+        : binding === "preview"
+          ? t("network.tabPreview")
+          : binding === "portForward"
+            ? t("network.tabPortForward")
+            : t("network.idle");
   const ok = binding !== "idle";
   return (
     <span

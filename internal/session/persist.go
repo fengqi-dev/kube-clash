@@ -78,6 +78,24 @@ func (m *Manager) persistExchanges(contextName string) {
 	}
 }
 
+func (m *Manager) persistMirrors(contextName string) {
+	if m.store == nil || contextName == "" {
+		return
+	}
+	items := m.intercept.ListMirrors()
+	specs := make([]store.MirrorSpec, 0, len(items))
+	for _, item := range items {
+		specs = append(specs, store.MirrorSpec{
+			Namespace: item.Namespace,
+			Service:   item.Service,
+			Ports:     toStorePorts(item.Locals),
+		})
+	}
+	if err := m.store.SetMirrors(contextName, specs); err != nil {
+		log.Printf("persist mirrors for %s: %v", contextName, err)
+	}
+}
+
 func (m *Manager) persistPreviews(contextName string) {
 	if m.store == nil || contextName == "" {
 		return
@@ -111,6 +129,7 @@ func (m *Manager) PersistShutdown() {
 	if contextName != "" {
 		if connected {
 			m.persistExchanges(contextName)
+			m.persistMirrors(contextName)
 			m.persistPreviews(contextName)
 		}
 		if err := m.store.SetConnected(contextName, namespace, connected); err != nil {
@@ -183,6 +202,16 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 		})
 		if err != nil {
 			log.Printf("restore exchange %s/%s: %v", item.Namespace, item.Service, err)
+		}
+	}
+	for _, item := range cluster.Mirrors {
+		_, err := m.intercept.StartMirror(ctx, intercept.Mapping{
+			Namespace: item.Namespace,
+			Service:   item.Service,
+			Ports:     toInterceptPorts(item.Ports),
+		})
+		if err != nil {
+			log.Printf("restore mirror %s/%s: %v", item.Namespace, item.Service, err)
 		}
 	}
 	for _, item := range cluster.Previews {
