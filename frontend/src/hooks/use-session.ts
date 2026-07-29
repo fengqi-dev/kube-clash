@@ -2,6 +2,28 @@ import { useEffect, useMemo, useState } from "react";
 import { backend } from "@/backend";
 import type { BootstrapData, SessionState, UpdateInfo } from "@/types";
 
+export type NetworkSubView =
+  | "network-portfwd"
+  | "network-exchange"
+  | "network-preview";
+
+export type AppView =
+  | "overview"
+  | "connections"
+  | "network"
+  | NetworkSubView
+  | "logs"
+  | "settings";
+
+export function isNetworkView(view: AppView): boolean {
+  return (
+    view === "network" ||
+    view === "network-portfwd" ||
+    view === "network-exchange" ||
+    view === "network-preview"
+  );
+}
+
 const emptySession: SessionState = {
   phase: "idle",
   context: "",
@@ -25,9 +47,7 @@ export function useSession() {
   });
   const [contextName, setContextName] = useState("");
   const [namespace, setNamespace] = useState("default");
-  const [view, setView] = useState<"overview" | "connections" | "network" | "logs" | "settings">(
-    "overview",
-  );
+  const [view, setView] = useState<AppView>("overview");
   const [loading, setLoading] = useState(true);
   const [uiError, setUIError] = useState("");
   const [updateBusy, setUpdateBusy] = useState(false);
@@ -46,15 +66,17 @@ export function useSession() {
         if (!active) return;
         setData(initial);
         const selected =
-          initial.contexts.find((item) => item.current)?.name ??
-          initial.contexts[0]?.name ??
+          initial.preferredContext ||
+          initial.contexts.find((item) => item.current)?.name ||
+          initial.contexts[0]?.name ||
           "";
-        setContextName(selected);
-        setNamespace(
-          initial.namespaces.includes("default")
+        const nextNamespace =
+          initial.preferredNamespace ||
+          (initial.namespaces.includes("default")
             ? "default"
-            : (initial.namespaces[0] ?? "default"),
-        );
+            : (initial.namespaces[0] ?? "default"));
+        setContextName(selected);
+        setNamespace(nextNamespace);
       })
       .catch((error: Error) => setUIError(error.message))
       .finally(() => setLoading(false));
@@ -84,11 +106,21 @@ export function useSession() {
     try {
       const namespaces = await backend.namespaces(next);
       setData((current) => ({ ...current, namespaces }));
-      setNamespace(
-        namespaces.includes("default")
-          ? "default"
-          : (namespaces[0] ?? "default"),
-      );
+      const nextNamespace = namespaces.includes("default")
+        ? "default"
+        : (namespaces[0] ?? "default");
+      setNamespace(nextNamespace);
+      await backend.rememberSelection(next, nextNamespace);
+    } catch (error) {
+      setUIError((error as Error).message);
+    }
+  }
+
+  async function changeNamespace(next: string) {
+    setNamespace(next);
+    if (!contextName) return;
+    try {
+      await backend.rememberSelection(contextName, next);
     } catch (error) {
       setUIError((error as Error).message);
     }
@@ -141,12 +173,10 @@ export function useSession() {
     ready,
     discovery,
     currentContext,
-    setNamespace,
+    setNamespace: changeNamespace,
     changeContext,
     toggleConnection,
     checkForUpdates,
     openUpdatePage,
   };
 }
-
-export type AppView = ReturnType<typeof useSession>["view"];

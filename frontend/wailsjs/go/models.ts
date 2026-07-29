@@ -40,27 +40,58 @@ export namespace cluster {
 	        this.deployments = source["deployments"];
 	    }
 	}
-
-}
-
-export namespace main {
-	
-	export class BootstrapData {
-	    contexts: cluster.ContextInfo[];
-	    namespaces: string[];
-	    session: session.State;
-	    update: update.Info;
+	export class InterceptPort {
+	    name: string;
+	    protocol: string;
+	    servicePort: number;
+	    listenPort: number;
 	
 	    static createFrom(source: any = {}) {
-	        return new BootstrapData(source);
+	        return new InterceptPort(source);
 	    }
 	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.contexts = this.convertValues(source["contexts"], cluster.ContextInfo);
-	        this.namespaces = source["namespaces"];
-	        this.session = this.convertValues(source["session"], session.State);
-	        this.update = this.convertValues(source["update"], update.Info);
+	        this.name = source["name"];
+	        this.protocol = source["protocol"];
+	        this.servicePort = source["servicePort"];
+	        this.listenPort = source["listenPort"];
+	    }
+	}
+	export class PodPortInfo {
+	    name: string;
+	    port: number;
+	    protocol: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new PodPortInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.port = source["port"];
+	        this.protocol = source["protocol"];
+	    }
+	}
+	export class PodInfo {
+	    name: string;
+	    namespace: string;
+	    phase: string;
+	    ready: boolean;
+	    ports: PodPortInfo[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PodInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.namespace = source["namespace"];
+	        this.phase = source["phase"];
+	        this.ready = source["ready"];
+	        this.ports = this.convertValues(source["ports"], PodPortInfo);
 	    }
 	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
@@ -80,6 +111,320 @@ export namespace main {
 		    }
 		    return a;
 		}
+	}
+	
+	export class ServicePortInfo {
+	    name: string;
+	    port: number;
+	    protocol: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new ServicePortInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.port = source["port"];
+	        this.protocol = source["protocol"];
+	    }
+	}
+	export class ServiceInfo {
+	    name: string;
+	    namespace: string;
+	    clusterIP: string;
+	    ports: ServicePortInfo[];
+	
+	    static createFrom(source: any = {}) {
+	        return new ServiceInfo(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.name = source["name"];
+	        this.namespace = source["namespace"];
+	        this.clusterIP = source["clusterIP"];
+	        this.ports = this.convertValues(source["ports"], ServicePortInfo);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace intercept {
+	
+	export class PortMapping {
+	    servicePort: number;
+	    protocol: string;
+	    localHost: string;
+	    localPort: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new PortMapping(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.servicePort = source["servicePort"];
+	        this.protocol = source["protocol"];
+	        this.localHost = source["localHost"];
+	        this.localPort = source["localPort"];
+	    }
+	}
+	export class Info {
+	    id: string;
+	    namespace: string;
+	    service: string;
+	    clusterIP?: string;
+	    preview?: boolean;
+	    ports: cluster.InterceptPort[];
+	    locals: PortMapping[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.namespace = source["namespace"];
+	        this.service = source["service"];
+	        this.clusterIP = source["clusterIP"];
+	        this.preview = source["preview"];
+	        this.ports = this.convertValues(source["ports"], cluster.InterceptPort);
+	        this.locals = this.convertValues(source["locals"], PortMapping);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	export class Mapping {
+	    namespace: string;
+	    service: string;
+	    ports: PortMapping[];
+	
+	    static createFrom(source: any = {}) {
+	        return new Mapping(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.namespace = source["namespace"];
+	        this.service = source["service"];
+	        this.ports = this.convertValues(source["ports"], PortMapping);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+	
+	export class PreviewRequest {
+	    namespace: string;
+	    name: string;
+	    ports: PortMapping[];
+	
+	    static createFrom(source: any = {}) {
+	        return new PreviewRequest(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.namespace = source["namespace"];
+	        this.name = source["name"];
+	        this.ports = this.convertValues(source["ports"], PortMapping);
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace helper {
+	
+	export class Status {
+	    installed: boolean;
+	    running: boolean;
+	    version?: string;
+	    expected: string;
+	    socket: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.installed = source["installed"];
+	        this.running = source["running"];
+	        this.version = source["version"];
+	        this.expected = source["expected"];
+	        this.socket = source["socket"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
+export namespace main {
+	
+	export class BootstrapData {
+	    contexts: cluster.ContextInfo[];
+	    namespaces: string[];
+	    session: session.State;
+	    update: update.Info;
+	    preferredContext?: string;
+	    preferredNamespace?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new BootstrapData(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.contexts = this.convertValues(source["contexts"], cluster.ContextInfo);
+	        this.namespaces = source["namespaces"];
+	        this.session = this.convertValues(source["session"], session.State);
+	        this.update = this.convertValues(source["update"], update.Info);
+	        this.preferredContext = source["preferredContext"];
+	        this.preferredNamespace = source["preferredNamespace"];
+	    }
+	
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
+export namespace portfwd {
+	
+	export class Info {
+	    id: string;
+	    context: string;
+	    namespace: string;
+	    kind: string;
+	    name: string;
+	    podName: string;
+	    remotePort: number;
+	    localPort: number;
+	    address: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Info(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.context = source["context"];
+	        this.namespace = source["namespace"];
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.podName = source["podName"];
+	        this.remotePort = source["remotePort"];
+	        this.localPort = source["localPort"];
+	        this.address = source["address"];
+	    }
+	}
+	export class Request {
+	    context: string;
+	    namespace: string;
+	    kind: string;
+	    name: string;
+	    remotePort: number;
+	    localPort: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new Request(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.context = source["context"];
+	        this.namespace = source["namespace"];
+	        this.kind = source["kind"];
+	        this.name = source["name"];
+	        this.remotePort = source["remotePort"];
+	        this.localPort = source["localPort"];
+	    }
 	}
 
 }
@@ -178,6 +523,8 @@ export namespace singbox {
 	export class Metrics {
 	    downloadTotal: number;
 	    uploadTotal: number;
+	    memory?: number;
+	    activeConnections: number;
 	    connections: Connection[];
 	
 	    static createFrom(source: any = {}) {
@@ -188,6 +535,8 @@ export namespace singbox {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.downloadTotal = source["downloadTotal"];
 	        this.uploadTotal = source["uploadTotal"];
+	        this.memory = source["memory"];
+	        this.activeConnections = source["activeConnections"];
 	        this.connections = this.convertValues(source["connections"], Connection);
 	    }
 	

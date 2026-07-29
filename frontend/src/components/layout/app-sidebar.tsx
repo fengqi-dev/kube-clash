@@ -1,4 +1,7 @@
 import {
+  ArrowRightLeft,
+  Cable,
+  Eye,
   Gauge,
   Network,
   Orbit,
@@ -11,21 +14,34 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
-import type { AppView } from "@/hooks/use-session";
+import {
+  isNetworkView,
+  type AppView,
+  type NetworkSubView,
+} from "@/hooks/use-session";
 import { useI18n, type TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
 
-const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> = [
+const navigation: Array<{ id: Exclude<AppView, "settings" | NetworkSubView>; icon: LucideIcon }> = [
   { id: "overview", icon: Gauge },
   { id: "connections", icon: Waypoints },
   { id: "network", icon: Network },
   { id: "logs", icon: ScrollText },
 ];
 
+const networkChildren: Array<{ id: NetworkSubView; icon: LucideIcon; label: TranslationKey }> = [
+  { id: "network-portfwd", icon: Cable, label: "network.tabPortForward" },
+  { id: "network-exchange", icon: ArrowRightLeft, label: "network.tabExchange" },
+  { id: "network-preview", icon: Eye, label: "network.tabPreview" },
+];
+
 const navKeys: Record<AppView, TranslationKey> = {
   overview: "nav.overview",
   connections: "nav.connections",
   network: "nav.network",
+  "network-portfwd": "network.tabPortForward",
+  "network-exchange": "network.tabExchange",
+  "network-preview": "network.tabPreview",
   logs: "nav.logs",
   settings: "nav.settings",
 };
@@ -44,6 +60,7 @@ export function AppSidebar({
   onNavigate(view: AppView): void;
 }) {
   const { t } = useI18n();
+  const networkActive = isNetworkView(view);
 
   return (
     <aside className="relative z-10 flex w-[220px] shrink-0 flex-col border-r border-sidebar-border bg-sidebar px-3 py-3 text-sidebar-foreground">
@@ -59,6 +76,60 @@ export function AppSidebar({
 
       <nav className="mt-5 space-y-0.5">
         {navigation.map(({ id, icon: Icon }) => {
+          if (id === "network") {
+            const parentActive = view === "network";
+            return (
+              <div key={id} className="space-y-0.5">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => onNavigate("network")}
+                  className={cn(
+                    "h-9 w-full justify-start gap-2.5 rounded-md px-2.5 text-[13px] font-medium",
+                    parentActive
+                      ? "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent"
+                      : networkActive
+                        ? "text-foreground hover:bg-accent/70"
+                        : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                  )}
+                >
+                  <Icon
+                    size={16}
+                    strokeWidth={1.9}
+                    className={networkActive ? "text-foreground" : "text-muted-foreground"}
+                  />
+                  {t(navKeys.network)}
+                </Button>
+                <div className="ml-3 space-y-0.5 border-l border-sidebar-border pl-2">
+                  {networkChildren.map(({ id: childId, icon: ChildIcon, label }) => {
+                    const active = view === childId;
+                    return (
+                      <Button
+                        key={childId}
+                        type="button"
+                        variant="ghost"
+                        onClick={() => onNavigate(childId)}
+                        className={cn(
+                          "h-8 w-full justify-start gap-2 rounded-md px-2 text-[12px] font-medium",
+                          active
+                            ? "bg-sidebar-accent text-sidebar-accent-foreground hover:bg-sidebar-accent"
+                            : "text-muted-foreground hover:bg-accent/70 hover:text-foreground",
+                        )}
+                      >
+                        <ChildIcon
+                          size={14}
+                          strokeWidth={1.9}
+                          className={active ? "text-foreground" : "text-muted-foreground"}
+                        />
+                        {t(label)}
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            );
+          }
+
           const active = view === id;
           return (
             <Button

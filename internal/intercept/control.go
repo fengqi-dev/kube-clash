@@ -1,0 +1,199 @@
+package intercept
+
+import (
+	"bufio"
+	"context"
+	"fmt"
+	"io"
+	"net"
+	"sync"
+	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+)
+
+type controlClient struct {
+	address string
+	conn    net.Conn
+
+	writeMu sync.Mutex
+	replyCh chan tunnel.ControlMessage
+
+	onReady func(interceptID string, network byte, streamID uint64)
+}
+
+func dialControl(ctx context.Context, gatewayAddress string) (*controlClient, error) {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
+	if err != nil {
+		return nil, fmt.Errorf("dial gateway control: %w", err)
+	}
+	if err := tunnel.WriteControlSession(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if err := tunnel.ReadStatus(conn); err != nil {
+		_ = conn.Close()
+		return nil, fmt.Errorf("control handshake: %w", err)
+	}
+	client := &controlClient{
+		address: gatewayAddress,
+		conn:    conn,
+		replyCh: make(chan tunnel.ControlMessage, 8),
+	}
+	go client.readLoop()
+	return client, nil
+}
+
+func (c *controlClient) readLoop() {
+	for {
+		message, err := tunnel.ReadControlMessage(c.conn)
+		if err != nil {
+			close(c.replyCh)
+			return
+		}
+		switch message.Type {
+		case tunnel.CtrlInboundReady:
+			if c.onReady != nil {
+				c.onReady(message.InterceptID, message.Network, message.StreamID)
+			}
+		case tunnel.CtrlAck, tunnel.CtrlError:
+			select {
+			case c.replyCh <- message:
+			default:
+			}
+		}
+	}
+}
+
+func (c *controlClient) register(interceptID string, network byte, listenPort uint16) error {
+	return c.roundTrip(tunnel.ControlMessage{
+		Type:        tunnel.CtrlRegister,
+		InterceptID: interceptID,
+		Network:     network,
+		ListenPort:  listenPort,
+	})
+}
+
+func (c *controlClient) unregister(interceptID string) error {
+	return c.roundTrip(tunnel.ControlMessage{
+		Type:        tunnel.CtrlUnregister,
+		InterceptID: interceptID,
+	})
+}
+
+func (c *controlClient) roundTrip(message tunnel.ControlMessage) error {
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
+	if err := tunnel.WriteControlMessage(c.conn, message); err != nil {
+		return err
+	}
+	select {
+	case reply, ok := <-c.replyCh:
+		if !ok {
+			return io.EOF
+		}
+		if reply.Type == tunnel.CtrlError {
+			return fmt.Errorf("%s", reply.Error)
+		}
+		if reply.Type != tunnel.CtrlAck {
+			return fmt.Errorf("unexpected control reply type %d", reply.Type)
+		}
+		return nil
+	case <-time.After(10 * time.Second):
+		return fmt.Errorf("timed out waiting for control ack")
+	}
+}
+
+func (c *controlClient) close() error {
+	if c.conn == nil {
+		return nil
+	}
+	return c.conn.Close()
+}
+
+func acceptStream(ctx context.Context, gatewayAddress string, streamID uint64) (net.Conn, error) {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
+	if err != nil {
+		return nil, err
+	}
+	if err := tunnel.WriteAccept(conn, streamID); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if err := tunnel.ReadStatus(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
+}
+
+func relayTCP(left, right net.Conn) {
+	done := make(chan struct{}, 2)
+	copyStream := func(dst, src net.Conn) {
+		_, _ = io.Copy(dst, src)
+		if value, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = value.CloseWrite()
+		}
+		done <- struct{}{}
+	}
+	go copyStream(left, right)
+	go copyStream(right, left)
+	<-done
+}
+
+func relayUDP(tunnelConn net.Conn, localHost string, localPort int) {
+	defer tunnelConn.Close()
+	localAddr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
+	udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
+	if err != nil {
+		return
+	}
+	local, err := net.DialUDP("udp", nil, udpAddr)
+	if err != nil {
+		return
+	}
+	defer local.Close()
+
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(done) }) }
+
+	go func() {
+		defer stop()
+		reader := bufio.NewReader(tunnelConn)
+		var buffer []byte
+		for {
+			payload, err := tunnel.ReadDatagram(reader, buffer)
+			if err != nil {
+				return
+			}
+			buffer = payload[:0]
+			if _, err := local.Write(payload); err != nil {
+				return
+			}
+		}
+	}()
+
+	buffer := make([]byte, tunnel.MaxDatagramSize)
+	for {
+		select {
+		case <-done:
+			return
+		default:
+		}
+		_ = local.SetReadDeadline(time.Now().Add(60 * time.Second))
+		n, err := local.Read(buffer)
+		if err != nil {
+			stop()
+			<-done
+			return
+		}
+		if err := tunnel.WriteDatagram(tunnelConn, buffer[:n]); err != nil {
+			stop()
+			<-done
+			return
+		}
+	}
+}

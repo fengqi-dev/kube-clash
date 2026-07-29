@@ -2,9 +2,11 @@ package singbox
 
 // Metrics is the KubeLoop-owned session metrics contract (not Clash-shaped).
 type Metrics struct {
-	DownloadTotal int64        `json:"downloadTotal"`
-	UploadTotal   int64        `json:"uploadTotal"`
-	Connections   []Connection `json:"connections"`
+	DownloadTotal     int64        `json:"downloadTotal"`
+	UploadTotal       int64        `json:"uploadTotal"`
+	Memory            uint64       `json:"memory,omitempty"`
+	ActiveConnections int          `json:"activeConnections"`
+	Connections       []Connection `json:"connections"`
 }
 
 type Connection struct {

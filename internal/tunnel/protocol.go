@@ -11,8 +11,10 @@ import (
 )
 
 const (
-	CommandTCP byte = 1
-	CommandUDP byte = 2
+	CommandTCP     byte = 1
+	CommandUDP     byte = 2
+	CommandControl byte = 3
+	CommandAccept  byte = 4
 
 	StatusOK    byte = 0
 	StatusError byte = 1
@@ -20,6 +22,7 @@ const (
 	MaxDatagramSize = 65507
 	maxHostSize     = 1024
 	maxErrorSize    = 4096
+	maxIDSize       = 256
 )
 
 var magic = [4]byte{'K', 'C', 'G', 1}
@@ -54,18 +57,23 @@ func WriteOpen(w io.Writer, request OpenRequest) error {
 }
 
 func ReadOpen(r io.Reader) (OpenRequest, error) {
-	header := make([]byte, 7)
-	if _, err := io.ReadFull(r, header); err != nil {
+	command, err := ReadSessionHeader(r)
+	if err != nil {
 		return OpenRequest{}, err
 	}
-	if string(header[:4]) != string(magic[:]) {
-		return OpenRequest{}, errors.New("invalid tunnel protocol magic")
-	}
-	command := header[4]
+	return ReadOpenBody(r, command)
+}
+
+// ReadOpenBody reads host/port after magic+command were already consumed.
+func ReadOpenBody(r io.Reader, command byte) (OpenRequest, error) {
 	if command != CommandTCP && command != CommandUDP {
 		return OpenRequest{}, fmt.Errorf("unsupported command %d", command)
 	}
-	hostSize := int(binary.BigEndian.Uint16(header[5:7]))
+	var sizeBuf [2]byte
+	if _, err := io.ReadFull(r, sizeBuf[:]); err != nil {
+		return OpenRequest{}, err
+	}
+	hostSize := int(binary.BigEndian.Uint16(sizeBuf[:]))
 	if hostSize == 0 || hostSize > maxHostSize {
 		return OpenRequest{}, errors.New("target host length is invalid")
 	}
@@ -78,6 +86,41 @@ func ReadOpen(r io.Reader) (OpenRequest, error) {
 		return OpenRequest{}, errors.New("target port is required")
 	}
 	return OpenRequest{Command: command, Host: string(target[:hostSize]), Port: port}, nil
+}
+
+// ReadSessionHeader reads the shared magic + command byte used by all session types.
+func ReadSessionHeader(r io.Reader) (command byte, err error) {
+	header := make([]byte, 5)
+	if _, err := io.ReadFull(r, header); err != nil {
+		return 0, err
+	}
+	if string(header[:4]) != string(magic[:]) {
+		return 0, errors.New("invalid tunnel protocol magic")
+	}
+	return header[4], nil
+}
+
+func WriteControlSession(w io.Writer) error {
+	header := make([]byte, 5)
+	copy(header[:4], magic[:])
+	header[4] = CommandControl
+	return writeAll(w, header)
+}
+
+func WriteAccept(w io.Writer, streamID uint64) error {
+	header := make([]byte, 13)
+	copy(header[:4], magic[:])
+	header[4] = CommandAccept
+	binary.BigEndian.PutUint64(header[5:13], streamID)
+	return writeAll(w, header)
+}
+
+func ReadAcceptStreamID(r io.Reader) (uint64, error) {
+	var raw [8]byte
+	if _, err := io.ReadFull(r, raw[:]); err != nil {
+		return 0, err
+	}
+	return binary.BigEndian.Uint64(raw[:]), nil
 }
 
 func WriteStatus(w io.Writer, err error) error {

@@ -76,6 +76,7 @@ jobs:
           else
             wails build -clean -ldflags "-X main.version=${GITHUB_REF_NAME}"
           fi
+          ./build/bundle-helper.sh "${GITHUB_REF_NAME}" build/bin
 
       - name: Build desktop application
         if: runner.os == 'Windows'
@@ -83,6 +84,9 @@ jobs:
         run: |
           $versionFlag = "-X main.version=$env:GITHUB_REF_NAME"
           wails build -clean -ldflags $versionFlag
+          New-Item -ItemType Directory -Force -Path build/bin | Out-Null
+          go build -trimpath -ldflags "-s -w $versionFlag" `
+            -o "build/bin/kubeloop-helper.exe" ./cmd/kubeloop-helper
 
       - name: Package desktop application
         if: runner.os != 'Windows'

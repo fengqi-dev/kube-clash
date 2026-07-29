@@ -18,6 +18,9 @@ func defaultStartCommand(binaryPath, workDir string, output io.Writer) (*exec.Cm
 	if !ok {
 		return nil, errors.New("start privileged sing-box: log output is not a file")
 	}
+	if os.Geteuid() == 0 {
+		return startLifecycleScript(binaryPath, workDir, logFile)
+	}
 	routeCleanup, err := managedRouteCleanupCommands(workDir)
 	if err != nil {
 		return nil, err
@@ -25,15 +28,6 @@ func defaultStartCommand(binaryPath, workDir string, output io.Writer) (*exec.Cm
 	scriptPath, err := writeUnixLifecycleScript(binaryPath, workDir, logFile.Name(), routeCleanup)
 	if err != nil {
 		return nil, err
-	}
-	if os.Geteuid() == 0 {
-		cmd := exec.Command("/bin/sh", scriptPath)
-		cmd.Stdout = io.Discard
-		cmd.Stderr = output
-		if err := cmd.Start(); err != nil {
-			return nil, fmt.Errorf("start sing-box: %w", err)
-		}
-		return cmd, nil
 	}
 	script := "do shell script " + strconv.Quote("/bin/sh "+shellQuote(scriptPath)) +
 		" with administrator privileges"

@@ -11,6 +11,7 @@ import (
 	"net/netip"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
@@ -19,6 +20,25 @@ import (
 type Server struct {
 	Logger      *log.Logger
 	DialTimeout time.Duration
+
+	mu         sync.Mutex
+	nextStream atomic.Uint64
+	controls   map[*controlSession]struct{}
+	listeners  map[string]*interceptListener
+	pending    map[uint64]*pendingStream
+}
+
+func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
+	if dialTimeout == 0 {
+		dialTimeout = 10 * time.Second
+	}
+	return &Server{
+		Logger:      logger,
+		DialTimeout: dialTimeout,
+		controls:    make(map[*controlSession]struct{}),
+		listeners:   make(map[string]*interceptListener),
+		pending:     make(map[uint64]*pendingStream),
+	}
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -35,10 +55,10 @@ func (s *Server) Serve(listener net.Listener) error {
 }
 
 func (s *Server) handle(client net.Conn) {
-	defer client.Close()
 	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
-	request, err := tunnel.ReadOpen(client)
+	command, err := tunnel.ReadSessionHeader(client)
 	if err != nil {
+		_ = client.Close()
 		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			s.logf("reject handshake from %s: %v", client.RemoteAddr(), err)
 		}
@@ -46,11 +66,28 @@ func (s *Server) handle(client net.Conn) {
 	}
 	_ = client.SetReadDeadline(time.Time{})
 
-	timeout := s.DialTimeout
-	if timeout == 0 {
-		timeout = 10 * time.Second
+	switch command {
+	case tunnel.CommandTCP, tunnel.CommandUDP:
+		s.handleOutbound(client, command)
+	case tunnel.CommandControl:
+		s.handleControl(client)
+	case tunnel.CommandAccept:
+		s.handleAccept(client)
+	default:
+		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", command))
+		_ = client.Close()
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+}
+
+func (s *Server) handleOutbound(client net.Conn, command byte) {
+	defer client.Close()
+	request, err := tunnel.ReadOpenBody(client, command)
+	if err != nil {
+		s.logf("reject open from %s: %v", client.RemoteAddr(), err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), s.DialTimeout)
 	defer cancel()
 	targetAddress, err := resolvePrivate(ctx, request.Host, request.Port)
 	if err != nil {
@@ -77,6 +114,26 @@ func (s *Server) handle(client net.Conn) {
 		return
 	}
 	relayTCP(client, target)
+}
+
+func (s *Server) handleAccept(client net.Conn) {
+	streamID, err := tunnel.ReadAcceptStreamID(client)
+	if err != nil {
+		_ = client.Close()
+		return
+	}
+	pending := s.takePending(streamID)
+	if pending == nil {
+		_ = tunnel.WriteStatus(client, fmt.Errorf("unknown stream %d", streamID))
+		_ = client.Close()
+		return
+	}
+	if err := tunnel.WriteStatus(client, nil); err != nil {
+		pending.close()
+		_ = client.Close()
+		return
+	}
+	pending.serve(client)
 }
 
 func (s *Server) relayUDP(client, target net.Conn) {

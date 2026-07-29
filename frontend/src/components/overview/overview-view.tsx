@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { ConnectionOrb } from "@/components/overview/connection-orb";
 import { ConnectionSteps } from "@/components/overview/connection-steps";
+import { TrafficStats } from "@/components/overview/traffic-stats";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
@@ -178,6 +179,12 @@ export function OverviewView({
           tone={ready ? "success" : "neutral"}
         />
       </div>
+
+      <TrafficStats
+        ready={ready}
+        metrics={session.metrics}
+        updatedAt={session.updatedAt}
+      />
     </div>
   );
 }

@@ -10,6 +10,14 @@ export function CheckForUpdates() {
   return window['go']['main']['App']['CheckForUpdates']();
 }
 
+export function HelperStatus() {
+  return window['go']['main']['App']['HelperStatus']();
+}
+
+export function InstallHelper() {
+  return window['go']['main']['App']['InstallHelper']();
+}
+
 export function Connect(arg1, arg2) {
   return window['go']['main']['App']['Connect'](arg1, arg2);
 }
@@ -18,10 +26,62 @@ export function Disconnect() {
   return window['go']['main']['App']['Disconnect']();
 }
 
+export function ListIntercepts() {
+  return window['go']['main']['App']['ListIntercepts']();
+}
+
+export function ListPods(arg1, arg2) {
+  return window['go']['main']['App']['ListPods'](arg1, arg2);
+}
+
+export function ListPortForwards() {
+  return window['go']['main']['App']['ListPortForwards']();
+}
+
+export function ListPreviews() {
+  return window['go']['main']['App']['ListPreviews']();
+}
+
+export function ListServices(arg1, arg2) {
+  return window['go']['main']['App']['ListServices'](arg1, arg2);
+}
+
 export function Namespaces(arg1) {
   return window['go']['main']['App']['Namespaces'](arg1);
 }
 
 export function OpenUpdatePage() {
   return window['go']['main']['App']['OpenUpdatePage']();
+}
+
+export function RememberSelection(arg1, arg2) {
+  return window['go']['main']['App']['RememberSelection'](arg1, arg2);
+}
+
+export function StartIntercept(arg1) {
+  return window['go']['main']['App']['StartIntercept'](arg1);
+}
+
+export function StartPortForward(arg1) {
+  return window['go']['main']['App']['StartPortForward'](arg1);
+}
+
+export function StartPreview(arg1) {
+  return window['go']['main']['App']['StartPreview'](arg1);
+}
+
+export function StopIntercept(arg1) {
+  return window['go']['main']['App']['StopIntercept'](arg1);
+}
+
+export function StopPortForward(arg1) {
+  return window['go']['main']['App']['StopPortForward'](arg1);
+}
+
+export function StopPreview(arg1) {
+  return window['go']['main']['App']['StopPreview'](arg1);
+}
+
+export function UninstallHelper() {
+  return window['go']['main']['App']['UninstallHelper']();
 }

@@ -30,6 +30,21 @@ type Discovery struct {
 	Deployments  int      `json:"deployments"`
 }
 
+// ServicePortInfo describes one Service port for the intercept UI.
+type ServicePortInfo struct {
+	Name     string `json:"name"`
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol"`
+}
+
+// ServiceInfo is a ClusterIP Service that can be intercepted.
+type ServiceInfo struct {
+	Name      string            `json:"name"`
+	Namespace string            `json:"namespace"`
+	ClusterIP string            `json:"clusterIP"`
+	Ports     []ServicePortInfo `json:"ports"`
+}
+
 type Provider struct {
 	rules *clientcmd.ClientConfigLoadingRules
 }
@@ -96,6 +111,54 @@ func (p *Provider) Namespaces(ctx context.Context, contextName string) ([]string
 	}
 	sort.Strings(names)
 	return names, nil
+}
+
+func (p *Provider) ListServices(
+	ctx context.Context, contextName, namespace string,
+) ([]ServiceInfo, error) {
+	if namespace == "" {
+		namespace = "default"
+	}
+	client, err := p.client(contextName)
+	if err != nil {
+		return nil, err
+	}
+	list, err := client.CoreV1().Services(namespace).List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return nil, fmt.Errorf("list services: %w", err)
+	}
+	items := make([]ServiceInfo, 0, len(list.Items))
+	for _, service := range list.Items {
+		if service.Spec.ClusterIP == "" || service.Spec.ClusterIP == "None" {
+			continue
+		}
+		if strings.EqualFold(string(service.Spec.Type), "ExternalName") {
+			continue
+		}
+		ports := make([]ServicePortInfo, 0, len(service.Spec.Ports))
+		for _, port := range service.Spec.Ports {
+			protocol := string(port.Protocol)
+			if protocol == "" {
+				protocol = "TCP"
+			}
+			ports = append(ports, ServicePortInfo{
+				Name: port.Name, Port: port.Port, Protocol: protocol,
+			})
+		}
+		if len(ports) == 0 {
+			continue
+		}
+		items = append(items, ServiceInfo{
+			Name:      service.Name,
+			Namespace: service.Namespace,
+			ClusterIP: service.Spec.ClusterIP,
+			Ports:     ports,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		return items[i].Name < items[j].Name
+	})
+	return items, nil
 }
 
 func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery, error) {

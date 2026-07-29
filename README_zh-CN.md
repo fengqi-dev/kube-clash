@@ -6,100 +6,82 @@
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-KubeLoop 是一个跨平台 Kubernetes 桌面网络客户端。它通过托管的 sing-box 内核和 TUN
-路由，让本地应用透明访问 Pod IP、ClusterIP Service 和集群 DNS，无需逐个配置应用代理，
-也不要求用户在终端中执行命令。
+**[官网](https://fengqi-dev.github.io/kube-loop/)** · **[下载](https://github.com/fengqi-dev/kube-loop/releases)** · **[设计文档](docs/design.md)**
 
-> [!WARNING]
-> KubeLoop 当前处于 M1 开发阶段。完整连接编排和 sing-box 托管生命周期已经实现；
-> 生产环境 TUN 提权和签名安装包仍在开发中。
+KubeLoop 是一款桌面客户端：像连 VPN 一样连上 Kubernetes 集群，让本机应用直接访问
+Pod IP、ClusterIP Service 和 `*.cluster.local`——不必再为每个服务做端口转发，也不用给
+每个应用配代理。
 
-## 为什么需要 KubeLoop？
+> 早期体验版（M1）。连接编排、TUN 网络与特权 Helper 已可用；签名安装包仍在打磨。
 
-开发者从本机访问 Kubernetes 私有网络时，通常需要为每个 Service 建立端口转发、修改应用
-代理设置，或者安装高权限 VPN 组件。KubeLoop 提供以桌面客户端为中心的流程：
+---
 
-1. 选择 kubeconfig Context 和 DNS Namespace。
-2. 点击**连接**。
-3. 客户端自动发现集群网络并安装最小化 Gateway。
-4. sing-box 只将 Kubernetes 目标流量送入隧道。
-5. 本地应用直接访问 Pod、Service 和 `*.cluster.local`。
+## 你能得到什么
 
-所有非集群流量保持 `DIRECT`。
+- **一键接入集群网络** — 选择 kubeconfig Context 与 Namespace，点击连接。KubeLoop
+  自动发现 Pod / Service 网段与集群 DNS，并拉起定向隧道。
+- **对应用透明** — 浏览器、IDE、CLI、SDK 直接访问集群地址，无需在每个软件里配置
+  SOCKS / HTTP 代理。
+- **只接管集群流量** — 仅 Kubernetes 相关目标走隧道，其余流量仍走你原来的网络。
+- **不依赖公网暴露** — 集群内 Gateway 经 Kubernetes API Server（port-forward）到达，
+  不用 NodePort、LoadBalancer 或对外 Ingress。
+- **macOS / Windows / Linux** — 同一套桌面使用体验。
 
-## 架构
+## 常见场景
+
+| 你想做的事 | KubeLoop 怎么帮你 |
+| --- | --- |
+| 浏览器打开集群内 Service / 调内部 API | 连接后使用 ClusterIP 或 `*.svc.cluster.local` |
+| 直接访问真实 Pod IP 做排查 | 连接后本机已路由 Pod 网段 |
+| 不想敲 `kubectl port-forward` | 网络页的 **端口转发**（未开 TUN 也能用） |
+| 用本机进程顶替某个集群 Service | **流量交换**（Service Local Intercept）：集群侧仍用原 ClusterIP / DNS，流量落到本机 |
+| 把本机进程临时暴露成新的 ClusterIP | **预览**：创建临时 Service 指向本地应用 |
+
+## 工作原理（简版）
 
 ```text
-本地应用
-   │
-   ▼
-sing-box TUN / DNS / 规则
-   │  SOCKS5 TCP + UDP
-   ▼
-KubeLoop 本地桥
-   │  Kubernetes API Server port-forward
-   ▼
-集群内 Gateway
-   │
-   ├── Pod IP
-   ├── ClusterIP Service
-   └── CoreDNS
+本机应用  →  TUN + 分流 DNS  →  本地桥  →  API Server  →  集群内 Gateway
+                                                         ├─ Pod
+                                                         ├─ Service
+                                                         └─ CoreDNS
 ```
 
-- **桌面界面：** Wails、React、TypeScript 和 Tailwind CSS。
-- **Kubernetes 集成：** 使用 client-go，不依赖本机 `kubectl`。
-- **网络内核：** 托管的 [sing-box](https://github.com/SagerNet/sing-box) 独立进程，
-  负责 TUN、DNS 劫持和规则匹配。
-- **本地网络桥：** 将 SOCKS5 TCP/UDP 转换为 KubeLoop 隧道协议。
-- **集群 Gateway：** 无特权、非 root 的 Deployment，只能通过 Kubernetes API Server
-  访问。
+KubeLoop 托管固定版本的 [sing-box](https://github.com/SagerNet/sing-box) 负责
+TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机不必安装 `kubectl`。
 
-## 当前进度
+## 快速开始
 
-已经完成：
+1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载
+   （或按下方说明自行构建）。
+2. 确认本机 kubeconfig 能正常访问目标集群 API。
+3. 打开 KubeLoop，选择 **Context** 与 **Namespace**，点击 **连接**。
+4. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
+   可在 **设置** 中安装或卸载该服务。
 
-- 跨平台 Wails 桌面工程和现代 Tailwind UI。
-- 无边框且跟随系统浅色/深色外观，支持英文（默认）和简体中文界面。
-- kubeconfig、Context 和 Namespace 读取。
-- Pod CIDR、ClusterIP、Pod 和 CoreDNS 自动发现。
-- 动态生成 sing-box TUN、DNS、SOCKS5 和路由配置。
-- 在 macOS 上自动请求管理员授权启动 sing-box TUN，并验证 TUN 是否真正初始化成功。
-- 自动下载固定版本 sing-box，并执行 SHA-256 校验。
-- 幂等安装无特权集群 Gateway。
-- 使用 client-go 原生建立 API Server port-forward。
-- 本地 SOCKS5 TCP/UDP 桥和 Gateway 隧道协议。
-- Connect/Disconnect 完整生命周期和逆序资源清理。
-- ClusterIP TCP 和 CoreDNS UDP 的 Minikube 集成测试。
-- sing-box 实时连接、流量、网络详情和诊断页面。
-- 启动时自动检查最新稳定版 GitHub Release，支持手动刷新和打开下载页面。
+连接成功后，可在概览查看流量与状态，在网络页使用发现、端口转发、流量交换与预览。
 
-正在开发：
+## 安全设计
 
-- macOS 生产环境 TUN 授权、特权 Helper 和应用签名。
-- Windows 和 Linux 平台打包。
-- 故障自动恢复和应用内更新安装。
+- kubeconfig 凭证留在桌面进程内，不会交给 Gateway，也不会作为独立密钥库交给 UI。
+- Gateway 不使用 `privileged`、`hostNetwork`、`NET_ADMIN`，也不挂载 ServiceAccount
+  Token；不以 Service / Ingress 对外发布。
+- 路由仅覆盖已发现的 Pod / Service 网段；非集群流量保持直连。
+- 流量交换 / 预览对 Service、EndpointSlice 的修改，在停止或断开时始终恢复。
+- 特权 Helper 只接受本机 IPC，用于在 `~/.kubeloop` 会话目录下启停 TUN；它不访问
+  Kubernetes API。
 
-## 发布版本
+## 平台说明
 
-推送匹配 `v*` 的标签（例如 `v0.1.0`）后，GitHub Actions 会构建 macOS、Windows
-和 Linux 桌面包，构建 Linux amd64、arm64 Gateway 二进制，将多架构 Gateway
-镜像发布到 GHCR，生成 `SHA256SUMS`，并将全部产物发布到 GitHub Releases。
+| | |
+| --- | --- |
+| **界面** | 浅色 / 深色（跟随系统），英文与简体中文 |
+| **数据** | 状态与内核位于 `~/.kubeloop` |
+| **Helper** | 安装一次即可管理 TUN / DNS / 路由；可在设置中随时卸载 |
+| **更新** | 启动时检查 GitHub Releases；可在设置中打开下载页 |
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+## 开发者
 
-## 本地开发
-
-### 环境要求
-
-- Go 1.26+
-- Node.js 22+
-- Wails v2.13
-- 用于集成测试的 Kubernetes 集群
-
-### 启动开发环境
+环境：Go 1.26+、Node.js 22+、[Wails](https://wails.io) v2.13。
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
@@ -107,74 +89,33 @@ npm install --prefix frontend
 wails dev
 ```
 
-首次连接时，KubeLoop 会自动下载固定版本的 sing-box。开发环境既可以使用自动下载，
-也可以覆盖 sing-box 路径和 Gateway 镜像：
-
-```bash
-KUBELOOP_SINGBOX_PATH=/absolute/path/to/sing-box \
-KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
-wails dev
-```
-
-当前 macOS 预览版会直接启动 sing-box。在签名特权 Helper 完成前，创建 TUN 路由仍要求
-以具备相应权限的方式启动开发版本。
-
-### 构建
-
 ```bash
 wails build
+./build/bundle-helper.sh    # 将 kubeloop-helper 放到应用旁或 .app 内
 ```
 
-### 单元测试
+开发常用覆盖：
+
+```bash
+# 使用本地 sing-box / Gateway 镜像
+KUBELOOP_SINGBOX_PATH=/path/to/sing-box \
+KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
+wails dev
+
+# 不装系统 Helper，改为每次连接提权
+KUBELOOP_HELPER=0 wails dev
+```
 
 ```bash
 go test ./...
-npm run build --prefix frontend
+./e2e/run.sh                # Minikube 端到端（见 e2e/）
 ```
 
-## Minikube 集成测试
-
-集成测试会在当前 Minikube 中创建 `kubeloop-system` Namespace 和 Gateway Deployment，
-并验证：
-
-- Gateway 自动安装和 Ready 检查；
-- Kubernetes API Server port-forward；
-- TCP 访问 Kubernetes ClusterIP；
-- UDP 访问 CoreDNS；
-- SOCKS5 TCP 和 UDP 完整链路。
-
-构建并加载本地 arm64 Gateway 镜像：
-
-```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-  -trimpath -ldflags="-s -w" \
-  -o build/bin/kube-loop-gateway-linux-arm64 \
-  ./cmd/kubeloop-gateway
-
-minikube image build \
-  -t kube-loop-gateway:dev \
-  -f build/gateway.local.Dockerfile .
-```
-
-运行集成测试：
-
-```bash
-KUBELOOP_MINIKUBE_TEST=1 \
-  go test -tags=integration ./internal/cluster \
-  -run TestMinikubeGatewayTCPAndDNS -v -count=1
-```
-
-## 安全设计
-
-- kubeconfig 凭证只保留在桌面客户端核心进程中。
-- Gateway 不使用 `privileged`、`hostNetwork`、`NET_ADMIN`，也不挂载
-  ServiceAccount Token。
-- Gateway 不通过 Service、NodePort、Ingress 或 LoadBalancer 暴露。
-- Gateway 拒绝公网、回环、链路本地和组播目标。
-- sing-box 只接收自动发现的 Pod 和 Service 路由，其余流量保持直连。
+推送 `v*` 标签即可发布（桌面包、Gateway 二进制与 GHCR 镜像）。
 
 ## 文档
 
+- [项目网站](https://fengqi-dev.github.io/kube-loop/)
 - [桌面客户端设计](docs/design.md)
 - [第三方软件声明](THIRD_PARTY_NOTICES.md)
 
@@ -182,5 +123,5 @@ KUBELOOP_MINIKUBE_TEST=1 \
 
 KubeLoop 源代码使用 [Apache License 2.0](LICENSE)。
 
-sing-box 是使用 GPLv3 的独立托管程序。发布包含 sing-box 的安装包时，必须独立履行其许可证
-和对应源码提供义务，详见[第三方软件声明](THIRD_PARTY_NOTICES.md)。
+sing-box 是独立托管的 GPLv3 程序。分发包含 sing-box 的安装包时须自行履行其许可证义务，
+详见[第三方软件声明](THIRD_PARTY_NOTICES.md)。

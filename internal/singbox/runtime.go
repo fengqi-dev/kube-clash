@@ -21,6 +21,12 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
+// PrivilegedStartFunc starts sing-box via an external privileged helper.
+// It returns a stop function used during Close.
+type PrivilegedStartFunc func(
+	ctx context.Context, binaryPath, workDir string,
+) (stop func(context.Context) error, err error)
+
 type RunningCore interface {
 	io.Closer
 	Done() <-chan struct{}
@@ -31,9 +37,10 @@ type RunningCore interface {
 const DefaultMetricsInterval = time.Second
 
 type Runtime struct {
-	Installer    *Installer
-	HTTPClient   *http.Client
-	StartCommand func(string, string, io.Writer) (*exec.Cmd, error)
+	Installer       *Installer
+	HTTPClient      *http.Client
+	StartCommand    func(string, string, io.Writer) (*exec.Cmd, error)
+	PrivilegedStart PrivilegedStartFunc
 }
 
 func (r *Runtime) Start(
@@ -119,23 +126,37 @@ func (r *Runtime) Start(
 		cleanup()
 		return nil, fmt.Errorf("create sing-box log: %w", err)
 	}
-	cmd, err := r.startCommand(binaryPath, workDir, logFile)
-	if err != nil {
-		logFile.Close()
-		cleanup()
-		return nil, err
-	}
 	process := &Process{
-		cmd: cmd, done: make(chan struct{}), logFile: logFile,
+		done: make(chan struct{}), stopCh: make(chan struct{}), logFile: logFile,
 		workDir: workDir, logPath: logPath,
-		privilegedPIDPath: privilegedPIDPath(
-			workDir, r.StartCommand == nil && usesLifecycleWrapper(),
-		),
 		controllerAddress: net.JoinHostPort("127.0.0.1", strconv.Itoa(controllerPort)),
 		controllerSecret:  secret,
 		dnsPort:           dnsPort,
 		resolverDomains:   ResolverDomains(namespace),
 		httpClient:        r.HTTPClient,
+	}
+	if r.StartCommand == nil && r.PrivilegedStart != nil {
+		stop, startErr := r.PrivilegedStart(ctx, binaryPath, workDir)
+		if startErr != nil {
+			logFile.Close()
+			cleanup()
+			return nil, startErr
+		}
+		process.useHelper = true
+		process.helperStop = stop
+		_ = logFile.Close()
+		process.logFile = nil
+	} else {
+		cmd, startErr := r.startCommand(binaryPath, workDir, logFile)
+		if startErr != nil {
+			logFile.Close()
+			cleanup()
+			return nil, startErr
+		}
+		process.cmd = cmd
+		process.privilegedPIDPath = privilegedPIDPath(
+			workDir, r.StartCommand == nil && usesLifecycleWrapper(),
+		)
 	}
 	go process.wait()
 	go func() {
@@ -195,10 +216,13 @@ func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
 type Process struct {
 	cmd               *exec.Cmd
 	done              chan struct{}
+	stopCh            chan struct{}
 	logFile           *os.File
 	workDir           string
 	logPath           string
 	privilegedPIDPath string
+	useHelper         bool
+	helperStop        func(context.Context) error
 	controllerAddress string
 	controllerSecret  string
 	dnsPort           int
@@ -237,6 +261,7 @@ func (p *Process) Snapshot(ctx context.Context) (Metrics, error) {
 type clashConnections struct {
 	DownloadTotal int64             `json:"downloadTotal"`
 	UploadTotal   int64             `json:"uploadTotal"`
+	Memory        uint64            `json:"memory"`
 	Connections   []clashConnection `json:"connections"`
 }
 
@@ -293,9 +318,11 @@ func mapClashMetrics(raw clashConnections) Metrics {
 		connections = []Connection{}
 	}
 	return Metrics{
-		DownloadTotal: raw.DownloadTotal,
-		UploadTotal:   raw.UploadTotal,
-		Connections:   connections,
+		DownloadTotal:     raw.DownloadTotal,
+		UploadTotal:       raw.UploadTotal,
+		Memory:            raw.Memory,
+		ActiveConnections: len(connections),
+		Connections:       connections,
 	}
 }
 
@@ -325,11 +352,21 @@ func (p *Process) request(ctx context.Context, path string) (*http.Response, err
 }
 
 func (p *Process) wait() {
+	if p.useHelper {
+		<-p.stopCh
+		p.errMu.Lock()
+		p.waitErr = nil
+		p.errMu.Unlock()
+		close(p.done)
+		return
+	}
 	err := p.cmd.Wait()
 	p.errMu.Lock()
 	p.waitErr = err
 	p.errMu.Unlock()
-	_ = p.logFile.Close()
+	if p.logFile != nil {
+		_ = p.logFile.Close()
+	}
 	close(p.done)
 }
 
@@ -338,9 +375,18 @@ func (p *Process) Close() error {
 		select {
 		case <-p.done:
 		default:
-			if p.privilegedPIDPath != "" {
+			if p.useHelper {
+				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				if p.helperStop != nil {
+					_ = p.helperStop(ctx)
+				} else {
+					_ = SignalLifecycleStop(p.workDir)
+				}
+				cancel()
+				close(p.stopCh)
+			} else if p.privilegedPIDPath != "" {
 				_ = stopPrivilegedProcess(p.privilegedPIDPath)
-			} else if p.cmd.Process != nil {
+			} else if p.cmd != nil && p.cmd.Process != nil {
 				if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
 					_ = p.cmd.Process.Kill()
 				}
@@ -348,10 +394,17 @@ func (p *Process) Close() error {
 			select {
 			case <-p.done:
 			case <-time.After(5 * time.Second):
-				if p.cmd.Process != nil {
+				if p.cmd != nil && p.cmd.Process != nil {
 					_ = p.cmd.Process.Kill()
 				}
-				<-p.done
+				if p.useHelper {
+					select {
+					case <-p.done:
+					case <-time.After(2 * time.Second):
+					}
+				} else {
+					<-p.done
+				}
 			}
 		}
 		_ = os.RemoveAll(p.workDir)

@@ -5,15 +5,21 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"os"
 	"sort"
 	"sync"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
+	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
 type Phase string
@@ -51,14 +57,23 @@ type State struct {
 type ClusterProvider interface {
 	Contexts() ([]cluster.ContextInfo, error)
 	Namespaces(context.Context, string) ([]string, error)
+	ListServices(context.Context, string, string) ([]cluster.ServiceInfo, error)
+	ListPods(context.Context, string, string) ([]cluster.PodInfo, error)
 	Discover(context.Context, string) (cluster.Discovery, error)
 	WatchInventory(
 		context.Context,
 		string,
 		func(cluster.InventorySnapshot),
 	) (io.Closer, error)
-	EnsureGateway(context.Context, string, string) (string, error)
+	EnsureGateway(context.Context, string, string) (cluster.GatewayInfo, error)
 	StartPortForward(context.Context, string, string, uint16) (cluster.PortForward, error)
+	StartPodPortForward(context.Context, string, string, string, uint16, uint16) (cluster.PortForward, error)
+	ResolveServiceBackend(context.Context, string, string, string, int32) (string, uint16, error)
+	ApplyServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot, string) error
+	RestoreServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot) error
+	CreatePreviewService(context.Context, string, cluster.PreviewServiceSnapshot, string) (*corev1.Service, error)
+	DeletePreviewService(context.Context, string, cluster.PreviewServiceSnapshot) error
+	GetService(context.Context, string, string, string) (*corev1.Service, error)
 }
 
 type Core interface {
@@ -102,15 +117,19 @@ type Manager struct {
 	core          Core
 	bridgeFactory BridgeFactory
 	gatewayImage  string
+	store         *store.Store
 
 	mu        sync.RWMutex
 	state     State
 	cancel    context.CancelFunc
 	done      chan struct{}
 	listeners []func(State)
+	intercept *intercept.Manager
+	portfwd   *portfwd.Manager
 
 	recentConnections map[string]recentConnection
 	lastTraffic       map[string]connectionTraffic
+	restoring         bool
 }
 
 // Keep short-lived TUN connections visible between core snapshot polls.
@@ -129,9 +148,11 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	}
 	manager := &Manager{
 		provider:      provider,
-		core:          &singbox.Runtime{},
+		core:          newSingboxRuntime(),
 		bridgeFactory: socksbridge.Listen,
 		gatewayImage:  image,
+		intercept:     intercept.NewManager(provider),
+		portfwd:       portfwd.NewManager(provider),
 		state: State{
 			Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
 		},
@@ -148,6 +169,18 @@ func (m *Manager) Contexts() ([]cluster.ContextInfo, error) {
 
 func (m *Manager) Namespaces(ctx context.Context, contextName string) ([]string, error) {
 	return m.provider.Namespaces(ctx, contextName)
+}
+
+func (m *Manager) ListServices(
+	ctx context.Context, contextName, namespace string,
+) ([]cluster.ServiceInfo, error) {
+	return m.provider.ListServices(ctx, contextName, namespace)
+}
+
+func (m *Manager) ListPods(
+	ctx context.Context, contextName, namespace string,
+) ([]cluster.PodInfo, error) {
+	return m.provider.ListPods(ctx, contextName, namespace)
 }
 
 func (m *Manager) State() State {
@@ -208,7 +241,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Phase = PhaseInstalling
 	state.Message = "正在安装或检查集群 Gateway"
 	m.publish(state)
-	podName, err := m.provider.EnsureGateway(ctx, request.Context, m.gatewayImage)
+	gateway, err := m.provider.EnsureGateway(ctx, request.Context, m.gatewayImage)
 	if err != nil {
 		m.fail(ctx, state, "无法安装集群 Gateway", err)
 		return
@@ -225,13 +258,21 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Discovery = &discovery
 
 	forwarder, err := m.provider.StartPortForward(
-		ctx, request.Context, podName, cluster.GatewayPort,
+		ctx, request.Context, gateway.Name, cluster.GatewayPort,
 	)
 	if err != nil {
 		m.fail(ctx, state, "无法建立 Gateway 安全通道", err)
 		return
 	}
 	resources = append(resources, forwarder)
+
+	if err := m.intercept.Start(ctx, request.Context, gateway.IP, forwarder.Address()); err != nil {
+		m.fail(ctx, state, "无法启动 Service Intercept 控制通道", err)
+		return
+	}
+	resources = append(resources, closerFunc(func() {
+		_ = m.intercept.StopAll(context.Background())
+	}))
 
 	bridgeContext, stopBridge := context.WithCancel(ctx)
 	resources = append(resources, closerFunc(stopBridge))
@@ -258,6 +299,12 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.ConnectedAt = &connectedAt
 	state.Metrics = &singbox.Metrics{}
 	m.publish(state)
+	if m.store != nil {
+		if err := m.store.SetConnected(request.Context, request.Namespace, true); err != nil {
+			log.Printf("persist connected state: %v", err)
+		}
+	}
+	m.restoreBindings(ctx, request.Context)
 
 	inventory, err := m.provider.WatchInventory(ctx, request.Context, func(snap cluster.InventorySnapshot) {
 		m.applyInventory(snap)
@@ -446,21 +493,115 @@ func (m *Manager) clearRecentConnections() {
 }
 
 func (m *Manager) Disconnect() error {
+	return m.disconnect(true)
+}
+
+// Shutdown persists restore intents, then tears down runtime without clearing
+// the "was connected" flag used for next-launch recovery.
+func (m *Manager) Shutdown() error {
+	m.PersistShutdown()
+	m.StopAllPortForwards()
+	return m.disconnect(false)
+}
+
+func (m *Manager) disconnect(clearConnected bool) error {
+	state := m.State()
 	m.clearRecentConnections()
 	m.mu.RLock()
 	cancel, done := m.cancel, m.done
 	m.mu.RUnlock()
 	if cancel == nil {
 		m.publish(State{Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version})
+		if clearConnected {
+			m.markDisconnected(state.Context, state.Namespace)
+		}
 		return nil
 	}
 	cancel()
 	select {
 	case <-done:
+		if clearConnected {
+			m.markDisconnected(state.Context, state.Namespace)
+		}
 		return nil
 	case <-time.After(8 * time.Second):
 		return errors.New("timed out cleaning up the active connection")
 	}
+}
+
+func (m *Manager) markDisconnected(contextName, namespace string) {
+	if m.store == nil || contextName == "" {
+		return
+	}
+	if err := m.store.SetConnected(contextName, namespace, false); err != nil {
+		log.Printf("persist disconnected state: %v", err)
+	}
+}
+
+func (m *Manager) StartIntercept(ctx context.Context, mapping intercept.Mapping) (intercept.Info, error) {
+	info, err := m.intercept.StartIntercept(ctx, mapping)
+	if err == nil && !m.isRestoring() {
+		m.persistExchanges(m.State().Context)
+	}
+	return info, err
+}
+
+func (m *Manager) StopIntercept(ctx context.Context, id string) error {
+	err := m.intercept.Stop(ctx, id)
+	if err == nil && !m.isRestoring() {
+		m.persistExchanges(m.State().Context)
+	}
+	return err
+}
+
+func (m *Manager) ListIntercepts() []intercept.Info {
+	return m.intercept.List()
+}
+
+func (m *Manager) StartPreview(ctx context.Context, request intercept.PreviewRequest) (intercept.Info, error) {
+	info, err := m.intercept.StartPreview(ctx, request)
+	if err == nil && !m.isRestoring() {
+		m.persistPreviews(m.State().Context)
+	}
+	return info, err
+}
+
+func (m *Manager) StopPreview(ctx context.Context, id string) error {
+	err := m.intercept.Stop(ctx, id)
+	if err == nil && !m.isRestoring() {
+		m.persistPreviews(m.State().Context)
+	}
+	return err
+}
+
+func (m *Manager) ListPreviews() []intercept.Info {
+	return m.intercept.ListPreviews()
+}
+
+func (m *Manager) StartPortForwardSession(
+	ctx context.Context, request portfwd.Request,
+) (portfwd.Info, error) {
+	info, err := m.portfwd.Start(ctx, request)
+	if err == nil {
+		m.persistPortForwards()
+	}
+	return info, err
+}
+
+func (m *Manager) StopPortForward(id string) error {
+	err := m.portfwd.Stop(id)
+	if err == nil {
+		m.persistPortForwards()
+	}
+	return err
+}
+
+func (m *Manager) ListPortForwards() []portfwd.Info {
+	return m.portfwd.List()
+}
+
+func (m *Manager) StopAllPortForwards() {
+	m.portfwd.StopAll()
 }
 
 func (m *Manager) fail(ctx context.Context, state State, message string, err error) {

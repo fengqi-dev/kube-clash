@@ -22,7 +22,7 @@ func main() {
 		logger.Fatal(err)
 	}
 	logger.Printf("kube-loop gateway %s listening on %s", version, *listenAddress)
-	server := &gateway.Server{Logger: logger, DialTimeout: 10 * time.Second}
+	server := gateway.NewServer(logger, 10*time.Second)
 	if err := server.Serve(listener); err != nil {
 		logger.Fatal(err)
 	}

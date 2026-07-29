@@ -6,108 +6,94 @@
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-KubeLoop is a cross-platform Kubernetes desktop network client. It uses a
-managed sing-box core and TUN routing to let local applications transparently
-access Pod IPs, ClusterIP Services, and cluster DNS without per-application
-proxy settings or terminal commands.
+**[Website](https://fengqi-dev.github.io/kube-loop/)** · **[Releases](https://github.com/fengqi-dev/kube-loop/releases)** · **[Design](docs/design.md)**
 
-> [!WARNING]
-> KubeLoop is under active M1 development. The complete connection
-> orchestration and managed sing-box lifecycle are implemented; production TUN
-> privilege handling and signed installers are still in progress.
+KubeLoop is a desktop client that connects your laptop to a Kubernetes cluster
+like a VPN — so local apps can reach Pod IPs, ClusterIP Services, and
+`*.cluster.local` without port-forwards, proxy env vars, or per-app setup.
 
-## Why KubeLoop?
+> Early access (M1). Core connect / disconnect, TUN networking, and the
+> privileged helper are available; signed installers are still being polished.
 
-Accessing private Kubernetes workloads from a developer workstation typically
-requires port-forwarding each Service, changing application proxy settings, or
-installing a privileged VPN component. KubeLoop provides a desktop-first
-workflow:
+---
 
-1. Select a kubeconfig Context and DNS Namespace.
-2. Click **Connect**.
-3. KubeLoop discovers the cluster network and installs a minimal Gateway.
-4. sing-box routes only Kubernetes traffic into the tunnel.
-5. Local applications access Pods, Services, and `*.cluster.local` directly.
+## What you get
 
-All non-cluster traffic stays `DIRECT`.
+- **One-click cluster network** — Pick a kubeconfig context and namespace, click
+  Connect. KubeLoop discovers Pod / Service CIDRs and cluster DNS, then brings
+  up a focused tunnel.
+- **Transparent access** — Browsers, IDEs, CLIs, and SDKs talk to cluster
+  addresses as if they were on the same network. No SOCKS settings in each app.
+- **Cluster traffic only** — Only Kubernetes destinations go through the tunnel.
+  Everything else stays on your normal route.
+- **Works offline of the public internet path** — The in-cluster Gateway is
+  reached through the Kubernetes API Server (port-forward). No NodePort,
+  LoadBalancer, or public ingress for the data path.
+- **macOS, Windows, and Linux** — Same desktop workflow across platforms.
 
-## Architecture
+## Everyday workflows
+
+| Need | How KubeLoop helps |
+| --- | --- |
+| Open a Service in the browser / call an internal API | Connect, then use the ClusterIP or `*.svc.cluster.local` name |
+| Debug against a real Pod IP | Pod CIDR is routed locally after Connect |
+| `kubectl port-forward` without the terminal | **Port Forward** in the Network page (works even when TUN is off) |
+| Run a local process *as* a cluster Service | **Exchange** (Service Local Intercept): cluster clients keep the same ClusterIP / DNS; traffic lands on your machine |
+| Expose a local process as a new ClusterIP | **Preview** creates a temporary Service that points at your local app |
+
+## How it works (short)
 
 ```text
-Local application
-      │
-      ▼
-sing-box TUN / DNS / rules
-      │  SOCKS5 TCP + UDP
-      ▼
-KubeLoop local bridge
-      │  Kubernetes API Server port-forward
-      ▼
-In-cluster Gateway
-      │
-      ├── Pod IP
-      ├── ClusterIP Service
-      └── CoreDNS
+Your apps  →  TUN + split DNS  →  local bridge  →  API Server  →  in-cluster Gateway
+                                                                    ├─ Pods
+                                                                    ├─ Services
+                                                                    └─ CoreDNS
 ```
 
-- **Desktop UI:** Wails, React, TypeScript, and Tailwind CSS.
-- **Kubernetes integration:** client-go; no local `kubectl` dependency.
-- **Network core:** managed [sing-box](https://github.com/SagerNet/sing-box)
-  process for TUN, DNS interception, and rule matching.
-- **Local bridge:** SOCKS5 TCP/UDP to the KubeLoop tunnel protocol.
-- **Gateway:** an unprivileged, non-root Deployment reached only through the
-  Kubernetes API Server.
+Under the hood KubeLoop manages a pinned [sing-box](https://github.com/SagerNet/sing-box)
+core for TUN / DNS / rules, and a small unprivileged Gateway Deployment in the
+cluster. You do not need `kubectl` installed locally.
 
-## Current status
+## Get started
 
-Implemented:
+1. Download a build from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+   (or build from source — see below).
+2. Ensure your machine can reach the cluster API with a normal kubeconfig.
+3. Open KubeLoop, choose **Context** and **Namespace**, click **Connect**.
+4. On first use, approve the **virtual network service** (privileged helper)
+   once. Later connects should not ask again. You can install or remove it under
+   **Settings**.
 
-- Cross-platform Wails desktop project and modern Tailwind UI.
-- Frameless system-aware light/dark UI with English (default) and Simplified
-  Chinese language options.
-- kubeconfig, Context, and Namespace discovery.
-- Pod CIDR, ClusterIP, Pod, and CoreDNS discovery.
-- Dynamic sing-box TUN, DNS, SOCKS5, and routing configuration.
-- Privileged sing-box TUN lifecycle on macOS (osascript), Linux (pkexec/sudo),
-  and Windows (UAC), with platform split DNS (/etc/resolver, systemd-resolved, NRPT).
-- Automatic download and SHA-256 verification of pinned sing-box binaries.
-- Idempotent installation of an unprivileged cluster Gateway.
-- Native client-go API Server port-forwarding.
-- Local SOCKS5 TCP/UDP bridge and Gateway tunnel protocol.
-- End-to-end Connect/Disconnect lifecycle with reverse-order cleanup.
-- Minikube integration tests for ClusterIP TCP and CoreDNS UDP.
-- Live sing-box connection, traffic, network, and diagnostic views.
-- Automatic startup check for newer stable GitHub Releases with a manual
-  refresh and download link.
+After you are connected, open Overview for traffic and status, or Network for
+discovery, Port Forward, Exchange, and Preview.
 
-In progress:
+## Security posture
 
-- macOS production TUN authorization, privileged Helper, and application signing.
-- Signed privileged helpers and production packaging polish.
-- Automatic recovery and in-place update installation.
+KubeLoop is built so cluster access stays scoped and recoverable:
 
-## Releases
+- kubeconfig credentials stay in the desktop process — not sent to the Gateway
+  or the UI layer as a separate secret store.
+- The Gateway runs without `privileged`, `hostNetwork`, `NET_ADMIN`, or a
+  mounted ServiceAccount token, and is not published as a Service / Ingress.
+- Routing is limited to discovered Pod and Service ranges; non-cluster traffic
+  remains direct.
+- Exchange / Preview changes to Services and EndpointSlices are always restored
+  on stop or disconnect.
+- The privileged helper only accepts local IPC for session start/stop under your
+  `~/.kubeloop` session paths — it does not talk to the Kubernetes API.
 
-Pushing a tag matching `v*` (for example, `v0.1.0`) builds desktop packages
-for macOS, Windows, and Linux, builds Gateway binaries for Linux amd64 and
-arm64, publishes the multi-architecture Gateway image to GHCR, generates
-`SHA256SUMS`, and publishes everything to GitHub Releases.
+## Platform notes
 
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
+| | |
+| --- | --- |
+| **UI** | Light / dark (system-aware), English and 简体中文 |
+| **Data** | State and cores under `~/.kubeloop` |
+| **Helper** | Install once for TUN / DNS / routes; uninstall anytime in Settings |
+| **Updates** | Checks GitHub Releases on startup; open the download page from Settings |
 
-## Development
+## For developers
 
-### Requirements
-
-- Go 1.26+
-- Node.js 22+
-- Wails v2.13
-- A Kubernetes cluster for integration tests
-
-### Run locally
+Requirements: Go 1.26+, Node.js 22+, [Wails](https://wails.io) v2.13.
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
@@ -115,87 +101,40 @@ npm install --prefix frontend
 wails dev
 ```
 
-KubeLoop downloads the pinned sing-box core on first connection. For local
-development, either use the automatic download or override the core and
-Gateway image:
-
-```bash
-KUBELOOP_SINGBOX_PATH=/absolute/path/to/sing-box \
-KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
-wails dev
-```
-
-Connecting prompts for elevation (macOS admin dialog, Linux pkexec/sudo, or
-Windows UAC) so TUN and split DNS can be installed. A signed privileged Helper
-is still planned for production packaging.
-
-### Build
-
 ```bash
 wails build
+./build/bundle-helper.sh    # ship kubeloop-helper next to / inside the app
 ```
 
-### Unit tests
+Useful overrides while developing:
+
+```bash
+# Use a local sing-box / Gateway image
+KUBELOOP_SINGBOX_PATH=/path/to/sing-box \
+KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
+wails dev
+
+# Skip the installed helper; elevate on each Connect instead
+KUBELOOP_HELPER=0 wails dev
+```
 
 ```bash
 go test ./...
-npm run build --prefix frontend
+./e2e/run.sh                # Minikube end-to-end (see e2e/)
 ```
 
-## Minikube integration test
-
-The integration test creates a `kubeloop-system` Namespace and Gateway
-Deployment in the current Minikube cluster. It verifies:
-
-- automatic Gateway installation and readiness;
-- Kubernetes API Server port-forwarding;
-- TCP access to the Kubernetes ClusterIP;
-- UDP access to CoreDNS;
-- the complete SOCKS5 TCP and UDP path.
-
-Build and load the local arm64 Gateway image:
-
-```bash
-CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
-  -trimpath -ldflags="-s -w" \
-  -o build/bin/kube-loop-gateway-linux-arm64 \
-  ./cmd/kubeloop-gateway
-
-# Prefer building inside minikube when host Docker is unavailable:
-minikube cp build/bin/kube-loop-gateway-linux-arm64 /tmp/kube-loop-gateway-linux-arm64
-minikube ssh -- 'mkdir -p /tmp/gwbuild/build/bin && chmod 755 /tmp/kube-loop-gateway-linux-arm64 && cp /tmp/kube-loop-gateway-linux-arm64 /tmp/gwbuild/build/bin/'
-minikube cp build/gateway.local.Dockerfile /tmp/gwbuild/Dockerfile
-minikube ssh -- 'cd /tmp/gwbuild && sudo docker build -t kube-loop-gateway:dev -f Dockerfile .'
-```
-
-Run the integration test:
-
-```bash
-KUBELOOP_MINIKUBE_TEST=1 \
-  go test -tags=integration ./internal/cluster \
-  -run TestMinikubeGatewayTCPAndDNS -v -count=1
-```
-
-## Security
-
-- kubeconfig credentials stay in the desktop core process.
-- The Gateway does not use `privileged`, `hostNetwork`, `NET_ADMIN`, or a
-  mounted ServiceAccount token.
-- The Gateway is not exposed by a Service, NodePort, Ingress, or LoadBalancer.
-- Public, loopback, link-local, and multicast Gateway targets are rejected.
-- sing-box only receives discovered Pod and Service routes; other traffic remains
-  direct.
+Tag `v*` to cut a release (desktop packages, Gateway binaries + GHCR image).
 
 ## Documentation
 
-- [Desktop client design](docs/design.md)
+- [Project website](https://fengqi-dev.github.io/kube-loop/)
+- [Desktop design](docs/design.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License
 
-KubeLoop source code is licensed under the
-[Apache License 2.0](LICENSE).
+KubeLoop is licensed under the [Apache License 2.0](LICENSE).
 
-sing-box is a separate managed program licensed under GPLv3. Distributions that
-bundle sing-box must independently comply with its license and corresponding
-source requirements. See [Third-party notices](THIRD_PARTY_NOTICES.md).
+sing-box is a separately licensed (GPLv3) managed dependency. Distributions that
+bundle it must meet its license obligations — see
+[Third-party notices](THIRD_PARTY_NOTICES.md).

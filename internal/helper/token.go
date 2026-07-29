@@ -1,0 +1,88 @@
+package helper
+
+import (
+	"crypto/rand"
+	"encoding/hex"
+	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+)
+
+func EnsureUserToken() (string, error) {
+	path, err := TokenPath()
+	if err != nil {
+		return "", err
+	}
+	if raw, readErr := os.ReadFile(path); readErr == nil {
+		token := strings.TrimSpace(string(raw))
+		if token != "" {
+			return token, nil
+		}
+	}
+	token, err := randomToken()
+	if err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+	if err := os.WriteFile(path, []byte(token+"\n"), 0o600); err != nil {
+		return "", err
+	}
+	return token, nil
+}
+
+func ReadUserToken() (string, error) {
+	path, err := TokenPath()
+	if err != nil {
+		return "", err
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return "", err
+	}
+	token := strings.TrimSpace(string(raw))
+	if token == "" {
+		return "", fmt.Errorf("empty helper token")
+	}
+	return token, nil
+}
+
+func WriteSystemAuth(auth AuthFile) error {
+	if err := os.MkdirAll(SystemStateDir(), 0o755); err != nil {
+		return err
+	}
+	raw, err := json.MarshalIndent(auth, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(SystemAuthPath(), append(raw, '\n'), 0o600); err != nil {
+		return err
+	}
+	return os.WriteFile(SystemTokenPath(), []byte(auth.Token+"\n"), 0o600)
+}
+
+func ReadSystemAuth() (AuthFile, error) {
+	raw, err := os.ReadFile(SystemAuthPath())
+	if err != nil {
+		return AuthFile{}, err
+	}
+	var auth AuthFile
+	if err := json.Unmarshal(raw, &auth); err != nil {
+		return AuthFile{}, err
+	}
+	if auth.Token == "" {
+		return AuthFile{}, fmt.Errorf("empty system helper auth")
+	}
+	return auth, nil
+}
+
+func randomToken() (string, error) {
+	buf := make([]byte, 32)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}

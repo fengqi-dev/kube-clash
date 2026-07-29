@@ -5,12 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -24,6 +28,41 @@ func (f *fakeProvider) Contexts() ([]cluster.ContextInfo, error) { return nil, n
 func (f *fakeProvider) Namespaces(context.Context, string) ([]string, error) {
 	return []string{"default"}, nil
 }
+func (f *fakeProvider) ListServices(
+	context.Context, string, string,
+) ([]cluster.ServiceInfo, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []cluster.ServiceInfo{{
+		Name: "api", Namespace: "default", ClusterIP: "10.96.1.1",
+		Ports: []cluster.ServicePortInfo{{Name: "http", Port: 80, Protocol: "TCP"}},
+	}}, nil
+}
+func (f *fakeProvider) ListPods(
+	context.Context, string, string,
+) ([]cluster.PodInfo, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []cluster.PodInfo{{
+		Name: "api-0", Namespace: "default", Phase: "Running", Ready: true,
+		Ports: []cluster.PodPortInfo{{Name: "http", Port: 8080, Protocol: "TCP"}},
+	}}, nil
+}
+func (f *fakeProvider) StartPodPortForward(
+	context.Context, string, string, string, uint16, uint16,
+) (cluster.PortForward, error) {
+	return f.StartPortForward(context.Background(), "", "", 0)
+}
+func (f *fakeProvider) ResolveServiceBackend(
+	context.Context, string, string, string, int32,
+) (string, uint16, error) {
+	if f.err != nil {
+		return "", 0, f.err
+	}
+	return "api-0", 8080, nil
+}
 func (f *fakeProvider) Discover(context.Context, string) (cluster.Discovery, error) {
 	return f.discovery, f.err
 }
@@ -32,11 +71,11 @@ func (f *fakeProvider) WatchInventory(
 ) (io.Closer, error) {
 	return closerFunc(func() {}), f.err
 }
-func (f *fakeProvider) EnsureGateway(context.Context, string, string) (string, error) {
+func (f *fakeProvider) EnsureGateway(context.Context, string, string) (cluster.GatewayInfo, error) {
 	if f.err != nil {
-		return "", f.err
+		return cluster.GatewayInfo{}, f.err
 	}
-	return "gateway-pod", nil
+	return cluster.GatewayInfo{Name: "gateway-pod", IP: "10.244.0.8"}, nil
 }
 func (f *fakeProvider) StartPortForward(
 	context.Context, string, string, uint16,
@@ -45,21 +84,71 @@ func (f *fakeProvider) StartPortForward(
 		return nil, f.err
 	}
 	if f.forwarder == nil {
-		f.forwarder = &fakeForwarder{}
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return nil, err
+		}
+		server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+		go func() { _ = server.Serve(listener) }()
+		f.forwarder = &fakeForwarder{address: listener.Addr().String(), listener: listener}
 	}
 	return f.forwarder, nil
 }
-
-type fakeForwarder struct {
-	mu     sync.Mutex
-	closed bool
+func (f *fakeProvider) ApplyServiceIntercept(
+	context.Context, string, cluster.ServiceInterceptSnapshot, string,
+) error {
+	return f.err
+}
+func (f *fakeProvider) RestoreServiceIntercept(
+	context.Context, string, cluster.ServiceInterceptSnapshot,
+) error {
+	return f.err
+}
+func (f *fakeProvider) CreatePreviewService(
+	context.Context, string, cluster.PreviewServiceSnapshot, string,
+) (*corev1.Service, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &corev1.Service{Spec: corev1.ServiceSpec{ClusterIP: "10.96.9.9"}}, nil
+}
+func (f *fakeProvider) DeletePreviewService(
+	context.Context, string, cluster.PreviewServiceSnapshot,
+) error {
+	return f.err
+}
+func (f *fakeProvider) GetService(
+	context.Context, string, string, string,
+) (*corev1.Service, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return &corev1.Service{
+		Spec: corev1.ServiceSpec{
+			ClusterIP: "10.96.1.1",
+			Selector:  map[string]string{"app": "api"},
+			Ports: []corev1.ServicePort{{
+				Name: "http", Port: 80, Protocol: corev1.ProtocolTCP,
+			}},
+		},
+	}, nil
 }
 
-func (f *fakeForwarder) Address() string { return "127.0.0.1:12345" }
+type fakeForwarder struct {
+	mu       sync.Mutex
+	closed   bool
+	address  string
+	listener net.Listener
+}
+
+func (f *fakeForwarder) Address() string { return f.address }
 func (f *fakeForwarder) Close() error {
 	f.mu.Lock()
 	f.closed = true
 	f.mu.Unlock()
+	if f.listener != nil {
+		_ = f.listener.Close()
+	}
 	return nil
 }
 
