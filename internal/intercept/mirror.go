@@ -1,14 +1,17 @@
 package intercept
 
 import (
+	"bufio"
 	"fmt"
 	"io"
 	"net"
 	"strconv"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 const (
@@ -106,15 +109,6 @@ func tunnelNetwork(protocol corev1.Protocol) byte {
 	return protocolToNetwork(protocol)
 }
 
-func rejectUDPMirror(locals []PortMapping) error {
-	for _, local := range locals {
-		if normalizeProtocol(local.Protocol) == "UDP" {
-			return fmt.Errorf("mirror does not support UDP yet")
-		}
-	}
-	return nil
-}
-
 func closeWrite(conn net.Conn) {
 	if value, ok := conn.(interface{ CloseWrite() error }); ok {
 		_ = value.CloseWrite()
@@ -150,4 +144,84 @@ func mirrorTCP(client, primary net.Conn, local net.Conn) {
 		done <- struct{}{}
 	}()
 	<-done
+}
+
+// mirrorUDP forwards client datagrams to primary (response path) and tees
+// requests to local (responses discarded). primaryFramed is true when primary
+// is a Gateway UDP tunnel that uses length-prefixed datagrams.
+func mirrorUDP(client, primary net.Conn, primaryFramed bool, local *net.UDPConn) {
+	defer client.Close()
+	defer primary.Close()
+	if local != nil {
+		defer local.Close()
+		go func() {
+			buf := make([]byte, tunnel.MaxDatagramSize)
+			for {
+				if _, err := local.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+	}
+
+	done := make(chan struct{})
+	var once sync.Once
+	stop := func() { once.Do(func() { close(done) }) }
+
+	go func() {
+		defer stop()
+		reader := bufio.NewReader(client)
+		var buffer []byte
+		for {
+			payload, err := tunnel.ReadDatagram(reader, buffer)
+			if err != nil {
+				return
+			}
+			buffer = payload[:0]
+			if err := writeMirrorUDP(primary, primaryFramed, payload); err != nil {
+				return
+			}
+			if local != nil {
+				_, _ = local.Write(payload)
+			}
+		}
+	}()
+
+	go func() {
+		defer stop()
+		if primaryFramed {
+			reader := bufio.NewReader(primary)
+			var buffer []byte
+			for {
+				payload, err := tunnel.ReadDatagram(reader, buffer)
+				if err != nil {
+					return
+				}
+				buffer = payload[:0]
+				if err := tunnel.WriteDatagram(client, payload); err != nil {
+					return
+				}
+			}
+		}
+		buf := make([]byte, tunnel.MaxDatagramSize)
+		for {
+			n, err := primary.Read(buf)
+			if err != nil {
+				return
+			}
+			if err := tunnel.WriteDatagram(client, buf[:n]); err != nil {
+				return
+			}
+		}
+	}()
+
+	<-done
+}
+
+func writeMirrorUDP(primary net.Conn, framed bool, payload []byte) error {
+	if framed {
+		return tunnel.WriteDatagram(primary, payload)
+	}
+	_, err := primary.Write(payload)
+	return err
 }

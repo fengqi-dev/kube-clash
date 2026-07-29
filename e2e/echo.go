@@ -60,6 +60,13 @@ func ensureEchoWorkload(ctx context.Context, client kubernetes.Interface) error 
 	script := `
 import socket, threading
 
+def handle_tcp(c):
+    try:
+        data = c.recv(64)
+        c.sendall(b"cluster-tcp:" + data)
+    finally:
+        c.close()
+
 def tcp():
     s = socket.socket()
     s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -67,9 +74,7 @@ def tcp():
     s.listen()
     while True:
         c, _ = s.accept()
-        data = c.recv(64)
-        c.sendall(b"cluster-tcp:" + data)
-        c.close()
+        threading.Thread(target=handle_tcp, args=(c,), daemon=True).start()
 
 def udp():
     s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)

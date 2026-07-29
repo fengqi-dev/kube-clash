@@ -276,6 +276,115 @@ func TestStartMirrorTeesToLocalKeepsPrimaryResponse(t *testing.T) {
 	}
 }
 
+func TestStartMirrorUDPTeesToLocalKeepsPrimaryResponse(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	primary, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer primary.Close()
+	go func() {
+		buf := make([]byte, 32)
+		n, addr, err := primary.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+		_, _ = primary.WriteTo([]byte(fmt.Sprintf("primary:%s", buf[:n])), addr)
+	}()
+
+	mirrored := make(chan string, 1)
+	local, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	go func() {
+		buf := make([]byte, 32)
+		n, addr, err := local.ReadFrom(buf)
+		if err != nil {
+			return
+		}
+		mirrored <- string(buf[:n])
+		_, _ = local.WriteTo([]byte("local-should-be-ignored"), addr)
+	}()
+
+	primaryPort := primary.LocalAddr().(*net.UDPAddr).Port
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "dns", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.96.1.53",
+				Selector:  map[string]string{"app": "dns"},
+				Ports: []corev1.ServicePort{{
+					Name: "dns", Port: 53, Protocol: corev1.ProtocolUDP,
+				}},
+			},
+		},
+		endpointsSubsets: []corev1.EndpointSubset{{
+			Addresses: []corev1.EndpointAddress{{IP: "127.0.0.1"}},
+			Ports: []corev1.EndpointPort{{
+				Name: "dns", Port: int32(primaryPort), Protocol: corev1.ProtocolUDP,
+			}},
+		}},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.8", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	info, err := manager.StartMirror(ctx, Mapping{
+		Namespace: "default",
+		Service:   "dns",
+		Ports: []PortMapping{{
+			ServicePort: 53, Protocol: "UDP",
+			LocalHost: "127.0.0.1", LocalPort: local.LocalAddr().(*net.UDPAddr).Port,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Mode != ModeMirror {
+		t.Fatalf("mode=%q", info.Mode)
+	}
+
+	client, err := net.DialUDP("udp", nil, &net.UDPAddr{
+		IP: net.ParseIP("127.0.0.1"), Port: int(info.Ports[0].ListenPort),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 64)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buf[:n]); got != "primary:ping" {
+		t.Fatalf("client got %q, want primary response", got)
+	}
+	select {
+	case got := <-mirrored:
+		if got != "ping" {
+			t.Fatalf("mirror got %q", got)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("local mirror did not receive request copy")
+	}
+}
+
 func TestStartStopPreviewCreatesAndDeletes(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

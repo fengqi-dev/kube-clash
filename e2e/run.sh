@@ -33,6 +33,9 @@ echo "==> Restarting Gateway Pods to pick up image"
 kubectl --context="${CONTEXT}" -n kubeloop-system delete pod \
   -l app.kubernetes.io/name=kubeloop-gateway \
   --ignore-not-found=true --wait=false || true
+echo "==> Waiting for Gateway Deployment to be ready"
+kubectl --context="${CONTEXT}" -n kubeloop-system rollout status \
+  deploy/kubeloop-gateway --timeout=180s
 
 echo "==> Running e2e against context ${CONTEXT}"
 KUBELOOP_E2E=1 \

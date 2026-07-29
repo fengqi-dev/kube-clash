@@ -12,7 +12,9 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 )
 
-func TestServiceInterceptTCPAndUDP(t *testing.T) {
+// TestServiceExchangeTCPAndUDP replaces a ClusterIP Service with local TCP/UDP
+// processes (Exchange / Service Local Intercept).
+func TestServiceExchangeTCPAndUDP(t *testing.T) {
 	requireE2E(t)
 	ctx, cancel := testContext(t, 5*time.Minute)
 	defer cancel()

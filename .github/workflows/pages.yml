@@ -1,12 +1,8 @@
 name: Pages
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "site/**"
-      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
   workflow_dispatch:
 
 concurrency:
@@ -29,6 +25,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event_name == 'release' && github.event.release.tag_name || github.sha }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v6

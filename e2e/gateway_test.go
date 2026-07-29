@@ -34,10 +34,18 @@ func TestGatewayTCPAndDNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if err := ensureEchoWorkload(ctx, client); err != nil {
+		t.Fatal(err)
+	}
+	echoService, err := client.CoreV1().Services(echoNamespace).Get(ctx, "echo", metav1.GetOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	gatewayAddress := forwarder.Address()
 	assertGatewayTCP(t, gatewayAddress, apiService.Spec.ClusterIP, 443)
 	assertGatewayDNS(t, gatewayAddress, dnsService.Spec.ClusterIP)
+	assertGatewayUDPEcho(t, gatewayAddress, echoService.Spec.ClusterIP, 9090)
 
 	bridgeContext, stopBridge := context.WithCancel(ctx)
 	defer stopBridge()
@@ -47,6 +55,7 @@ func TestGatewayTCPAndDNS(t *testing.T) {
 	}
 	assertSOCKSTCP(t, bridge.Addr().String(), apiService.Spec.ClusterIP, 443)
 	assertSOCKSDNS(t, bridge.Addr().String(), dnsService.Spec.ClusterIP)
+	assertSOCKSUDPEcho(t, bridge.Addr().String(), echoService.Spec.ClusterIP, 9090)
 }
 
 func assertGatewayTCP(t *testing.T, gatewayAddress, targetIP string, port uint16) {
@@ -103,6 +112,74 @@ func assertGatewayDNS(t *testing.T, gatewayAddress, dnsIP string) {
 	}
 	if message.Header.RCode != dnsmessage.RCodeSuccess || len(message.Answers) == 0 {
 		t.Fatalf("unexpected DNS response: rcode=%v answers=%d", message.Header.RCode, len(message.Answers))
+	}
+}
+
+func assertGatewayUDPEcho(t *testing.T, gatewayAddress, targetIP string, port uint16) {
+	t.Helper()
+	connection, err := net.DialTimeout("tcp", gatewayAddress, 5*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	if err := tunnel.WriteOpen(connection, tunnel.OpenRequest{
+		Command: tunnel.CommandUDP, Host: targetIP, Port: port,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := tunnel.ReadStatus(connection); err != nil {
+		t.Fatalf("gateway UDP dial failed: %v", err)
+	}
+	if err := tunnel.WriteDatagram(connection, []byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.SetReadDeadline(time.Now().Add(5 * time.Second))
+	response, err := tunnel.ReadDatagram(bufio.NewReader(connection), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(response); got != "cluster-udp:ping" {
+		t.Fatalf("gateway UDP echo got %q, want cluster-udp:ping", got)
+	}
+}
+
+func assertSOCKSUDPEcho(t *testing.T, bridgeAddress, targetIP string, port uint16) {
+	t.Helper()
+	control := openSOCKSControl(t, bridgeAddress)
+	defer control.Close()
+	if _, err := control.Write(socksRequest(t, 3, "0.0.0.0", 0)); err != nil {
+		t.Fatal(err)
+	}
+	status, bindAddress := readSOCKSReplyAddress(t, control)
+	if status != 0 {
+		t.Fatalf("SOCKS UDP associate failed with status %d", status)
+	}
+	udp, err := net.DialUDP("udp", nil, bindAddress)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer udp.Close()
+
+	packet := append([]byte{0, 0, 0}, socksAddress(t, targetIP)...)
+	var encodedPort [2]byte
+	binary.BigEndian.PutUint16(encodedPort[:], port)
+	packet = append(packet, encodedPort[:]...)
+	packet = append(packet, []byte("ping")...)
+	if _, err := udp.Write(packet); err != nil {
+		t.Fatal(err)
+	}
+	_ = udp.SetReadDeadline(time.Now().Add(5 * time.Second))
+	response := make([]byte, 65535)
+	read, err := udp.Read(response)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// SOCKS UDP reply: RSV(2) FRAG(1) ATYP+ADDR+PORT then payload.
+	if read <= 10 {
+		t.Fatalf("short SOCKS UDP response: %d", read)
+	}
+	if got := string(response[10:read]); got != "cluster-udp:ping" {
+		t.Fatalf("SOCKS UDP echo got %q, want cluster-udp:ping", got)
 	}
 }
 

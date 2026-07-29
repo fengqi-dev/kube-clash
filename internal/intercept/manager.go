@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -221,11 +222,6 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	locals, err := mapping.resolveLocals(service)
 	if err != nil {
 		return Info{}, err
-	}
-	if mode == ModeMirror {
-		if err := rejectUDPMirror(locals); err != nil {
-			return Info{}, err
-		}
 	}
 	ports, err := buildPortsForLocals(service, locals, m.allocateListenPort)
 	if err != nil {
@@ -453,11 +449,7 @@ func (m *Manager) serveInbound(
 		host = "127.0.0.1"
 	}
 	if mode == ModeMirror {
-		if network == tunnel.NetworkUDP {
-			_ = tunnelConn.Close()
-			return
-		}
-		m.serveMirrorTCP(ctx, tunnelConn, primaryAddr, host, local.LocalPort)
+		m.serveMirror(ctx, gatewayAddress, tunnelConn, network, primaryAddr, host, local.LocalPort)
 		return
 	}
 	switch network {
@@ -477,19 +469,38 @@ func (m *Manager) serveInbound(
 	}
 }
 
-func (m *Manager) serveMirrorTCP(
-	ctx context.Context, client net.Conn, primaryAddr, localHost string, localPort int,
+func (m *Manager) serveMirror(
+	ctx context.Context,
+	gatewayAddress string,
+	client net.Conn,
+	network byte,
+	primaryAddr, localHost string,
+	localPort int,
 ) {
 	if primaryAddr == "" {
 		_ = client.Close()
 		return
 	}
-	var dialer net.Dialer
-	primary, err := dialer.DialContext(ctx, "tcp", primaryAddr)
+	if network == tunnel.NetworkUDP {
+		m.serveMirrorUDP(ctx, gatewayAddress, client, primaryAddr, localHost, localPort)
+		return
+	}
+	m.serveMirrorTCP(ctx, gatewayAddress, client, primaryAddr, localHost, localPort)
+}
+
+func (m *Manager) serveMirrorTCP(
+	ctx context.Context,
+	gatewayAddress string,
+	client net.Conn,
+	primaryAddr, localHost string,
+	localPort int,
+) {
+	primary, _, err := dialMirrorPrimary(ctx, gatewayAddress, primaryAddr, tunnel.NetworkTCP)
 	if err != nil {
 		_ = client.Close()
 		return
 	}
+	var dialer net.Dialer
 	localConn, err := dialer.DialContext(
 		ctx, "tcp", net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort)),
 	)
@@ -497,6 +508,97 @@ func (m *Manager) serveMirrorTCP(
 		localConn = nil
 	}
 	mirrorTCP(client, primary, localConn)
+}
+
+func (m *Manager) serveMirrorUDP(
+	ctx context.Context,
+	gatewayAddress string,
+	client net.Conn,
+	primaryAddr, localHost string,
+	localPort int,
+) {
+	primary, primaryFramed, err := dialMirrorPrimary(ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP)
+	if err != nil {
+		_ = client.Close()
+		return
+	}
+	localAddr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
+	udpAddr, err := net.ResolveUDPAddr("udp", localAddr)
+	var localConn *net.UDPConn
+	if err == nil {
+		localConn, err = net.DialUDP("udp", nil, udpAddr)
+		if err != nil {
+			localConn = nil
+		}
+	}
+	mirrorUDP(client, primary, primaryFramed, localConn)
+}
+
+// dialMirrorPrimary reaches the original Pod backend. Prefer Gateway outbound
+// dial so Pod IPs work without a host route/TUN; fall back to a direct dial
+// for loopback addresses used in unit tests.
+// framed is true when the returned conn uses tunnel datagram framing (Gateway UDP).
+func dialMirrorPrimary(
+	ctx context.Context, gatewayAddress, primaryAddr string, network byte,
+) (conn net.Conn, framed bool, err error) {
+	host, portStr, err := net.SplitHostPort(primaryAddr)
+	if err != nil {
+		return nil, false, err
+	}
+	port, err := strconv.Atoi(portStr)
+	if err != nil || port <= 0 || port > 65535 {
+		return nil, false, fmt.Errorf("invalid primary port %q", portStr)
+	}
+	command := tunnel.CommandTCP
+	if network == tunnel.NetworkUDP {
+		command = tunnel.CommandUDP
+	}
+	if gatewayAddress != "" && !isLoopbackHost(host) {
+		conn, err := dialGatewayOpen(ctx, gatewayAddress, command, host, uint16(port))
+		if err == nil {
+			return conn, network == tunnel.NetworkUDP, nil
+		}
+	}
+	if network == tunnel.NetworkUDP {
+		udpAddr, err := net.ResolveUDPAddr("udp", primaryAddr)
+		if err != nil {
+			return nil, false, err
+		}
+		conn, err := net.DialUDP("udp", nil, udpAddr)
+		return conn, false, err
+	}
+	var dialer net.Dialer
+	conn, err = dialer.DialContext(ctx, "tcp", primaryAddr)
+	return conn, false, err
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+func dialGatewayOpen(
+	ctx context.Context, gatewayAddress string, command byte, host string, port uint16,
+) (net.Conn, error) {
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
+	if err != nil {
+		return nil, fmt.Errorf("connect gateway: %w", err)
+	}
+	if err := tunnel.WriteOpen(conn, tunnel.OpenRequest{
+		Command: command, Host: host, Port: port,
+	}); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	if err := tunnel.ReadStatus(conn); err != nil {
+		_ = conn.Close()
+		return nil, err
+	}
+	return conn, nil
 }
 
 func normalizePreviewPorts(ports []PortMapping) ([]PortMapping, error) {

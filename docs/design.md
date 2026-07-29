@@ -63,11 +63,9 @@ The Gateway still has no kube API access, no privilege, and no hostNetwork. Endp
 
 Mirror uses the same Service → Gateway hijack as Exchange, but the desktop datapath differs:
 
-1. Dial the original Pod (from the Endpoints snapshot) as the **primary** path and return its response to the cluster client;
-2. Tee a copy of the client request to a local TCP process; discard the local response;
+1. Dial the original Pod (from the Endpoints snapshot) as the **primary** path via Gateway outbound TCP/UDP, and return its response to the cluster client;
+2. Tee a copy of the client request to a local TCP/UDP process; discard the local response;
 3. If the local dial fails, primary traffic continues uninterrupted.
-
-UDP mirror is out of scope for the first release.
 
 ### 2.3 Out of MVP
 
