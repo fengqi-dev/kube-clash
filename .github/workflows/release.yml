@@ -91,7 +91,7 @@ jobs:
           mkdir -p dist
           arch="$(go env GOARCH)"
           os_name="$(go env GOOS)"
-          tar -C build/bin -czf "dist/kube-clash-${os_name}-${arch}.tar.gz" .
+          tar -C build/bin -czf "dist/kubeloop-${os_name}-${arch}.tar.gz" .
 
       - name: Package desktop application
         if: runner.os == 'Windows'
@@ -99,7 +99,7 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $arch = go env GOARCH
-          Compress-Archive -Path "build/bin/*" -DestinationPath "dist/kube-clash-windows-$arch.zip"
+          Compress-Archive -Path "build/bin/*" -DestinationPath "dist/kubeloop-windows-$arch.zip"
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7
@@ -138,8 +138,8 @@ jobs:
           CGO_ENABLED=0 GOOS=linux go build \
             -trimpath \
             -ldflags="-s -w" \
-            -o "dist/kube-clash-gateway-linux-${GOARCH}" \
-            ./cmd/kube-clash-gateway
+            -o "dist/kubeloop-gateway-linux-${GOARCH}" \
+            ./cmd/kubeloop-gateway
 
       - name: Upload Gateway artifact
         uses: actions/upload-artifact@v7
@@ -220,4 +220,4 @@ jobs:
             --repo "${GITHUB_REPOSITORY}" \
             --verify-tag \
             --generate-notes \
-            --title "Kube Clash ${GITHUB_REF_NAME}"
+            --title "KubeLoop ${GITHUB_REF_NAME}"

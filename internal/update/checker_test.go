@@ -15,7 +15,7 @@ func TestCheckerFindsNewRelease(t *testing.T) {
 		}
 		body := `{
 			"tag_name": "v0.2.0",
-			"html_url": "https://github.com/fengqi-dev/kube-clash/releases/tag/v0.2.0",
+			"html_url": "https://github.com/fengqi-dev/kube-loop/releases/tag/v0.2.0",
 			"published_at": "2026-07-28T09:00:00Z"
 		}`
 		return &http.Response{
@@ -47,7 +47,7 @@ func TestCheckerDoesNotTreatDevelopmentBuildAsOutdated(t *testing.T) {
 			Status:     "200 OK",
 			Header:     make(http.Header),
 			Body: io.NopCloser(bytes.NewBufferString(
-				`{"tag_name":"v9.0.0","html_url":"https://github.com/fengqi-dev/kube-clash/releases/tag/v9.0.0"}`,
+				`{"tag_name":"v9.0.0","html_url":"https://github.com/fengqi-dev/kube-loop/releases/tag/v9.0.0"}`,
 			)),
 			Request: request,
 		}, nil

@@ -1,28 +1,28 @@
-# Kube Clash
+# KubeLoop
 
-[![CI](https://github.com/fengqi-dev/kube-clash/actions/workflows/ci.yml/badge.svg)](https://github.com/fengqi-dev/kube-clash/actions/workflows/ci.yml)
-[![Release](https://github.com/fengqi-dev/kube-clash/actions/workflows/release.yml/badge.svg)](https://github.com/fengqi-dev/kube-clash/actions/workflows/release.yml)
+[![CI](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml)
+[![Release](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-Kube Clash 是一个跨平台 Kubernetes 桌面网络客户端。它通过托管的 Mihomo 内核和 TUN
+KubeLoop 是一个跨平台 Kubernetes 桌面网络客户端。它通过托管的 sing-box 内核和 TUN
 路由，让本地应用透明访问 Pod IP、ClusterIP Service 和集群 DNS，无需逐个配置应用代理，
 也不要求用户在终端中执行命令。
 
 > [!WARNING]
-> Kube Clash 当前处于 M1 开发阶段。完整连接编排和 Mihomo 托管生命周期已经实现；
+> KubeLoop 当前处于 M1 开发阶段。完整连接编排和 sing-box 托管生命周期已经实现；
 > 生产环境 TUN 提权和签名安装包仍在开发中。
 
-## 为什么需要 Kube Clash？
+## 为什么需要 KubeLoop？
 
 开发者从本机访问 Kubernetes 私有网络时，通常需要为每个 Service 建立端口转发、修改应用
-代理设置，或者安装高权限 VPN 组件。Kube Clash 提供以桌面客户端为中心的流程：
+代理设置，或者安装高权限 VPN 组件。KubeLoop 提供以桌面客户端为中心的流程：
 
 1. 选择 kubeconfig Context 和 DNS Namespace。
 2. 点击**连接**。
 3. 客户端自动发现集群网络并安装最小化 Gateway。
-4. Mihomo 只将 Kubernetes 目标流量送入隧道。
+4. sing-box 只将 Kubernetes 目标流量送入隧道。
 5. 本地应用直接访问 Pod、Service 和 `*.cluster.local`。
 
 所有非集群流量保持 `DIRECT`。
@@ -33,10 +33,10 @@ Kube Clash 是一个跨平台 Kubernetes 桌面网络客户端。它通过托管
 本地应用
    │
    ▼
-Mihomo TUN / DNS / 规则
+sing-box TUN / DNS / 规则
    │  SOCKS5 TCP + UDP
    ▼
-Kube Clash 本地桥
+KubeLoop 本地桥
    │  Kubernetes API Server port-forward
    ▼
 集群内 Gateway
@@ -48,9 +48,9 @@ Kube Clash 本地桥
 
 - **桌面界面：** Wails、React、TypeScript 和 Tailwind CSS。
 - **Kubernetes 集成：** 使用 client-go，不依赖本机 `kubectl`。
-- **网络内核：** 托管的 [Mihomo](https://github.com/MetaCubeX/mihomo) 独立进程，
+- **网络内核：** 托管的 [sing-box](https://github.com/SagerNet/sing-box) 独立进程，
   负责 TUN、DNS 劫持和规则匹配。
-- **本地网络桥：** 将 SOCKS5 TCP/UDP 转换为 Kube Clash 隧道协议。
+- **本地网络桥：** 将 SOCKS5 TCP/UDP 转换为 KubeLoop 隧道协议。
 - **集群 Gateway：** 无特权、非 root 的 Deployment，只能通过 Kubernetes API Server
   访问。
 
@@ -62,15 +62,15 @@ Kube Clash 本地桥
 - 无边框且跟随系统浅色/深色外观，支持英文（默认）和简体中文界面。
 - kubeconfig、Context 和 Namespace 读取。
 - Pod CIDR、ClusterIP、Pod 和 CoreDNS 自动发现。
-- 动态生成 Mihomo TUN、DNS、SOCKS5 和路由配置。
-- 在 macOS 上自动请求管理员授权启动 Mihomo TUN，并验证 TUN 是否真正初始化成功。
-- 自动下载固定版本 Mihomo，并执行 SHA-256 校验。
+- 动态生成 sing-box TUN、DNS、SOCKS5 和路由配置。
+- 在 macOS 上自动请求管理员授权启动 sing-box TUN，并验证 TUN 是否真正初始化成功。
+- 自动下载固定版本 sing-box，并执行 SHA-256 校验。
 - 幂等安装无特权集群 Gateway。
 - 使用 client-go 原生建立 API Server port-forward。
 - 本地 SOCKS5 TCP/UDP 桥和 Gateway 隧道协议。
 - Connect/Disconnect 完整生命周期和逆序资源清理。
 - ClusterIP TCP 和 CoreDNS UDP 的 Minikube 集成测试。
-- Mihomo 实时连接、流量、内存、网络详情和诊断页面。
+- sing-box 实时连接、流量、网络详情和诊断页面。
 - 启动时自动检查最新稳定版 GitHub Release，支持手动刷新和打开下载页面。
 
 正在开发：
@@ -107,16 +107,16 @@ npm install --prefix frontend
 wails dev
 ```
 
-首次连接时，Kube Clash 会自动下载固定版本的 Mihomo。开发环境既可以使用自动下载，
-也可以覆盖 Mihomo 路径和 Gateway 镜像：
+首次连接时，KubeLoop 会自动下载固定版本的 sing-box。开发环境既可以使用自动下载，
+也可以覆盖 sing-box 路径和 Gateway 镜像：
 
 ```bash
-KUBE_CLASH_MIHOMO_PATH=/absolute/path/to/mihomo \
-KUBE_CLASH_GATEWAY_IMAGE=kube-clash-gateway:dev \
+KUBELOOP_SINGBOX_PATH=/absolute/path/to/sing-box \
+KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
 wails dev
 ```
 
-当前 macOS 预览版会直接启动 Mihomo。在签名特权 Helper 完成前，创建 TUN 路由仍要求
+当前 macOS 预览版会直接启动 sing-box。在签名特权 Helper 完成前，创建 TUN 路由仍要求
 以具备相应权限的方式启动开发版本。
 
 ### 构建
@@ -134,7 +134,7 @@ npm run build --prefix frontend
 
 ## Minikube 集成测试
 
-集成测试会在当前 Minikube 中创建 `kube-clash-system` Namespace 和 Gateway Deployment，
+集成测试会在当前 Minikube 中创建 `kubeloop-system` Namespace 和 Gateway Deployment，
 并验证：
 
 - Gateway 自动安装和 Ready 检查；
@@ -148,18 +148,18 @@ npm run build --prefix frontend
 ```bash
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build \
   -trimpath -ldflags="-s -w" \
-  -o build/bin/kube-clash-gateway-linux-arm64 \
-  ./cmd/kube-clash-gateway
+  -o build/bin/kube-loop-gateway-linux-arm64 \
+  ./cmd/kubeloop-gateway
 
 minikube image build \
-  -t kube-clash-gateway:dev \
+  -t kube-loop-gateway:dev \
   -f build/gateway.local.Dockerfile .
 ```
 
 运行集成测试：
 
 ```bash
-KUBE_CLASH_MINIKUBE_TEST=1 \
+KUBELOOP_MINIKUBE_TEST=1 \
   go test -tags=integration ./internal/cluster \
   -run TestMinikubeGatewayTCPAndDNS -v -count=1
 ```
@@ -171,7 +171,7 @@ KUBE_CLASH_MINIKUBE_TEST=1 \
   ServiceAccount Token。
 - Gateway 不通过 Service、NodePort、Ingress 或 LoadBalancer 暴露。
 - Gateway 拒绝公网、回环、链路本地和组播目标。
-- Mihomo 只接收自动发现的 Pod 和 Service 路由，其余流量保持直连。
+- sing-box 只接收自动发现的 Pod 和 Service 路由，其余流量保持直连。
 
 ## 文档
 
@@ -180,7 +180,7 @@ KUBE_CLASH_MINIKUBE_TEST=1 \
 
 ## 许可证
 
-Kube Clash 源代码使用 [Apache License 2.0](LICENSE)。
+KubeLoop 源代码使用 [Apache License 2.0](LICENSE)。
 
-Mihomo 是使用 GPLv3 的独立托管程序。发布包含 Mihomo 的安装包时，必须独立履行其许可证
+sing-box 是使用 GPLv3 的独立托管程序。发布包含 sing-box 的安装包时，必须独立履行其许可证
 和对应源码提供义务，详见[第三方软件声明](THIRD_PARTY_NOTICES.md)。

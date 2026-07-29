@@ -3,13 +3,15 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
+	"io"
 	"net"
 	"sync"
 	"testing"
 	"time"
 
-	"github.com/fengqi-dev/kube-clash/internal/cluster"
-	"github.com/fengqi-dev/kube-clash/internal/mihomo"
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
 type fakeProvider struct {
@@ -24,6 +26,11 @@ func (f *fakeProvider) Namespaces(context.Context, string) ([]string, error) {
 }
 func (f *fakeProvider) Discover(context.Context, string) (cluster.Discovery, error) {
 	return f.discovery, f.err
+}
+func (f *fakeProvider) WatchInventory(
+	context.Context, string, func(cluster.InventorySnapshot),
+) (io.Closer, error) {
+	return closerFunc(func() {}), f.err
 }
 func (f *fakeProvider) EnsureGateway(context.Context, string, string) (string, error) {
 	if f.err != nil {
@@ -67,7 +74,7 @@ func newFakeCore() *fakeCore {
 
 func (f *fakeCore) Start(
 	context.Context, cluster.Discovery, string, string,
-) (mihomo.RunningCore, error) {
+) (singbox.RunningCore, error) {
 	close(f.started)
 	return f.process, nil
 }
@@ -80,8 +87,8 @@ type fakeProcess struct {
 
 func (f *fakeProcess) Done() <-chan struct{} { return f.done }
 func (f *fakeProcess) Err() error            { return f.err }
-func (f *fakeProcess) Snapshot(context.Context) (mihomo.Metrics, error) {
-	return mihomo.Metrics{}, nil
+func (f *fakeProcess) Snapshot(context.Context) (singbox.Metrics, error) {
+	return singbox.Metrics{Connections: []singbox.Connection{}}, nil
 }
 func (f *fakeProcess) Close() error {
 	f.once.Do(func() { close(f.done) })
@@ -195,5 +202,59 @@ func receiveState(t *testing.T, states <-chan State) State {
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for session state")
 		return State{}
+	}
+}
+
+func TestRetainMetricsKeepsRecentConnections(t *testing.T) {
+	manager := NewManager(&fakeProvider{})
+	first := manager.retainMetrics(singbox.Metrics{
+		DownloadTotal: 100,
+		Connections: []singbox.Connection{{
+			ID:          "conn-1",
+			Network:     "tcp",
+			Destination: "10.96.0.1:443",
+			Download:    50,
+		}},
+	})
+	if len(first.Connections) != 1 {
+		t.Fatalf("expected 1 live connection, got %d", len(first.Connections))
+	}
+
+	retained := manager.retainMetrics(singbox.Metrics{
+		DownloadTotal: 200,
+		Connections:   nil,
+	})
+	if retained.DownloadTotal != 200 {
+		t.Fatalf("download total = %d, want 200", retained.DownloadTotal)
+	}
+	if len(retained.Connections) != 1 || retained.Connections[0].ID != "conn-1" {
+		t.Fatalf("expected retained connection, got %#v", retained.Connections)
+	}
+
+	manager.clearRecentConnections()
+	cleared := manager.retainMetrics(singbox.Metrics{Connections: nil})
+	if len(cleared.Connections) != 0 {
+		t.Fatalf("expected no connections after clear, got %#v", cleared.Connections)
+	}
+}
+
+func TestRetainMetricsCapsPublishedConnections(t *testing.T) {
+	manager := NewManager(&fakeProvider{})
+	connections := make([]singbox.Connection, 250)
+	for i := range connections {
+		connections[i] = singbox.Connection{
+			ID:          fmt.Sprintf("conn-%d", i),
+			Network:     "tcp",
+			Destination: "10.96.0.1:80",
+			Download:    int64(i),
+		}
+	}
+	metrics := manager.retainMetrics(singbox.Metrics{Connections: connections})
+	if len(metrics.Connections) != maxPublishedConnections {
+		t.Fatalf("published = %d, want %d", len(metrics.Connections), maxPublishedConnections)
+	}
+	if metrics.Connections[0].Download < metrics.Connections[len(metrics.Connections)-1].Download {
+		t.Fatalf("expected higher-traffic connections first, got first=%d last=%d",
+			metrics.Connections[0].Download, metrics.Connections[len(metrics.Connections)-1].Download)
 	}
 }

@@ -6,9 +6,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-clash/internal/cluster"
-	"github.com/fengqi-dev/kube-clash/internal/session"
-	"github.com/fengqi-dev/kube-clash/internal/update"
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/session"
+	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
@@ -36,7 +36,7 @@ func NewApp() *App {
 		updater: &update.Checker{CurrentVersion: version},
 		updateState: update.Info{
 			CurrentVersion: version,
-			URL:            "https://github.com/fengqi-dev/kube-clash/releases",
+			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
 		},
 	}
 }
@@ -122,7 +122,7 @@ func (a *App) OpenUpdatePage() error {
 	target := a.updateState.URL
 	a.updateMu.RUnlock()
 	if target == "" {
-		target = "https://github.com/fengqi-dev/kube-clash/releases"
+		target = "https://github.com/fengqi-dev/kube-loop/releases"
 	}
 	if a.ctx == nil {
 		return errors.New("application is not ready")

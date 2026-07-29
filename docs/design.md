@@ -1,4 +1,4 @@
-# Kube Clash 桌面客户端设计
+# KubeLoop 桌面客户端设计
 
 > 状态：Draft v0.2（产品边界已确认）
 > 目标：让开发者像连接 VPN 一样连接 Kubernetes 集群，并从本机透明访问 Pod IP、Service IP 和集群域名。
@@ -9,11 +9,11 @@
 - Gateway 由桌面客户端自动检查、安装和升级；
 - 第一阶段只完成 Pod、Service 和集群 DNS 的透明访问；
 - “用本地服务替换集群 Service”等反向映射能力不进入 MVP。
-- 使用 Mihomo（Clash Meta）作为 TUN、DNS 和规则路由内核。
+- 使用 sing-box 作为 TUN、DNS 和规则路由内核。
 
 ## 1. 产品定位
 
-Kube Clash 是桌面网络客户端，而不是命令行工具。用户不需要理解路由、TUN、端口转发或
+KubeLoop 是桌面网络客户端，而不是命令行工具。用户不需要理解路由、TUN、端口转发或
 Kubernetes 网络细节，只需要选择集群并点击连接。
 
 它借鉴 Clash 的使用体验：
@@ -70,7 +70,7 @@ Kubernetes 网络细节，只需要选择集群并点击连接。
 
 ```text
 ┌──────────────────────────────────────────────────────┐
-│ Kube Clash                                设置  —  □ │
+│ KubeLoop                                设置  —  □ │
 ├──────────────────────────────────────────────────────┤
 │                                                      │
 │             ● 已连接                                  │
@@ -153,7 +153,7 @@ Kubernetes 网络细节，只需要选择集群并点击连接。
 │                      └──────────┬───────────┘  │
 │                                 │ packets       │
 │                      ┌──────────▼───────────┐  │
-│                      │ Mihomo Core          │  │
+│                      │ sing-box Core          │  │
 │                      │ TUN / DNS / Rules    │  │
 │                      └──────────┬───────────┘  │
 └─────────────────────────────────┼──────────────┘
@@ -195,9 +195,9 @@ UI 进程不直接持有 root 权限。
 首版不调用外部 `kubectl`，直接使用 Kubernetes client-go，避免用户机器上的版本差异和
 命令行窗口闪烁。
 
-### 4.3 Mihomo Core 与 Privileged Helper
+### 4.3 sing-box Core 与 Privileged Helper
 
-Mihomo 作为客户端托管的独立进程随平台安装包分发，负责：
+sing-box 作为客户端托管的独立进程随平台安装包分发，负责：
 
 - 创建 TUN 和接收目标集群流量；
 - DNS 劫持与 `cluster.local` nameserver policy；
@@ -205,7 +205,7 @@ Mihomo 作为客户端托管的独立进程随平台安装包分发，负责：
 - 将集群流量发送到本地 `KUBERNETES` SOCKS5 桥；
 - 让所有非集群流量保持 `DIRECT`。
 
-桌面客户端生成最小配置，不接受代理订阅，也不接管公网流量。Mihomo 通过只监听
+桌面客户端生成最小配置，不接受代理订阅，也不接管公网流量。sing-box 通过只监听
 `127.0.0.1` 的 External Controller 接受健康检查，Controller Secret 每个 Session 随机
 生成。
 
@@ -218,8 +218,8 @@ Privileged Helper 是独立、最小权限的系统服务，只接受本机签�
 
 Helper 不读取 kubeconfig，不持有 Kubernetes 凭证，也不连接互联网。
 
-Mihomo 使用 GPLv3。分发安装包时必须同时保留许可证、版权声明，并按许可证要求提供对应
-源码。Mihomo 保持为独立进程，不修改其源码；项目仍需在发布流程中生成第三方许可证和源码
+sing-box 使用 GPLv3。分发安装包时必须同时保留许可证、版权声明，并按许可证要求提供对应
+源码。sing-box 保持为独立进程，不修改其源码；项目仍需在发布流程中生成第三方许可证和源码
 获取说明。
 
 平台实现：
@@ -279,15 +279,15 @@ RestoreSystemNetwork()
 ### 5.1 Pod IP / Service IP
 
 1. 应用向 Pod IP 或 ClusterIP 发起连接。
-2. 系统路由将数据包送入 Kube Clash 的 TUN。
-3. Mihomo 根据动态生成的 IP-CIDR 规则选择 `KUBERNETES` outbound。
-4. Mihomo 将 TCP/UDP 会话发送到本地 SOCKS5 桥。
+2. 系统路由将数据包送入 KubeLoop 的 TUN。
+3. sing-box 根据动态生成的 IP-CIDR 规则选择 `KUBERNETES` outbound。
+4. sing-box 将 TCP/UDP 会话发送到本地 SOCKS5 桥。
 5. SOCKS5 桥把 TCP 和 UDP 都封装进可靠的多路复用流。
 6. 流量通过 API Server port-forward 到 Gateway。
 7. Gateway 在集群内连接真实目标。
-8. 返回流量沿原通道和 Mihomo TUN 返回应用。
+8. 返回流量沿原通道和 sing-box TUN 返回应用。
 
-使用 Mihomo 网络栈的好处：
+使用 sing-box 网络栈的好处：
 
 - 集群 Gateway 不需要网络管理权限；
 - 不依赖集群 CNI 的回程路由能力；
@@ -303,7 +303,7 @@ RestoreSystemNetwork()
 - 用户显式配置的集群域。
 
 查询通过现有隧道转发到 kube-system 中的 CoreDNS Service。其他域名继续使用用户原来的
-DNS，不受 Kube Clash 影响。
+DNS，不受 KubeLoop 影响。
 
 短名称如 `my-service` 存在 Namespace 语义，首版采用当前 Namespace 生成搜索域：
 
@@ -408,14 +408,14 @@ Gateway 返回协商后的能力和限制。不兼容时返回明确的升级信
 - ServiceAccount；
 - Role / RoleBinding。
 
-建议默认安装在 `kube-clash-system`。企业环境可以由管理员预装，普通开发者只保留发现和
+建议默认安装在 `kubeloop-system`。企业环境可以由管理员预装，普通开发者只保留发现和
 port-forward 权限。
 
 Gateway 本身不需要读取 Kubernetes API，因此默认 ServiceAccount 不授予额外权限。
 
 ### 8.1 Gateway 自动安装流程
 
-1. 客户端检查 `kube-clash-system` Namespace；
+1. 客户端检查 `kubeloop-system` Namespace；
 2. 使用 server-side apply 提交带版本标签的资源；
 3. 等待 Deployment Available；
 4. 校验镜像 digest、协议版本和健康状态；
@@ -425,8 +425,8 @@ Gateway 本身不需要读取 Kubernetes API，因此默认 ServiceAccount 不�
 自动安装必须是幂等的。客户端只管理带以下标识的资源：
 
 ```text
-app.kubernetes.io/managed-by: kube-clash
-app.kubernetes.io/part-of: kube-clash
+app.kubernetes.io/managed-by: kube-loop
+app.kubernetes.io/part-of: kube-loop
 ```
 
 如果用户没有安装权限，UI 展示缺少的 RBAC 权限和可复制的管理员安装清单，但不会降级为
@@ -440,7 +440,7 @@ app.kubernetes.io/part-of: kube-clash
 - 日志默认脱敏 token、证书和 kubeconfig 内容；
 - Gateway 不暴露 NodePort、LoadBalancer 或 Ingress；
 - Helper IPC 校验调用进程签名和用户身份；
-- Helper 只允许操作 Kube Clash 自己创建的接口、路由和 DNS 配置；
+- Helper 只允许操作 KubeLoop 自己创建的接口、路由和 DNS 配置；
 - 网络配置写入恢复日志，应用异常退出后自动回滚；
 - Gateway 镜像固定 digest，并在 UI 中展示版本；
 - 支持管理员禁用任意目标访问，限制到集群 CIDR。

@@ -17,19 +17,19 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/fengqi-dev/kube-clash/internal/socksbridge"
-	"github.com/fengqi-dev/kube-clash/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 func TestMinikubeGatewayTCPAndDNS(t *testing.T) {
-	if os.Getenv("KUBE_CLASH_MINIKUBE_TEST") != "1" {
-		t.Skip("set KUBE_CLASH_MINIKUBE_TEST=1 to run against the local minikube context")
+	if os.Getenv("KUBELOOP_MINIKUBE_TEST") != "1" {
+		t.Skip("set KUBELOOP_MINIKUBE_TEST=1 to run against the local minikube context")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
 	provider := NewProvider()
-	podName, err := provider.EnsureGateway(ctx, "minikube", "kube-clash-gateway:dev")
+	podName, err := provider.EnsureGateway(ctx, "minikube", "kube-loop-gateway:dev")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestMinikubeGatewayTCPAndDNS(t *testing.T) {
 	gatewayAddress := forwarder.Address()
 	testGatewayTCP(t, gatewayAddress, apiService.Spec.ClusterIP)
 	testGatewayDNS(t, gatewayAddress, dnsService.Spec.ClusterIP)
-	if target := os.Getenv("KUBE_CLASH_MINIKUBE_HTTP_TARGET"); target != "" {
+	if target := os.Getenv("KUBELOOP_MINIKUBE_HTTP_TARGET"); target != "" {
 		testGatewayHTTP(t, gatewayAddress, target)
 	}
 

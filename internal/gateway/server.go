@@ -13,7 +13,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-clash/internal/tunnel"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 type Server struct {

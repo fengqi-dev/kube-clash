@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	latestReleaseURL = "https://api.github.com/repos/fengqi-dev/kube-clash/releases/latest"
-	releasesPageURL  = "https://github.com/fengqi-dev/kube-clash/releases"
+	latestReleaseURL = "https://api.github.com/repos/fengqi-dev/kube-loop/releases/latest"
+	releasesPageURL  = "https://github.com/fengqi-dev/kube-loop/releases"
 )
 
 type Info struct {
@@ -53,7 +53,7 @@ func (c *Checker) Check(ctx context.Context) (Info, error) {
 	}
 	request.Header.Set("Accept", "application/vnd.github+json")
 	request.Header.Set("X-GitHub-Api-Version", "2022-11-28")
-	request.Header.Set("User-Agent", "kube-clash/"+current)
+	request.Header.Set("User-Agent", "kube-loop/"+current)
 
 	client := c.HTTPClient
 	if client == nil {
@@ -65,7 +65,7 @@ func (c *Checker) Check(ctx context.Context) (Info, error) {
 	}
 	defer response.Body.Close()
 	if response.StatusCode == http.StatusNotFound {
-		return info, errors.New("no published Kube Clash release was found")
+		return info, errors.New("no published KubeLoop release was found")
 	}
 	if response.StatusCode != http.StatusOK {
 		return info, fmt.Errorf("check for updates: GitHub returned %s", response.Status)
@@ -84,7 +84,7 @@ func (c *Checker) Check(ctx context.Context) (Info, error) {
 	}
 	info.LatestVersion = release.TagName
 	info.PublishedAt = release.PublishedAt
-	if strings.HasPrefix(release.HTMLURL, "https://github.com/fengqi-dev/kube-clash/") {
+	if strings.HasPrefix(release.HTMLURL, "https://github.com/fengqi-dev/kube-loop/") {
 		info.URL = release.HTMLURL
 	}
 	if _, err := parseVersion(current); err == nil {

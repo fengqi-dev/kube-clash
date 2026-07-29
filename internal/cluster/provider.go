@@ -5,7 +5,9 @@ import (
 	"fmt"
 	"net/netip"
 	"sort"
+	"strings"
 
+	"go.yaml.in/yaml/v3"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -19,10 +21,13 @@ type ContextInfo struct {
 }
 
 type Discovery struct {
-	PodCIDRs   []string `json:"podCIDRs"`
-	ServiceIPs []string `json:"serviceIPs"`
-	DNSServer  string   `json:"dnsServer"`
-	Pods       int      `json:"pods"`
+	PodCIDRs     []string `json:"podCIDRs"`
+	ServiceCIDRs []string `json:"serviceCIDRs"`
+	ServiceIPs   []string `json:"serviceIPs"`
+	DNSServer    string   `json:"dnsServer"`
+	Pods         int      `json:"pods"`
+	Services     int      `json:"services"`
+	Deployments  int      `json:"deployments"`
 }
 
 type Provider struct {
@@ -60,7 +65,7 @@ func (p *Provider) RESTConfig(contextName string) (*rest.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load context %q: %w", contextName, err)
 	}
-	restConfig.UserAgent = "kube-clash/0.1"
+	restConfig.UserAgent = "kube-loop/0.1"
 	return restConfig, nil
 }
 
@@ -110,6 +115,10 @@ func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery,
 	if err != nil {
 		return Discovery{}, fmt.Errorf("list pods: %w", err)
 	}
+	deployments, err := client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return Discovery{}, fmt.Errorf("list deployments: %w", err)
+	}
 
 	podCIDRs := make(map[string]struct{})
 	for _, node := range nodes.Items {
@@ -153,12 +162,60 @@ func (p *Provider) Discover(ctx context.Context, contextName string) (Discovery,
 		}
 	}
 
+	serviceCIDRs := discoverServiceCIDRs(ctx, client)
+
 	return Discovery{
-		PodCIDRs:   sortedKeys(podCIDRs),
-		ServiceIPs: sortedKeys(serviceIPs),
-		DNSServer:  dnsServer,
-		Pods:       len(pods.Items),
+		PodCIDRs:     sortedKeys(podCIDRs),
+		ServiceCIDRs: serviceCIDRs,
+		ServiceIPs:   sortedKeys(serviceIPs),
+		DNSServer:    dnsServer,
+		Pods:         len(pods.Items),
+		Services:     len(services.Items),
+		Deployments:  len(deployments.Items),
 	}, nil
+}
+
+func discoverServiceCIDRs(ctx context.Context, client kubernetes.Interface) []string {
+	cidrs := make(map[string]struct{})
+	if list, err := client.NetworkingV1().ServiceCIDRs().List(ctx, metav1.ListOptions{}); err == nil {
+		for _, item := range list.Items {
+			for _, raw := range item.Spec.CIDRs {
+				if prefix, parseErr := netip.ParsePrefix(raw); parseErr == nil {
+					cidrs[prefix.Masked().String()] = struct{}{}
+				}
+			}
+		}
+	}
+	if len(cidrs) == 0 {
+		if subnet, err := serviceSubnetFromKubeadm(ctx, client); err == nil && subnet != "" {
+			if prefix, parseErr := netip.ParsePrefix(subnet); parseErr == nil {
+				cidrs[prefix.Masked().String()] = struct{}{}
+			}
+		}
+	}
+	return sortedKeys(cidrs)
+}
+
+func serviceSubnetFromKubeadm(ctx context.Context, client kubernetes.Interface) (string, error) {
+	configMap, err := client.CoreV1().ConfigMaps("kube-system").Get(
+		ctx, "kubeadm-config", metav1.GetOptions{},
+	)
+	if err != nil {
+		return "", err
+	}
+	raw, ok := configMap.Data["ClusterConfiguration"]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return "", fmt.Errorf("kubeadm-config missing ClusterConfiguration")
+	}
+	var parsed struct {
+		Networking struct {
+			ServiceSubnet string `yaml:"serviceSubnet"`
+		} `yaml:"networking"`
+	}
+	if err := yaml.Unmarshal([]byte(raw), &parsed); err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(parsed.Networking.ServiceSubnet), nil
 }
 
 func sortedKeys(values map[string]struct{}) []string {

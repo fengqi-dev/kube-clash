@@ -1,5 +1,9 @@
+FROM alpine:3.22 AS perms
+COPY build/bin/kube-loop-gateway-linux-arm64 /kube-loop-gateway
+RUN chmod 755 /kube-loop-gateway
+
 FROM scratch
-COPY build/bin/kube-clash-gateway-linux-arm64 /kube-clash-gateway
+COPY --from=perms /kube-loop-gateway /kube-loop-gateway
 USER 65532:65532
 EXPOSE 1080
-ENTRYPOINT ["/kube-clash-gateway"]
+ENTRYPOINT ["/kube-loop-gateway"]

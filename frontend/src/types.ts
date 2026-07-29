@@ -15,29 +15,26 @@ export interface ContextInfo {
 
 export interface Discovery {
   podCIDRs: string[];
+  serviceCIDRs: string[];
   serviceIPs: string[];
   dnsServer: string;
   pods: number;
-}
-
-export interface ConnectionMetadata {
-  network: string;
-  type: string;
-  sourceIP: string;
-  destinationIP: string;
-  destinationPort: string;
-  host: string;
-  process: string;
-  processPath: string;
+  services: number;
+  deployments: number;
 }
 
 export interface Connection {
   id: string;
-  metadata: ConnectionMetadata;
+  network: string;
+  source: string;
+  destination: string;
+  process: string;
   upload: number;
   download: number;
-  start: string;
-  chains: string[];
+  uploadSpeed?: number;
+  downloadSpeed?: number;
+  startedAt: string;
+  outbound: string;
   rule: string;
 }
 
@@ -45,7 +42,6 @@ export interface Metrics {
   downloadTotal: number;
   uploadTotal: number;
   connections: Connection[];
-  memory: number;
 }
 
 export interface UpdateInfo {
