@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -148,11 +149,14 @@ func (s *Server) stopSession(workDir string) error {
 	if current == nil {
 		return nil
 	}
+	// Wait for the lifecycle wrapper to finish DNS/route restore before the
+	// desktop deletes workDir (which also removes the stop signal file).
 	select {
 	case <-current.cmdDone:
-	default:
+		return nil
+	case <-time.After(15 * time.Second):
+		return fmt.Errorf("timed out waiting for privileged session to stop")
 	}
-	return nil
 }
 
 func writeResponse(w io.Writer, response Response) error {

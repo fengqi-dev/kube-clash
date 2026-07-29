@@ -31,6 +31,8 @@ func writeUnixLifecycleScript(
 		)
 	}
 
+	// Restore must not abort the script on a single failing rm/grep (set -e).
+	restore := "set +e; " + restoreDNS + "set -e; "
 	script := fmt.Sprintf(
 		"#!/bin/sh\nset -e\n"+
 			"%s%s%s"+
@@ -60,8 +62,8 @@ func writeUnixLifecycleScript(
 		shellQuote(logPath),
 		shellQuote(pidPath),
 		shellQuote(stopPath),
-		restoreDNS,
-		restoreDNS,
+		restore,
+		restore,
 	)
 	path := filepath.Join(workDir, lifecycleScriptName+".sh")
 	if err := os.WriteFile(path, []byte(script), 0o700); err != nil {

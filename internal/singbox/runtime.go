@@ -62,7 +62,13 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
-	dnsPort, err := selectDNSPort()
+	// Public port is advertised to the OS (/etc/resolver). sing-box dns-in uses
+	// an internal port; dnsSearchProxy expands short names then forwards.
+	publicDNSPort, err := selectDNSPort()
+	if err != nil {
+		return nil, err
+	}
+	internalDNSPort, err := availablePort()
 	if err != nil {
 		return nil, err
 	}
@@ -84,7 +90,7 @@ func (r *Runtime) Start(
 		ControllerPort:   controllerPort,
 		ControllerSecret: secret,
 		DNSHost:          DefaultDNSListen,
-		DNSPort:          dnsPort,
+		DNSPort:          internalDNSPort,
 		TUNAddress:       tunAddress,
 		Namespace:        namespace,
 		Hosts:            normalizedHosts,
@@ -121,7 +127,7 @@ func (r *Runtime) Start(
 	resolverDomains := ResolverDomains(namespace, normalizedHosts...)
 	dnsMeta, _ := json.Marshal(map[string]any{
 		"listen":  DefaultDNSListen,
-		"port":    dnsPort,
+		"port":    publicDNSPort,
 		"domains": resolverDomains,
 		"search":  searchDomains,
 		"ndots":   5,
@@ -140,18 +146,28 @@ func (r *Runtime) Start(
 		cleanup()
 		return nil, fmt.Errorf("create sing-box log: %w", err)
 	}
+	dnsProxy, err := startDNSSearchProxy(
+		DefaultDNSListen, publicDNSPort, DefaultDNSListen, internalDNSPort, searchDomains,
+	)
+	if err != nil {
+		logFile.Close()
+		cleanup()
+		return nil, err
+	}
 	process := &Process{
 		done: make(chan struct{}), stopCh: make(chan struct{}), logFile: logFile,
 		workDir: workDir, logPath: logPath,
 		controllerAddress: net.JoinHostPort("127.0.0.1", strconv.Itoa(controllerPort)),
 		controllerSecret:  secret,
-		dnsPort:           dnsPort,
+		dnsPort:           publicDNSPort,
 		resolverDomains:   resolverDomains,
+		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
 	}
 	if r.StartCommand == nil && r.PrivilegedStart != nil {
 		stop, startErr := r.PrivilegedStart(ctx, binaryPath, workDir)
 		if startErr != nil {
+			_ = dnsProxy.Close()
 			logFile.Close()
 			cleanup()
 			return nil, startErr
@@ -163,6 +179,7 @@ func (r *Runtime) Start(
 	} else {
 		cmd, startErr := r.startCommand(binaryPath, workDir, logFile)
 		if startErr != nil {
+			_ = dnsProxy.Close()
 			logFile.Close()
 			cleanup()
 			return nil, startErr
@@ -241,6 +258,7 @@ type Process struct {
 	controllerSecret  string
 	dnsPort           int
 	resolverDomains   []string
+	dnsProxy          *dnsSearchProxy
 	httpClient        *http.Client
 	closeOnce         sync.Once
 	errMu             sync.RWMutex
@@ -390,16 +408,20 @@ func (p *Process) Close() error {
 		case <-p.done:
 		default:
 			if p.useHelper {
-				ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				// helperStop should block until lifecycle finishes DNS restore.
+				// Older helpers returned immediately; waitLifecycleCleanup covers that.
+				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 				if p.helperStop != nil {
 					_ = p.helperStop(ctx)
 				} else {
 					_ = SignalLifecycleStop(p.workDir)
 				}
 				cancel()
+				waitLifecycleCleanup(p.workDir, 15*time.Second)
 				close(p.stopCh)
 			} else if p.privilegedPIDPath != "" {
 				_ = stopPrivilegedProcess(p.privilegedPIDPath)
+				waitLifecycleCleanup(p.workDir, 15*time.Second)
 			} else if p.cmd != nil && p.cmd.Process != nil {
 				if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
 					_ = p.cmd.Process.Kill()
@@ -407,7 +429,7 @@ func (p *Process) Close() error {
 			}
 			select {
 			case <-p.done:
-			case <-time.After(5 * time.Second):
+			case <-time.After(20 * time.Second):
 				if p.cmd != nil && p.cmd.Process != nil {
 					_ = p.cmd.Process.Kill()
 				}
@@ -421,9 +443,12 @@ func (p *Process) Close() error {
 				}
 			}
 		}
-		// Remove session files only after the lifecycle wrapper has exited so
-		// embedded split-DNS restore (including host-alias resolver files) can
-		// still read dns-meta / search-domain scripts under workDir.
+		if p.dnsProxy != nil {
+			_ = p.dnsProxy.Close()
+			p.dnsProxy = nil
+		}
+		// Remove session files only after lifecycle DNS restore has finished.
+		// Deleting workDir too early removes the stop signal and skips cleanup.
 		_ = os.RemoveAll(p.workDir)
 	})
 	err := p.Err()
