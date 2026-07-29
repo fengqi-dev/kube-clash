@@ -9,6 +9,7 @@ import (
 	"net"
 	"os"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,18 @@ const (
 )
 
 const DefaultGatewayImage = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
+
+// ResolveGatewayImage picks the Gateway image for this desktop build.
+// KUBELOOP_GATEWAY_IMAGE wins; release builds pin the matching image tag.
+func ResolveGatewayImage(appVersion string) string {
+	if image := strings.TrimSpace(os.Getenv("KUBELOOP_GATEWAY_IMAGE")); image != "" {
+		return image
+	}
+	if appVersion != "" && appVersion != "dev" {
+		return "ghcr.io/fengqi-dev/kube-loop/gateway:" + appVersion
+	}
+	return DefaultGatewayImage
+}
 
 type Request struct {
 	Context   string
@@ -158,15 +171,11 @@ const (
 )
 
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
-	image := os.Getenv("KUBELOOP_GATEWAY_IMAGE")
-	if image == "" {
-		image = DefaultGatewayImage
-	}
 	manager := &Manager{
 		provider:      provider,
 		core:          newSingboxRuntime(),
 		bridgeFactory: socksbridge.Listen,
-		gatewayImage:  image,
+		gatewayImage:  ResolveGatewayImage(""),
 		intercept:     intercept.NewManager(provider),
 		portfwd:       portfwd.NewManager(provider),
 		state: State{

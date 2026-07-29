@@ -28,6 +28,7 @@ import { useTheme, type ThemePreference } from "@/hooks/use-theme";
 import { useI18n, type Language } from "@/i18n";
 import { cn } from "@/lib/utils";
 import type { HelperStatus, UpdateInfo } from "@/types";
+import { appVersion } from "@/version";
 
 export function SettingsView({
   ready,
@@ -259,7 +260,9 @@ export function SettingsView({
               <div>
                 <h3 className="text-sm font-semibold">KubeLoop Desktop</h3>
                 <p className="mt-1 font-mono text-[11px] text-muted-foreground">
-                  {t("settings.currentVersion", { version: update.currentVersion || "dev" })}
+                  {t("settings.currentVersion", {
+                    version: update.currentVersion || appVersion,
+                  })}
                 </p>
               </div>
             </div>

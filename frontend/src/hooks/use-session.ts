@@ -8,6 +8,7 @@ import type {
   SessionState,
   UpdateInfo,
 } from "@/types";
+import { appVersion } from "@/version";
 
 export type AppView =
   | "overview"
@@ -28,7 +29,7 @@ const emptySession: SessionState = {
 };
 
 const emptyUpdate: UpdateInfo = {
-  currentVersion: "dev",
+  currentVersion: appVersion,
   available: false,
   url: "https://github.com/fengqi-dev/kube-loop/releases",
 };
