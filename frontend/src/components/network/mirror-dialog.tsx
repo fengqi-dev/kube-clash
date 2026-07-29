@@ -45,32 +45,18 @@ export function MirrorDialog({
   const [localPort, setLocalPort] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const tcpPorts = useMemo(
-    () =>
-      (service?.ports ?? []).filter(
-        (port) => (port.protocol || "TCP").toUpperCase() === "TCP",
-      ),
-    [service],
-  );
-
   const selectedPort = useMemo(() => {
-    return tcpPorts.find((port) => portKeyOf(port) === portKey);
-  }, [portKey, tcpPorts]);
+    if (!service) return undefined;
+    return service.ports.find((port) => portKeyOf(port) === portKey);
+  }, [portKey, service]);
 
   useEffect(() => {
-    if (!open || !service) {
+    if (!open || !service || service.ports.length === 0) {
       setPortKey("");
       setLocalPort("");
       return;
     }
-    const next = service.ports.find(
-      (port) => (port.protocol || "TCP").toUpperCase() === "TCP",
-    );
-    if (!next) {
-      setPortKey("");
-      setLocalPort("");
-      return;
-    }
+    const next = service.ports[0];
     setPortKey(portKeyOf(next));
     setLocalPort(String(next.port));
     setLocalHost("127.0.0.1");
@@ -91,7 +77,7 @@ export function MirrorDialog({
         ports: [
           {
             servicePort: selectedPort.port,
-            protocol: "TCP",
+            protocol: selectedPort.protocol || "TCP",
             localHost: localHost.trim() || "127.0.0.1",
             localPort: parsedLocal,
           },
@@ -130,13 +116,13 @@ export function MirrorDialog({
             <Select
               value={portKey}
               onValueChange={setPortKey}
-              disabled={!service || tcpPorts.length === 0}
+              disabled={!service || !service.ports.length}
             >
               <SelectTrigger className="h-9 w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {tcpPorts.map((port) => (
+                {(service?.ports ?? []).map((port) => (
                   <SelectItem key={portKeyOf(port)} value={portKeyOf(port)}>
                     {port.protocol || "TCP"}/{port.port}
                     {port.name ? ` (${port.name})` : ""}

@@ -22,15 +22,24 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: macOS
+          - name: macOS arm64
             runner: macos-latest
-            artifact: desktop-macos
-          - name: Windows
+            artifact: desktop-darwin-arm64
+          - name: macOS amd64
+            runner: macos-15-intel
+            artifact: desktop-darwin-amd64
+          - name: Windows amd64
             runner: windows-latest
-            artifact: desktop-windows
-          - name: Linux
+            artifact: desktop-windows-amd64
+          - name: Windows arm64
+            runner: windows-11-arm
+            artifact: desktop-windows-arm64
+          - name: Linux amd64
             runner: ubuntu-24.04
-            artifact: desktop-linux
+            artifact: desktop-linux-amd64
+          - name: Linux arm64
+            runner: ubuntu-24.04-arm
+            artifact: desktop-linux-arm64
 
     steps:
       - name: Check out repository

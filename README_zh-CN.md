@@ -50,8 +50,7 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 ## 快速开始
 
 1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载对应平台压缩包
-   （`kubeloop-darwin-*.tar.gz` / `kubeloop-windows-*.zip` / `kubeloop-linux-*.tar.gz`；
-   或按下方说明自行构建）。
+   （darwin / windows / linux × amd64 / arm64；或按下方说明自行构建）。
    - **macOS**：解压后打开 `KubeLoop.app`。若被 Gatekeeper 拦截，可右键 → **打开**，
      或执行 `xattr -cr KubeLoop.app`。
    - **Windows**：解压 zip。若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
@@ -62,7 +61,7 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
    可在 **设置** 中安装或卸载该服务。
 
 连接成功后，可在概览查看流量与状态，在网络页使用发现。端口转发、流量交换、流量镜像与预览各自
-带有 Namespace 选择器。Exchange 用本机进程替换 Service；Mirror 保留集群 Pod 为主路径，并将 TCP 请求拷贝到本机。
+带有 Namespace 选择器。Exchange 用本机进程替换 Service；Mirror 保留集群 Pod 为主路径，并将 TCP/UDP 请求拷贝到本机。
 
 ## 安全设计
 

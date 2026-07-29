@@ -54,8 +54,7 @@ cluster. You do not need `kubectl` installed locally.
 ## Get started
 
 1. Download a platform archive from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-   (`kubeloop-darwin-*.tar.gz`, `kubeloop-windows-*.zip`, or `kubeloop-linux-*.tar.gz`;
-   or build from source — see below).
+   (darwin/windows/linux × amd64/arm64; or build from source — see below).
    - **macOS**: extract, then open `KubeLoop.app`. If Gatekeeper blocks it, right-click
      → **Open**, or run `xattr -cr KubeLoop.app`.
    - **Windows**: extract the zip. If SmartScreen appears, choose **More info** →
@@ -85,7 +84,7 @@ the whole cluster:
 
 Exchange / Mirror / Preview stay disabled when Service / EndpointSlice / Endpoints write is missing.
 **Exchange** replaces a Service with a local process; **Mirror** keeps cluster Pods as the
-primary path and tees TCP requests to a local process.
+primary path and tees TCP/UDP requests to a local process.
 See [docs/design.md](docs/design.md) §8 (or [中文](docs/design.zh-CN.md)) for example Roles.
 
 ## Security posture

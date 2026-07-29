@@ -13,7 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 )
 
-func TestPreviewExposesLocalTCP(t *testing.T) {
+func TestPreviewExposesLocalTCPAndUDP(t *testing.T) {
 	requireE2E(t)
 	ctx, cancel := testContext(t, 5*time.Minute)
 	defer cancel()
@@ -32,6 +32,8 @@ func TestPreviewExposesLocalTCP(t *testing.T) {
 
 	localTCP, localTCPAddr := startLocalTCPEcho(t, "preview-tcp")
 	defer localTCP.Close()
+	localUDP, localUDPAddr := startLocalUDPEcho(t, "preview-udp")
+	defer localUDP.Close()
 
 	manager := intercept.NewManager(provider)
 	if err := manager.Start(ctx, kubeContext(), gateway.IP, forwarder.Address()); err != nil {
@@ -42,10 +44,16 @@ func TestPreviewExposesLocalTCP(t *testing.T) {
 	info, err := manager.StartPreview(ctx, intercept.PreviewRequest{
 		Namespace: echoNamespace,
 		Name:      "preview-local",
-		Ports: []intercept.PortMapping{{
-			ServicePort: 8080, Protocol: "TCP",
-			LocalHost: "127.0.0.1", LocalPort: localTCPAddr.Port,
-		}},
+		Ports: []intercept.PortMapping{
+			{
+				ServicePort: 8080, Protocol: "TCP",
+				LocalHost: "127.0.0.1", LocalPort: localTCPAddr.Port,
+			},
+			{
+				ServicePort: 9090, Protocol: "UDP",
+				LocalHost: "127.0.0.1", LocalPort: localUDPAddr.Port,
+			},
+		},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -55,6 +63,7 @@ func TestPreviewExposesLocalTCP(t *testing.T) {
 	}
 
 	_ = waitClusterProbe(t, ctx, client, info.ClusterIP, 8080, "tcp", "ping", "preview-tcp:")
+	_ = waitClusterProbe(t, ctx, client, info.ClusterIP, 9090, "udp", "ping", "preview-udp:")
 
 	if err := manager.Stop(ctx, info.ID); err != nil {
 		t.Fatal(err)

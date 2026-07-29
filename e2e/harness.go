@@ -4,6 +4,8 @@ package e2e
 
 import (
 	"context"
+	"fmt"
+	"net"
 	"os"
 	"testing"
 	"time"
@@ -11,6 +13,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 const (
@@ -80,5 +83,40 @@ func ensureGateway(
 			t.Logf("close gateway port-forward: %v", err)
 		}
 	})
+	if err := waitGatewayControl(ctx, forwarder.Address()); err != nil {
+		t.Fatalf("gateway control not ready: %v", err)
+	}
 	return gateway, forwarder
+}
+
+// waitGatewayControl dials the Gateway control session until handshake succeeds.
+func waitGatewayControl(ctx context.Context, address string) error {
+	deadline := time.Now().Add(60 * time.Second)
+	var last error
+	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		var dialer net.Dialer
+		conn, err := dialer.DialContext(ctx, "tcp", address)
+		if err != nil {
+			last = err
+			time.Sleep(300 * time.Millisecond)
+			continue
+		}
+		err = tunnel.WriteControlSession(conn)
+		if err == nil {
+			err = tunnel.ReadStatus(conn)
+		}
+		_ = conn.Close()
+		if err == nil {
+			return nil
+		}
+		last = err
+		time.Sleep(300 * time.Millisecond)
+	}
+	if last == nil {
+		last = fmt.Errorf("timed out")
+	}
+	return fmt.Errorf("control handshake at %s: %w", address, last)
 }
