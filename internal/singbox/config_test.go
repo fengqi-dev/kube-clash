@@ -95,6 +95,38 @@ func TestResolverDomains(t *testing.T) {
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ResolverDomains = %v, want %v", got, want)
 	}
+	withHosts := ResolverDomains("demo", HostAlias{Domain: "app.dev", IP: "10.96.0.50"})
+	if !strings.Contains(strings.Join(withHosts, ","), "app.dev") {
+		t.Fatalf("ResolverDomains missing host alias: %v", withHosts)
+	}
+}
+
+func TestGenerateHostAliases(t *testing.T) {
+	content, err := Generate(cluster.Discovery{
+		PodCIDRs:     []string{"10.244.0.0/16"},
+		ServiceCIDRs: []string{"10.96.0.0/12"},
+		DNSServer:    "10.96.0.10",
+	}, Options{
+		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "test-secret",
+		DNSPort: 1053, Namespace: "default",
+		Hosts: []HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, item := range []string{`"type": "hosts"`, `"app.dev"`, `"10.96.0.50"`} {
+		if !strings.Contains(text, item) {
+			t.Fatalf("generated config missing %q:\n%s", item, text)
+		}
+	}
+}
+
+func TestNormalizeHostAliasesClearsEmpty(t *testing.T) {
+	got, err := NormalizeHostAliases(nil)
+	if err != nil || got != nil {
+		t.Fatalf("empty aliases = %v, %v", got, err)
+	}
 }
 
 func TestSearchDomains(t *testing.T) {

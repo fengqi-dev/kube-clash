@@ -48,6 +48,30 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestHostAliasesClear(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.SetHostAliases("minikube", []HostAliasSpec{
+		{Domain: "app.dev", IP: "10.96.0.50"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if len(s.HostAliases("minikube")) != 1 {
+		t.Fatal("expected one host alias")
+	}
+	if err := s.SetHostAliases("minikube", nil); err != nil {
+		t.Fatal(err)
+	}
+	if got := s.HostAliases("minikube"); len(got) != 0 {
+		t.Fatalf("expected cleared host aliases, got %#v", got)
+	}
+	if s.Cluster("minikube").HostAliases != nil {
+		t.Fatalf("stored HostAliases should be nil after clear: %#v", s.Cluster("minikube").HostAliases)
+	}
+}
+
 func TestOnlyOneConnectedContext(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

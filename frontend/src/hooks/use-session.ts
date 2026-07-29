@@ -15,6 +15,7 @@ export type AppView =
   | "connections"
   | "workload"
   | "network"
+  | "host-aliases"
   | "logs"
   | "settings";
 

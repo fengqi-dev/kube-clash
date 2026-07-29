@@ -26,6 +26,10 @@ export function GatewayInstallManifest() {
   return window['go']['main']['App']['GatewayInstallManifest']();
 }
 
+export function GetHostAliases(arg1) {
+  return window['go']['main']['App']['GetHostAliases'](arg1);
+}
+
 export function GetManualNetwork(arg1) {
   return window['go']['main']['App']['GetManualNetwork'](arg1);
 }
@@ -80,6 +84,10 @@ export function RememberSelection(arg1, arg2) {
 
 export function RemoveKubeconfig(arg1) {
   return window['go']['main']['App']['RemoveKubeconfig'](arg1);
+}
+
+export function SetHostAliases(arg1, arg2) {
+  return window['go']['main']['App']['SetHostAliases'](arg1, arg2);
 }
 
 export function SetManualNetwork(arg1, arg2) {

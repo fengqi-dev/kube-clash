@@ -2,6 +2,7 @@ import type {
   BootstrapData,
   ClusterInventory,
   HelperStatus,
+  HostAlias,
   InterceptInfo,
   InterceptMapping,
   ManualNetwork,
@@ -34,6 +35,8 @@ declare global {
           Disconnect(): Promise<void>;
           GetManualNetwork(contextName: string): Promise<ManualNetwork>;
           SetManualNetwork(contextName: string, network: ManualNetwork): Promise<void>;
+          GetHostAliases(contextName: string): Promise<HostAlias[]>;
+          SetHostAliases(contextName: string, items: HostAlias[]): Promise<void>;
           GatewayInstallManifest(): Promise<string>;
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
@@ -89,6 +92,10 @@ export const backend = {
     Promise.resolve().then(() => api().GetManualNetwork(contextName)),
   setManualNetwork: (contextName: string, network: ManualNetwork) =>
     Promise.resolve().then(() => api().SetManualNetwork(contextName, network)),
+  getHostAliases: (contextName: string) =>
+    Promise.resolve().then(() => api().GetHostAliases(contextName)),
+  setHostAliases: (contextName: string, items: HostAlias[]) =>
+    Promise.resolve().then(() => api().SetHostAliases(contextName, items)),
   gatewayInstallManifest: () =>
     Promise.resolve().then(() => api().GatewayInstallManifest()),
   startIntercept: (mapping: InterceptMapping) =>

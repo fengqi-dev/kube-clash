@@ -3,6 +3,7 @@
 import {cluster} from '../models';
 import {main} from '../models';
 import {update} from '../models';
+import {store} from '../models';
 import {helper} from '../models';
 import {intercept} from '../models';
 import {portfwd} from '../models';
@@ -18,6 +19,8 @@ export function Connect(arg1:string,arg2:string):Promise<void>;
 export function Disconnect():Promise<void>;
 
 export function GatewayInstallManifest():Promise<string>;
+
+export function GetHostAliases(arg1:string):Promise<Array<store.HostAliasSpec>>;
 
 export function GetManualNetwork(arg1:string):Promise<cluster.ManualNetwork>;
 
@@ -46,6 +49,8 @@ export function ReloadContexts():Promise<cluster.ClusterInventory>;
 export function RememberSelection(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveKubeconfig(arg1:string):Promise<cluster.ClusterInventory>;
+
+export function SetHostAliases(arg1:string,arg2:Array<store.HostAliasSpec>):Promise<void>;
 
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
 

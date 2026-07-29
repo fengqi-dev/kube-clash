@@ -7,6 +7,7 @@ import {
   Server,
   Settings2,
   ShieldCheck,
+  Globe,
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
@@ -23,6 +24,7 @@ const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> 
   { id: "connections", icon: Waypoints },
   { id: "workload", icon: Boxes },
   { id: "network", icon: Network },
+  { id: "host-aliases", icon: Globe },
   { id: "logs", icon: ScrollText },
 ];
 
@@ -32,6 +34,7 @@ const navKeys: Record<AppView, TranslationKey> = {
   connections: "nav.connections",
   workload: "nav.workload",
   network: "nav.network",
+  "host-aliases": "nav.hostAliases",
   logs: "nav.logs",
   settings: "nav.settings",
 };

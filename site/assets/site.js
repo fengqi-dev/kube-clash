@@ -33,9 +33,11 @@ const dictionary = {
     "overview.start.design.body": "Architecture, permissions, and security boundaries.",
     "overview.guides.title": "Guides",
     "overview.guides.product.title": "Product capabilities",
-    "overview.guides.product.body": "TUN, split DNS, Exchange, Preview, and Port Forward.",
+    "overview.guides.product.body":
+      "TUN, split DNS, Host Aliases, Exchange, Preview, and Port Forward.",
     "overview.guides.workflows.title": "Everyday workflows",
-    "overview.guides.workflows.body": "Open Services, debug Pods, intercept local processes.",
+    "overview.guides.workflows.body":
+      "Open Services, map custom domains, debug Pods, intercept local processes.",
     "overview.guides.arch.title": "Architecture",
     "overview.guides.arch.body": "How traffic flows from your apps to the Gateway.",
     "overview.more.title": "Also useful",
@@ -64,7 +66,7 @@ const dictionary = {
       "On first use, approve the virtual network service. Later connects should not ask again.",
     "started.after.title": "After you are connected",
     "started.after.body":
-      "Use Overview for traffic and status, Workload / Network for Port Forward, Exchange, and Preview. Short names like mysql.default resolve via Kubernetes search domains.",
+      "Use Overview for traffic and status, Workload / Network for Port Forward, Exchange, and Preview, and Host Aliases for custom domain → IP maps. Short names like mysql.default resolve via Kubernetes search domains.",
 
     "product.title": "Product",
     "product.desc":
@@ -75,6 +77,9 @@ const dictionary = {
     "product.core.dns.title": "Cluster DNS",
     "product.core.dns.body":
       "Split DNS with search domains — mysql.default and *.svc.cluster.local both work.",
+    "product.core.hosts.title": "Host Aliases",
+    "product.core.hosts.body":
+      "Per-context domain → IPv4 maps via local DNS while connected. Reconnect to apply; cleared on disconnect.",
     "product.core.clusters.title": "Cluster management",
     "product.core.clusters.body": "Add kubeconfig files, list Contexts, probe and switch.",
     "product.tools.title": "Developer tools",
@@ -90,7 +95,7 @@ const dictionary = {
 
     "workflows.title": "Workflows",
     "workflows.desc":
-      "Browse, debug, intercept, and preview without opening a terminal for every Service.",
+      "Browse, debug, map domains, intercept, and preview without opening a terminal for every Service.",
     "workflows.list.title": "Everyday paths",
     "workflows.w1.label": "Internal API",
     "workflows.w1.title": "Open a Service in the browser",
@@ -108,6 +113,11 @@ const dictionary = {
     "workflows.w4.title": "Run a local process as a Service",
     "workflows.w4.body": "Exchange keeps ClusterIP / DNS while traffic lands locally.",
     "workflows.w4.hint": "Exchange",
+    "workflows.w5.label": "Host alias",
+    "workflows.w5.title": "Map a custom domain to a cluster IP",
+    "workflows.w5.body":
+      "On Host Aliases, bind app.dev to a Service or Pod IP. Reconnect so split DNS picks it up.",
+    "workflows.w5.hint": "app.dev → 10.96.x.x",
 
     "arch.title": "Architecture",
     "arch.desc":
@@ -118,7 +128,8 @@ const dictionary = {
     "arch.n1.body": "Browsers, IDEs, CLIs, and SDKs — no SOCKS settings per app.",
     "arch.n2.tag": "sing-box",
     "arch.n2.title": "TUN / DNS / rules",
-    "arch.n2.body": "Split DNS and focused routes for Pod CIDR, Service CIDR, and cluster.local.",
+    "arch.n2.body":
+      "Split DNS and focused routes for Pod CIDR, Service CIDR, cluster.local, and optional Host Aliases.",
     "arch.n3.tag": "Bridge",
     "arch.n3.title": "Local SOCKS5 bridge",
     "arch.n3.body": "TCP and UDP sessions multiplexed toward the cluster path.",
@@ -168,9 +179,10 @@ const dictionary = {
     "overview.start.design.body": "架构、权限与安全边界说明。",
     "overview.guides.title": "指南",
     "overview.guides.product.title": "产品能力",
-    "overview.guides.product.body": "TUN、分流 DNS、Exchange、Preview 与端口转发。",
+    "overview.guides.product.body":
+      "TUN、分流 DNS、主机别名、Exchange、Preview 与端口转发。",
     "overview.guides.workflows.title": "使用场景",
-    "overview.guides.workflows.body": "打开 Service、调试 Pod、拦截本机进程。",
+    "overview.guides.workflows.body": "打开 Service、映射自定义域名、调试 Pod、拦截本机进程。",
     "overview.guides.arch.title": "架构",
     "overview.guides.arch.body": "流量如何从本机应用到达 Gateway。",
     "overview.more.title": "更多",
@@ -195,7 +207,7 @@ const dictionary = {
     "started.step4.body": "首次使用时批准虚拟网卡服务；之后连接通常不再要求授权。",
     "started.after.title": "连接之后",
     "started.after.body":
-      "在概览查看流量与状态；在工作负载 / 网络使用端口转发、Exchange 与 Preview。mysql.default 等短名通过 Kubernetes 搜索域解析。",
+      "在概览查看流量与状态；在工作负载 / 网络使用端口转发、Exchange 与 Preview；在主机别名配置域名 → IP。mysql.default 等短名通过 Kubernetes 搜索域解析。",
 
     "product.title": "产品能力",
     "product.desc": "透明集群网络，加上你每天都会用到的工具。",
@@ -205,6 +217,9 @@ const dictionary = {
     "product.core.dns.title": "集群 DNS",
     "product.core.dns.body":
       "分流 DNS 与搜索域——mysql.default 与 *.svc.cluster.local 都可用。",
+    "product.core.hosts.title": "主机别名",
+    "product.core.hosts.body":
+      "按 Context 配置域名 → IPv4；连接期间经本地 DNS 生效。改后需重连；断开时清理。",
     "product.core.clusters.title": "集群管理",
     "product.core.clusters.body": "添加 kubeconfig、列出 Context、探测并切换。",
     "product.tools.title": "开发者工具",
@@ -219,7 +234,7 @@ const dictionary = {
       "无特权集群内 Deployment，仅经 API Server port-forward 访问；支持受限 RBAC 与管理员预装。",
 
     "workflows.title": "使用场景",
-    "workflows.desc": "浏览、排查、拦截与预览，不必为每个 Service 再开终端。",
+    "workflows.desc": "浏览、排查、映射域名、拦截与预览，不必为每个 Service 再开终端。",
     "workflows.list.title": "日常路径",
     "workflows.w1.label": "内部 API",
     "workflows.w1.title": "在浏览器打开 Service",
@@ -237,6 +252,11 @@ const dictionary = {
     "workflows.w4.title": "本机进程充当 Service",
     "workflows.w4.body": "Exchange 保留 ClusterIP / DNS，流量落到本机。",
     "workflows.w4.hint": "Exchange",
+    "workflows.w5.label": "主机别名",
+    "workflows.w5.title": "把自定义域名指到集群 IP",
+    "workflows.w5.body":
+      "在「主机别名」将 app.dev 映射到 Service 或 Pod IP，重新连接后分流 DNS 生效。",
+    "workflows.w5.hint": "app.dev → 10.96.x.x",
 
     "arch.title": "架构",
     "arch.desc": "本地应用经 sing-box 进入。只有集群目标会穿过 SOCKS 桥到达 Gateway。",
@@ -246,7 +266,8 @@ const dictionary = {
     "arch.n1.body": "浏览器、IDE、CLI、SDK——无需逐个配置 SOCKS。",
     "arch.n2.tag": "sing-box",
     "arch.n2.title": "TUN / DNS / 规则",
-    "arch.n2.body": "为 Pod CIDR、Service CIDR 与 cluster.local 做分流 DNS 与定向路由。",
+    "arch.n2.body":
+      "为 Pod CIDR、Service CIDR、cluster.local 以及可选的主机别名做分流 DNS 与定向路由。",
     "arch.n3.tag": "桥",
     "arch.n3.title": "本机 SOCKS5 桥",
     "arch.n3.body": "TCP / UDP 会话复用后送向集群路径。",

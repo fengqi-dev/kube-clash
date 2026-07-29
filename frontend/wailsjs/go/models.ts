@@ -732,6 +732,25 @@ export namespace singbox {
 
 }
 
+export namespace store {
+	
+	export class HostAliasSpec {
+	    domain: string;
+	    ip: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new HostAliasSpec(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.domain = source["domain"];
+	        this.ip = source["ip"];
+	    }
+	}
+
+}
+
 export namespace update {
 	
 	export class Info {

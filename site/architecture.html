@@ -6,7 +6,7 @@
     <title>Architecture — KubeLoop Docs</title>
     <meta
       name="description"
-      content="KubeLoop architecture: sing-box TUN/DNS, API Server port-forward, in-cluster Gateway, CoreDNS."
+      content="KubeLoop architecture: sing-box TUN/DNS, Host Aliases, API Server port-forward, in-cluster Gateway, CoreDNS."
     />
     <link rel="icon" href="assets/appicon.svg" type="image/svg+xml" />
     <link rel="stylesheet" href="assets/styles.css" />
@@ -43,8 +43,8 @@
                 <div>
                   <h3 data-i18n="arch.n2.title">TUN / DNS / rules</h3>
                   <p data-i18n="arch.n2.body">
-                    Split DNS and focused routes for Pod CIDR, Service CIDR, and
-                    cluster.local.
+                    Split DNS and focused routes for Pod CIDR, Service CIDR,
+                    cluster.local, and optional Host Aliases.
                   </p>
                 </div>
               </article>

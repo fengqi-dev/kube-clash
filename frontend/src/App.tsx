@@ -3,6 +3,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { StatusBar } from "@/components/layout/status-bar";
 import { ClustersView } from "@/components/clusters/clusters-view";
 import { ConnectionsView } from "@/components/connections/connections-view";
+import { HostAliasesView } from "@/components/host-aliases/host-aliases-view";
 import { LogsView } from "@/components/logs/logs-view";
 import { NetworkView } from "@/components/network/network-view";
 import { WorkloadView } from "@/components/network/workload-view";
@@ -116,6 +117,9 @@ function App() {
               ready={ready}
               session={session}
             />
+          )}
+          {view === "host-aliases" && (
+            <HostAliasesView contextName={contextName} ready={ready} />
           )}
           {view === "logs" && (
             <LogsView session={session} error={uiError || session.error || ""} />
