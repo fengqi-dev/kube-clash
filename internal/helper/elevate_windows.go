@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"syscall"
@@ -58,26 +59,28 @@ Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue
 }
 
 func runElevatedPowerShell(ctx context.Context, script string) error {
-	encoded := encodePowerShellCommand(script)
-	command := fmt.Sprintf(
-		`$id = [Guid]::NewGuid().ToString('N')
-$stdout = Join-Path ([IO.Path]::GetTempPath()) ('kubeloop-elevated-' + $id + '.out')
-$stderr = Join-Path ([IO.Path]::GetTempPath()) ('kubeloop-elevated-' + $id + '.err')
-try {
-    $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','%s') -Verb RunAs -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
-    if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout }
-    if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
-    exit $p.ExitCode
-} finally {
-    Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
-}`,
-		encoded,
-	)
+	outputFile, err := os.CreateTemp("", "kubeloop-elevated-*.log")
+	if err != nil {
+		return fmt.Errorf("create elevated helper log: %w", err)
+	}
+	outputPath := outputFile.Name()
+	if err := outputFile.Close(); err != nil {
+		_ = os.Remove(outputPath)
+		return fmt.Errorf("close elevated helper log: %w", err)
+	}
+	defer os.Remove(outputPath)
+
+	payload := elevatedPowerShellPayload(script, outputPath)
+	command := elevatedPowerShellLauncher(encodePowerShellCommand(payload))
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command)
 	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	output, err := cmd.CombinedOutput()
+	launcherOutput, err := cmd.CombinedOutput()
 	if err != nil {
-		return fmt.Errorf("elevated helper command: %w: %s", err, strings.TrimSpace(string(output)))
+		elevatedOutput, _ := os.ReadFile(outputPath)
+		detail := strings.TrimSpace(strings.Join([]string{
+			string(launcherOutput), string(elevatedOutput),
+		}, "\n"))
+		return fmt.Errorf("elevated helper command: %w: %s", err, detail)
 	}
 	return nil
 }
