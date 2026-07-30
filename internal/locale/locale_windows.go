@@ -1,12 +1,12 @@
 //go:build windows
 
-package tray
+package locale
 
 import "golang.org/x/sys/windows"
 
 var procGetUserDefaultUILanguage = windows.NewLazySystemDLL("kernel32.dll").NewProc("GetUserDefaultUILanguage")
 
-func isWindowsChinese() bool {
+func isChineseUI() bool {
 	r, _, err := procGetUserDefaultUILanguage.Call()
 	if r == 0 && err != nil {
 		return false
