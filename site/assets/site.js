@@ -79,10 +79,10 @@ const dictionary = {
       "Extract the portable zip and run KubeLoop. If SmartScreen appears, choose More info → Run anyway.",
     "started.install.linux.shellTitle": "Shell",
     "started.install.linux.shell":
-      "Download and extract the latest tarball for your CPU:",
+      "Download and install the latest .deb/.rpm for your distro (falls back to the tarball):",
     "started.install.linux.pkgTitle": "Package",
     "started.install.linux.pkg":
-      "Install the .deb or .rpm from GitHub Releases for your distribution.",
+      "Install kubeloop-VERSION-linux-ARCH.deb or .rpm from GitHub Releases.",
     "started.install.linux.tarballTitle": "Tarball",
     "started.install.linux.tarball":
       "Extract the tar.gz and run the KubeLoop binary from the unpacked directory.",
@@ -332,10 +332,11 @@ const dictionary = {
     "started.install.windows.portable":
       "解压便携 zip 后运行 KubeLoop。若出现 SmartScreen，选择「更多信息 → 仍要运行」。",
     "started.install.linux.shellTitle": "Shell",
-    "started.install.linux.shell": "下载并解压对应 CPU 架构的最新压缩包：",
+    "started.install.linux.shell":
+      "按发行版下载并安装最新 .deb/.rpm（没有软件包时回退到压缩包）：",
     "started.install.linux.pkgTitle": "软件包",
     "started.install.linux.pkg":
-      "按发行版安装 GitHub Releases 中的 .deb 或 .rpm。",
+      "从 GitHub Releases 安装 kubeloop-VERSION-linux-ARCH.deb 或 .rpm。",
     "started.install.linux.tarballTitle": "压缩包",
     "started.install.linux.tarball":
       "解压 tar.gz，在解压目录中运行 KubeLoop。",
