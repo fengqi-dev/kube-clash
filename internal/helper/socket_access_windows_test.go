@@ -4,7 +4,6 @@ package helper
 
 import (
 	"os"
-	"strings"
 	"testing"
 
 	"golang.org/x/sys/windows"
@@ -33,8 +32,12 @@ func TestConfigureHelperSocketAccess(t *testing.T) {
 	if descriptor == nil || !descriptor.IsValid() {
 		t.Fatal("helper socket security descriptor is invalid")
 	}
-	if got := descriptor.String(); !strings.Contains(got, ownerSID) {
-		t.Fatalf("helper socket DACL %q does not contain owner SID %q", got, ownerSID)
+	allowed, err := daclAllowsSID(descriptor, ownerSID)
+	if err != nil {
+		t.Fatalf("inspect helper socket DACL: %v", err)
+	}
+	if !allowed {
+		t.Fatalf("helper socket DACL %q does not allow owner SID %q", descriptor.String(), ownerSID)
 	}
 }
 

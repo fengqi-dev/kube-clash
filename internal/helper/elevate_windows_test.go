@@ -108,7 +108,11 @@ func TestConfigureElevatedExchangeAccess(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := descriptor.String(); !strings.Contains(got, ownerSID) {
-		t.Fatalf("elevated exchange DACL %q does not contain owner SID %q", got, ownerSID)
+	allowed, err := daclAllowsSID(descriptor, ownerSID)
+	if err != nil {
+		t.Fatalf("inspect elevated exchange DACL: %v", err)
+	}
+	if !allowed {
+		t.Fatalf("elevated exchange DACL %q does not allow owner SID %q", descriptor.String(), ownerSID)
 	}
 }
