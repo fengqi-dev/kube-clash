@@ -1,7 +1,7 @@
 import { Minus, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n";
-import { Quit, WindowMinimise } from "../../../wailsjs/runtime/runtime";
+import { WindowHide, WindowMinimise } from "../../../wailsjs/runtime/runtime";
 
 export function WindowControls() {
   const { t } = useI18n();
@@ -24,7 +24,7 @@ export function WindowControls() {
         size="icon"
         aria-label={t("window.close")}
         title={t("window.close")}
-        onClick={() => Quit()}
+        onClick={() => WindowHide()}
         className="rounded-none border-l hover:bg-destructive hover:text-white"
       >
         <X strokeWidth={1.8} />

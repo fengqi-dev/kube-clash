@@ -10,9 +10,11 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/locale"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"github.com/fengqi-dev/kube-loop/internal/tray"
 	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -23,6 +25,7 @@ type App struct {
 	manager     *session.Manager
 	store       *store.Store
 	updater     *update.Checker
+	tray        *tray.Controller
 	once        sync.Once
 	updateMu    sync.RWMutex
 	updateCheck sync.Mutex
@@ -85,7 +88,17 @@ func (a *App) startup(ctx context.Context) {
 	})
 }
 
+func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	if a.tray == nil {
+		return false
+	}
+	return a.tray.BeforeClose(ctx)
+}
+
 func (a *App) shutdown(context.Context) {
+	if a.tray != nil {
+		a.tray.Stop()
+	}
 	_ = a.manager.Shutdown()
 }
 
@@ -146,10 +159,11 @@ func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
 	if a.ctx == nil {
 		return cluster.ClusterInventory{}, errors.New("application is not ready")
 	}
+	s := locale.T()
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select kubeconfig",
+		Title: s.SelectKubeconfig,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Kubeconfig", Pattern: "*.yaml;*.yml;*.conf;*"},
+			{DisplayName: s.KubeconfigFilter, Pattern: "*.yaml;*.yml;*.conf;*"},
 		},
 	})
 	if err != nil {
