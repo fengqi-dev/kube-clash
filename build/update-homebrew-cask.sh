@@ -52,7 +52,8 @@ fi
 hash_for() {
   local name="$1"
   local line
-  line="$(grep -E "[[:space:]]${name}\$" "${tmpdir}/SHA256SUMS" | head -n1 || true)"
+  # sha256sum ./* writes "./name"; sha256sum * writes "name".
+  line="$(grep -E "[[:space:]](\./)?${name}\$" "${tmpdir}/SHA256SUMS" | head -n1 || true)"
   if [[ -z "${line}" ]]; then
     echo "missing ${name} in SHA256SUMS" >&2
     exit 1
