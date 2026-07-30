@@ -268,7 +268,8 @@ jobs:
         shell: bash
         run: |
           cd dist
-          sha256sum ./* > SHA256SUMS
+          # Prefer bare filenames (no "./" prefix) so consumers can match by asset name.
+          sha256sum -- * > SHA256SUMS
 
       - name: Publish GitHub Release assets
         shell: bash
