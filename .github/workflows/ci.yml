@@ -164,19 +164,19 @@ jobs:
         run: go test -tags=e2e ./e2e -count=1 -timeout=25m -v
 
   windows-e2e:
-    name: E2E (Windows self-hosted)
-    if: ${{ vars.KUBELOOP_WINDOWS_E2E == '1' }}
-    needs: go
-    runs-on: [self-hosted, Windows, X64]
-    timeout-minutes: 35
-    env:
-      KUBELOOP_E2E_PROFILE: kubeloop-e2e
-      KUBELOOP_E2E_CONTEXT: kubeloop-e2e
-      KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
-      KUBELOOP_WINDOWS_MINIKUBE_DRIVER: ${{ vars.KUBELOOP_WINDOWS_MINIKUBE_DRIVER || 'docker' }}
+    name: Windows integration
+    needs: frontend
+    runs-on: windows-2025
+    timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+
+      - name: Download frontend dist
+        uses: actions/download-artifact@v7
+        with:
+          name: frontend-dist
+          path: frontend/dist
 
       - name: Set up Go
         uses: actions/setup-go@v6
@@ -184,66 +184,29 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Verify runner prerequisites
+      - name: Check formatting
         shell: pwsh
         run: |
-          Get-Command minikube -ErrorAction Stop | Out-Null
-          Get-Command kubectl -ErrorAction Stop | Out-Null
-          minikube version
-          kubectl version --client
-          if ($env:KUBELOOP_WINDOWS_MINIKUBE_DRIVER -eq "docker") {
-            Get-Command docker -ErrorAction Stop | Out-Null
-            docker info
+          $unformatted = git ls-files "*.go" | ForEach-Object {
+            gofmt -l $_
+          }
+          if ($unformatted) {
+            Write-Error "The following Go files are not formatted:`n$($unformatted -join "`n")"
+            exit 1
           }
 
-      - name: Start Minikube
-        shell: pwsh
-        run: |
-          minikube start `
-            --profile $env:KUBELOOP_E2E_PROFILE `
-            --driver $env:KUBELOOP_WINDOWS_MINIKUBE_DRIVER `
-            --cpus 2 `
-            --memory 4096
+      - name: Vet
+        run: go vet ./...
 
-      - name: Build and load Gateway image
+      - name: Run Windows tests
+        run: go test ./... -count=1
+
+      - name: Build Windows binaries
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force build/bin | Out-Null
-          $env:CGO_ENABLED = "0"
-          $env:GOOS = "linux"
-          $env:GOARCH = "amd64"
-          go build `
-            -trimpath `
-            -ldflags="-s -w" `
-            -o build/bin/kube-loop-gateway `
-            ./cmd/kubeloop-gateway
+          New-Item -ItemType Directory -Force build/windows-ci | Out-Null
+          go build -trimpath -o build/windows-ci/kubeloop-helper.exe ./cmd/kubeloop-helper
           if ($LASTEXITCODE -ne 0) {
             exit $LASTEXITCODE
           }
-          minikube --profile $env:KUBELOOP_E2E_PROFILE image build `
-            --tag $env:KUBELOOP_GATEWAY_IMAGE `
-            --file build/gateway.e2e.Dockerfile `
-            .
-
-      - name: Run Minikube e2e tests
-        shell: pwsh
-        env:
-          KUBELOOP_E2E: "1"
-        run: go test -tags=e2e ./e2e -count=1 -timeout=25m -v
-
-      - name: Collect diagnostics
-        if: failure()
-        shell: pwsh
-        run: |
-          minikube --profile $env:KUBELOOP_E2E_PROFILE status
-          kubectl --context $env:KUBELOOP_E2E_CONTEXT get pods --all-namespaces -o wide
-          kubectl --context $env:KUBELOOP_E2E_CONTEXT `
-            -n kubeloop-system logs `
-            -l app.kubernetes.io/name=kubeloop-gateway `
-            --all-containers `
-            --tail=500
-
-      - name: Delete Minikube profile
-        if: always()
-        shell: pwsh
-        run: minikube delete --profile $env:KUBELOOP_E2E_PROFILE
+          go build -trimpath -o build/windows-ci/kubeloop-gateway.exe ./cmd/kubeloop-gateway
