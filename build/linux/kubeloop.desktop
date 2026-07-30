@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=KubeLoop
+GenericName=Kubernetes Local Network
+Comment=Local development network for Kubernetes
+Exec=kubeloop
+Icon=kubeloop
+Terminal=false
+Categories=Development;Network;
+StartupNotify=true

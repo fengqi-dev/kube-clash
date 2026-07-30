@@ -65,13 +65,46 @@ jobs:
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
             libgtk-3-dev \
-            libwebkit2gtk-4.1-dev
+            libwebkit2gtk-4.1-dev \
+            rpm
 
       - name: Install frontend dependencies
         run: npm ci --prefix frontend
 
       - name: Install Wails
         run: go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
+
+      - name: Install nfpm
+        if: runner.os == 'Linux'
+        run: go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+
+      - name: Install NSIS
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install nsis --yes --no-progress
+          echo "C:\Program Files (x86)\NSIS" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+
+      - name: Sync product version
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import pathlib
+
+          version = os.environ["GITHUB_REF_NAME"].lstrip("v")
+          parts = [p for p in version.split(".") if p]
+          while len(parts) < 3:
+              parts.append("0")
+          product_version = ".".join(parts[:3])
+
+          path = pathlib.Path("wails.json")
+          data = json.loads(path.read_text())
+          data.setdefault("info", {})["productVersion"] = product_version
+          path.write_text(json.dumps(data, indent=2) + "\n")
+          print(f"productVersion={product_version}")
+          PY
 
       - name: Build desktop application
         if: runner.os != 'Windows'
@@ -93,24 +126,27 @@ jobs:
         env:
           VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
-          wails build -clean -ldflags "-X main.version=${GITHUB_REF_NAME}"
+          wails build -clean -nsis -ldflags "-X main.version=${GITHUB_REF_NAME}"
 
       - name: Package desktop application
         if: runner.os != 'Windows'
         shell: bash
-        run: |
-          mkdir -p dist
-          arch="$(go env GOARCH)"
-          os_name="$(go env GOOS)"
-          tar -C build/bin -czf "dist/kubeloop-${os_name}-${arch}.tar.gz" .
+        env:
+          VERSION: ${{ github.ref_name }}
+        run: ./build/package-desktop.sh
 
       - name: Package desktop application
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $arch = go env GOARCH
-          Compress-Archive -Path "build/bin/*" -DestinationPath "dist/kubeloop-windows-$arch.zip"
+          $arch = (go env GOARCH).Trim()
+          Compress-Archive -Path "build/bin/KubeLoop.exe" -DestinationPath "dist/kubeloop-windows-$arch.zip"
+          $installer = Get-ChildItem "build/bin/*-installer.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "NSIS installer not found in build/bin"
+          }
+          Copy-Item $installer.FullName "dist/kubeloop-windows-$arch-installer.exe"
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7

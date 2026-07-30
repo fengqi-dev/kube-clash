@@ -1,6 +1,10 @@
 bin/
 build/bin/
 build/embedded/kubeloop-helper*
+build/windows/installer/tmp/
+build/windows/installer/wails_tools.nsh
+build/windows/icon.ico
+dist/
 frontend/dist/
 frontend/node_modules/
 *.log
