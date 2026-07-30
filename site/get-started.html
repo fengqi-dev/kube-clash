@@ -26,15 +26,126 @@
             <div class="steps">
               <article class="step">
                 <h3 data-i18n="started.step1.title">Install KubeLoop</h3>
-                <p data-i18n="started.step1.body">
-                  Download a platform package from GitHub Releases (or build from
-                  source with Wails). macOS: open the DMG and drag KubeLoop.app
-                  into Applications (or extract the tar.gz); if Gatekeeper
-                  blocks it, right-click → Open, or run xattr -cr KubeLoop.app.
-                  Windows: run the NSIS installer, or extract the portable zip;
-                  if SmartScreen appears, choose More info → Run anyway. Linux:
-                  install the deb / rpm, or extract the tar.gz and run KubeLoop.
+                <p data-i18n="started.step1.lead">
+                  Install a platform package from GitHub Releases, or build from
+                  source with Wails.
                 </p>
+
+                <div class="install-os" data-install-os>
+                  <div
+                    class="install-os-tabs"
+                    role="tablist"
+                    aria-label="Operating system"
+                  >
+                    <button
+                      type="button"
+                      class="install-os-tab"
+                      role="tab"
+                      id="install-tab-macos"
+                      aria-controls="install-panel-macos"
+                      aria-selected="true"
+                      data-os="macos"
+                    >
+                      macOS
+                    </button>
+                    <button
+                      type="button"
+                      class="install-os-tab"
+                      role="tab"
+                      id="install-tab-windows"
+                      aria-controls="install-panel-windows"
+                      aria-selected="false"
+                      data-os="windows"
+                    >
+                      Windows
+                    </button>
+                    <button
+                      type="button"
+                      class="install-os-tab"
+                      role="tab"
+                      id="install-tab-linux"
+                      aria-controls="install-panel-linux"
+                      aria-selected="false"
+                      data-os="linux"
+                    >
+                      Linux
+                    </button>
+                  </div>
+
+                  <div
+                    class="install-os-panel is-active"
+                    role="tabpanel"
+                    id="install-panel-macos"
+                    aria-labelledby="install-tab-macos"
+                    data-os="macos"
+                  >
+                    <h4 data-i18n="started.install.macos.brewTitle">Homebrew</h4>
+                    <pre class="install-code"><code>brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+brew install --cask kubeloop</code></pre>
+                    <h4 data-i18n="started.install.macos.shellTitle">Shell</h4>
+                    <p data-i18n="started.install.macos.shell">
+                      Download the latest DMG for your CPU, then open it and drag
+                      KubeLoop.app into Applications.
+                    </p>
+                    <pre class="install-code"><code>curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash</code></pre>
+                    <h4 data-i18n="started.install.macos.manualTitle">Manual</h4>
+                    <p data-i18n="started.install.macos.manual">
+                      Open the DMG from GitHub Releases and drag KubeLoop.app into
+                      Applications. If Gatekeeper blocks it, right-click → Open, or
+                      run:
+                    </p>
+                    <pre class="install-code"><code>xattr -cr /Applications/KubeLoop.app</code></pre>
+                  </div>
+
+                  <div
+                    class="install-os-panel"
+                    role="tabpanel"
+                    id="install-panel-windows"
+                    aria-labelledby="install-tab-windows"
+                    data-os="windows"
+                    hidden
+                  >
+                    <h4 data-i18n="started.install.windows.shellTitle">Shell</h4>
+                    <p data-i18n="started.install.windows.shell">
+                      In PowerShell, download and run the latest installer:
+                    </p>
+                    <pre class="install-code"><code>irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex</code></pre>
+                    <h4 data-i18n="started.install.windows.installerTitle">Installer</h4>
+                    <p data-i18n="started.install.windows.installer">
+                      Run the NSIS installer from GitHub Releases.
+                    </p>
+                    <h4 data-i18n="started.install.windows.portableTitle">Portable</h4>
+                    <p data-i18n="started.install.windows.portable">
+                      Extract the portable zip and run KubeLoop. If SmartScreen
+                      appears, choose More info → Run anyway.
+                    </p>
+                  </div>
+
+                  <div
+                    class="install-os-panel"
+                    role="tabpanel"
+                    id="install-panel-linux"
+                    aria-labelledby="install-tab-linux"
+                    data-os="linux"
+                    hidden
+                  >
+                    <h4 data-i18n="started.install.linux.shellTitle">Shell</h4>
+                    <p data-i18n="started.install.linux.shell">
+                      Download and extract the latest tarball for your CPU:
+                    </p>
+                    <pre class="install-code"><code>curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash</code></pre>
+                    <h4 data-i18n="started.install.linux.pkgTitle">Package</h4>
+                    <p data-i18n="started.install.linux.pkg">
+                      Install the .deb or .rpm from GitHub Releases for your
+                      distribution.
+                    </p>
+                    <h4 data-i18n="started.install.linux.tarballTitle">Tarball</h4>
+                    <p data-i18n="started.install.linux.tarball">
+                      Extract the tar.gz and run the KubeLoop binary from the
+                      unpacked directory.
+                    </p>
+                  </div>
+                </div>
               </article>
               <article class="step">
                 <h3 data-i18n="started.step2.title">Confirm kubeconfig access</h3>

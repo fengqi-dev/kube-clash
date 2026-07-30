@@ -296,3 +296,41 @@ jobs:
               --title "KubeLoop ${tag}" \
               "${prerelease_args[@]}"
           fi
+
+  homebrew-cask:
+    name: Update Homebrew Cask
+    needs: publish
+    # Skip hyphenated pre-release tags (v1.1.0-rc.1).
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Check out default branch
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+
+      - name: Bump Casks/kubeloop.rb
+        env:
+          VERSION: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        run: ./build/update-homebrew-cask.sh
+
+      - name: Commit and push cask bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Casks/kubeloop.rb
+          if git diff --staged --quiet; then
+            echo "Homebrew cask already up to date"
+            exit 0
+          fi
+          # [skip ci] prevents the bump commit from re-running CI/Pages.
+          git commit -m "chore(homebrew): bump kubeloop cask to ${GITHUB_REF_NAME} [skip ci]"
+          git push
