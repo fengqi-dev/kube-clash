@@ -275,6 +275,12 @@ jobs:
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
+          # Hyphenated tags (v1.1.0-rc.1) are GitHub pre-releases.
+          # Plain vX.Y.Z can still be pre-created with: gh release create TAG --prerelease
+          prerelease_args=()
+          if [[ "${tag}" == *-* ]]; then
+            prerelease_args+=(--prerelease)
+          fi
           if gh release view "${tag}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
             # Re-runs / rebuilt matrices: replace assets on the existing release.
             gh release upload "${tag}" dist/* \
@@ -285,5 +291,6 @@ jobs:
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
               --generate-notes \
-              --title "KubeLoop ${tag}"
+              --title "KubeLoop ${tag}" \
+              "${prerelease_args[@]}"
           fi
