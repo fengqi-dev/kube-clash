@@ -80,25 +80,22 @@ jobs:
           CGO_LDFLAGS: ${{ runner.os == 'macOS' && '-framework UniformTypeIdentifiers' || '' }}
           VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
+          ./build/bundle-helper.sh "${GITHUB_REF_NAME}"
           if [[ "${RUNNER_OS}" == "Linux" ]]; then
             wails build -clean -tags webkit2_41 \
               -ldflags "-X main.version=${GITHUB_REF_NAME}"
           else
             wails build -clean -ldflags "-X main.version=${GITHUB_REF_NAME}"
           fi
-          ./build/bundle-helper.sh "${GITHUB_REF_NAME}" build/bin
 
       - name: Build desktop application
         if: runner.os == 'Windows'
-        shell: pwsh
+        shell: bash
         env:
           VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
-          $versionFlag = "-X main.version=$env:GITHUB_REF_NAME"
-          wails build -clean -ldflags $versionFlag
-          New-Item -ItemType Directory -Force -Path build/bin | Out-Null
-          go build -trimpath -ldflags "-s -w $versionFlag" `
-            -o "build/bin/kubeloop-helper.exe" ./cmd/kubeloop-helper
+          ./build/bundle-helper.sh "${GITHUB_REF_NAME}"
+          wails build -clean -ldflags "-X main.version=${GITHUB_REF_NAME}"
 
       - name: Package desktop application
         if: runner.os != 'Windows'
