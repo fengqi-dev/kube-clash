@@ -19,3 +19,15 @@ func TestDispatchRequiresValidSessionIDForStop(t *testing.T) {
 		t.Fatalf("dispatch() unexpectedly accepted an unsafe session ID")
 	}
 }
+
+func TestTailText(t *testing.T) {
+	if got := tailText([]byte("short"), 8); got != "short" {
+		t.Fatalf("short tail = %q", got)
+	}
+	if got := tailText([]byte("0123456789"), 4); got != "6789" {
+		t.Fatalf("truncated tail = %q", got)
+	}
+	if got := tailText([]byte("0123456789"), 0); got != "0123456789" {
+		t.Fatalf("unlimited tail = %q", got)
+	}
+}

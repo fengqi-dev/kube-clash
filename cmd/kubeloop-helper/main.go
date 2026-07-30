@@ -26,8 +26,9 @@ func main() {
 		uid := fs.Int("uid", 0, "owner uid")
 		ver := fs.String("version", helper.Version, "helper version")
 		home := fs.String("home", "", "user home directory for session allowlist")
+		ownerSID := fs.String("sid", "", "Windows SID allowed to access the helper socket")
 		_ = fs.Parse(os.Args[2:])
-		if err := helper.InstallFromCLI(*source, *token, *uid, *ver, *home); err != nil {
+		if err := helper.InstallFromCLI(*source, *token, *uid, *ver, *home, *ownerSID); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -44,6 +45,20 @@ func main() {
 		}
 		server := helper.NewServer(auth)
 		if err := helper.RunService(server); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+	case "elevated":
+		fs := flag.NewFlagSet("elevated", flag.ExitOnError)
+		operation := fs.String("operation", "", "elevated operation")
+		request := fs.String("request", "", "elevated request file")
+		result := fs.String("result", "", "elevated result file")
+		_ = fs.Parse(os.Args[2:])
+		if *operation == "" || *request == "" || *result == "" {
+			fmt.Fprintln(os.Stderr, "--operation, --request, and --result are required")
+			os.Exit(2)
+		}
+		if err := helper.RunElevatedRequest(*operation, *request, *result); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
@@ -64,6 +79,7 @@ Usage:
   kubeloop-helper install --source PATH --token TOKEN [--uid N] [--version V]
   kubeloop-helper uninstall
   kubeloop-helper run
+  kubeloop-helper elevated --operation OP --request PATH --result PATH
   kubeloop-helper version
 `)
 }

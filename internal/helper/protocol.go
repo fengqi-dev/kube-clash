@@ -32,10 +32,11 @@ type Response struct {
 
 // AuthFile is persisted under the system state directory.
 type AuthFile struct {
-	Token   string `json:"token"`
-	UID     int    `json:"uid"`
-	Version string `json:"version"`
-	HomeDir string `json:"homeDir,omitempty"`
+	Token    string `json:"token"`
+	UID      int    `json:"uid"`
+	Version  string `json:"version"`
+	HomeDir  string `json:"homeDir,omitempty"`
+	OwnerSID string `json:"ownerSid,omitempty"`
 }
 
 // Status describes helper installation from the desktop app's point of view.

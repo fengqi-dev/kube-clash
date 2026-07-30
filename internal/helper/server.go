@@ -11,6 +11,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -30,8 +31,14 @@ type session struct {
 	workDir string
 	cmd     *exec.Cmd
 	done    chan struct{}
+	exited  chan sessionExit
 	routes  []string
 	dns     singbox.DNSMeta
+}
+
+type sessionExit struct {
+	err error
+	log string
 }
 
 func NewServer(auth AuthFile) *Server {
@@ -43,7 +50,7 @@ func NewServer(auth AuthFile) *Server {
 }
 
 func (s *Server) Serve(ctx context.Context) error {
-	listener, err := listenHelper()
+	listener, err := listenHelper(s.Auth.OwnerSID)
 	if err != nil {
 		return err
 	}
@@ -133,7 +140,10 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		return fmt.Errorf("build route settings: %w", err)
 	}
 
-	current := &session{done: make(chan struct{}), routes: routes, dns: dns}
+	current := &session{
+		done: make(chan struct{}), exited: make(chan sessionExit, 1),
+		routes: routes, dns: dns,
+	}
 	s.mu.Lock()
 	if existing := s.sessions[spec.ID]; existing != nil {
 		s.mu.Unlock()
@@ -224,6 +234,9 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 	s.mu.Unlock()
 	go func() {
 		waitErr := cmd.Wait()
+		_ = logFile.Sync()
+		logContent, _ := os.ReadFile(filepath.Join(current.workDir, "sing-box.log"))
+		current.exited <- sessionExit{err: waitErr, log: tailText(logContent, 8<<10)}
 		if waitErr != nil {
 			s.Log.Printf("sing-box session %s exited: %v", spec.ID, waitErr)
 		}
@@ -236,7 +249,26 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		s.mu.Unlock()
 		close(current.done)
 	}()
-	return nil
+	select {
+	case result := <-current.exited:
+		detail := strings.TrimSpace(result.log)
+		if detail == "" {
+			detail = "sing-box produced no diagnostic output"
+		}
+		if result.err != nil {
+			return fmt.Errorf("sing-box exited during startup: %w: %s", result.err, detail)
+		}
+		return fmt.Errorf("sing-box exited during startup: %s", detail)
+	case <-time.After(2 * time.Second):
+		return nil
+	}
+}
+
+func tailText(content []byte, limit int) string {
+	if limit <= 0 || len(content) <= limit {
+		return string(content)
+	}
+	return string(content[len(content)-limit:])
 }
 
 func (s *Server) stopSession(sessionID string) error {
