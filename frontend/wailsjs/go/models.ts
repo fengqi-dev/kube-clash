@@ -513,6 +513,7 @@ export namespace portfwd {
 	    kind: string;
 	    name: string;
 	    podName: string;
+	    protocol: string;
 	    remotePort: number;
 	    localPort: number;
 	    address: string;
@@ -529,6 +530,7 @@ export namespace portfwd {
 	        this.kind = source["kind"];
 	        this.name = source["name"];
 	        this.podName = source["podName"];
+	        this.protocol = source["protocol"];
 	        this.remotePort = source["remotePort"];
 	        this.localPort = source["localPort"];
 	        this.address = source["address"];
@@ -539,6 +541,7 @@ export namespace portfwd {
 	    namespace: string;
 	    kind: string;
 	    name: string;
+	    protocol?: string;
 	    remotePort: number;
 	    localPort: number;
 	
@@ -552,6 +555,7 @@ export namespace portfwd {
 	        this.namespace = source["namespace"];
 	        this.kind = source["kind"];
 	        this.name = source["name"];
+	        this.protocol = source["protocol"];
 	        this.remotePort = source["remotePort"];
 	        this.localPort = source["localPort"];
 	    }
@@ -678,6 +682,7 @@ export namespace singbox {
 	    uploadSpeed?: number;
 	    downloadSpeed?: number;
 	    startedAt: string;
+	    inbound: string;
 	    outbound: string;
 	    rule: string;
 	
@@ -697,6 +702,7 @@ export namespace singbox {
 	        this.uploadSpeed = source["uploadSpeed"];
 	        this.downloadSpeed = source["downloadSpeed"];
 	        this.startedAt = source["startedAt"];
+	        this.inbound = source["inbound"];
 	        this.outbound = source["outbound"];
 	        this.rule = source["rule"];
 	    }

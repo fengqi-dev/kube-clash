@@ -78,6 +78,7 @@ export interface Connection {
   uploadSpeed?: number;
   downloadSpeed?: number;
   startedAt: string;
+  inbound: string;
   outbound: string;
   rule: string;
 }
@@ -226,6 +227,7 @@ export interface PortForwardRequest {
   namespace: string;
   kind: "pod" | "service" | string;
   name: string;
+  protocol?: string;
   remotePort: number;
   localPort: number;
 }
@@ -237,6 +239,7 @@ export interface PortForwardInfo {
   kind: string;
   name: string;
   podName: string;
+  protocol: string;
   remotePort: number;
   localPort: number;
   address: string;

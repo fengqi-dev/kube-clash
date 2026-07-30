@@ -37,6 +37,10 @@ func TestServiceExchangeTCPAndUDP(t *testing.T) {
 	defer localUDP.Close()
 
 	manager := intercept.NewManager(provider)
+	dataPlane := startTrafficDataPlane(t, ctx, provider, forwarder.Address())
+	manager.SetTrafficDialers(intercept.TrafficDialers{
+		Exchange: dataPlane.dialer(dataPlane.endpoints.Exchange),
+	})
 	if err := manager.Start(ctx, kubeContext(), gateway.IP, forwarder.Address()); err != nil {
 		t.Fatal(err)
 	}

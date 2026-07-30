@@ -95,6 +95,15 @@ func (r *recordingProcess) Err() error            { return nil }
 func (r *recordingProcess) Snapshot(context.Context) (singbox.Metrics, error) {
 	return singbox.Metrics{Connections: []singbox.Connection{}}, nil
 }
+func (r *recordingProcess) TrafficEndpoints() singbox.TrafficEndpoints {
+	endpoint := singbox.TrafficEndpoint{
+		Address: "127.0.0.1:18080", Username: "test-user", Password: "test-password",
+	}
+	return singbox.TrafficEndpoints{
+		PortForward: endpoint, Exchange: endpoint, Preview: endpoint,
+		MirrorPrimary: endpoint, MirrorShadow: endpoint,
+	}
+}
 func (r *recordingProcess) Close() error {
 	select {
 	case <-r.done:

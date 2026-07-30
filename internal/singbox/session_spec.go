@@ -17,21 +17,24 @@ var sessionIDPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$`)
 // SessionSpec is the complete, field-constrained description accepted by the
 // privileged helper. It deliberately contains no filesystem paths or commands.
 type SessionSpec struct {
-	ID               string      `json:"id"`
-	PodCIDRs         []string    `json:"podCIDRs,omitempty"`
-	ServiceCIDRs     []string    `json:"serviceCIDRs,omitempty"`
-	ServiceIPs       []string    `json:"serviceIPs,omitempty"`
-	ClusterDNSServer string      `json:"clusterDNSServer,omitempty"`
-	BridgeHost       string      `json:"bridgeHost"`
-	BridgePort       int         `json:"bridgePort"`
-	ControllerPort   int         `json:"controllerPort"`
-	ControllerSecret string      `json:"controllerSecret"`
-	DNSHost          string      `json:"dnsHost"`
-	DNSPort          int         `json:"dnsPort"`
-	PublicDNSPort    int         `json:"publicDNSPort"`
-	TUNAddress       string      `json:"tunAddress"`
-	Namespace        string      `json:"namespace,omitempty"`
-	Hosts            []HostAlias `json:"hosts,omitempty"`
+	ID               string              `json:"id"`
+	PodCIDRs         []string            `json:"podCIDRs,omitempty"`
+	ServiceCIDRs     []string            `json:"serviceCIDRs,omitempty"`
+	ServiceIPs       []string            `json:"serviceIPs,omitempty"`
+	ClusterDNSServer string              `json:"clusterDNSServer,omitempty"`
+	BridgeHost       string              `json:"bridgeHost"`
+	BridgePort       int                 `json:"bridgePort"`
+	ControllerPort   int                 `json:"controllerPort"`
+	ControllerSecret string              `json:"controllerSecret"`
+	DNSHost          string              `json:"dnsHost"`
+	DNSPort          int                 `json:"dnsPort"`
+	PublicDNSPort    int                 `json:"publicDNSPort"`
+	TUNAddress       string              `json:"tunAddress"`
+	Namespace        string              `json:"namespace,omitempty"`
+	Hosts            []HostAlias         `json:"hosts,omitempty"`
+	TrafficPorts     TrafficInboundPorts `json:"trafficPorts"`
+	TrafficUsername  string              `json:"trafficUsername"`
+	TrafficPassword  string              `json:"trafficPassword"`
 }
 
 // DNSMeta describes the split-DNS state installed by the privileged helper.
@@ -67,6 +70,25 @@ func (s SessionSpec) Validate() error {
 	}
 	if len(s.ControllerSecret) < 32 || len(s.ControllerSecret) > 256 {
 		return errors.New("controller secret must be between 32 and 256 characters")
+	}
+	if len(s.TrafficUsername) < 16 || len(s.TrafficUsername) > 255 {
+		return errors.New("traffic username must be between 16 and 255 characters")
+	}
+	if len(s.TrafficPassword) < 32 || len(s.TrafficPassword) > 255 {
+		return errors.New("traffic password must be between 32 and 255 characters")
+	}
+	seenTrafficPorts := make(map[int]struct{}, len(s.TrafficPorts.items()))
+	for _, port := range []int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort} {
+		seenTrafficPorts[port] = struct{}{}
+	}
+	for _, item := range s.TrafficPorts.items() {
+		if err := validatePort(item.port, item.tag); err != nil {
+			return err
+		}
+		if _, exists := seenTrafficPorts[item.port]; exists {
+			return errors.New("traffic inbound ports must be unique and not overlap internal ports")
+		}
+		seenTrafficPorts[item.port] = struct{}{}
 	}
 	if len(s.PodCIDRs)+len(s.ServiceCIDRs)+len(s.ServiceIPs)+len(s.Hosts) > maxSessionItems {
 		return errors.New("session contains too many routes or host aliases")
@@ -117,6 +139,9 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		TUNAddress:       s.TUNAddress,
 		Namespace:        s.Namespace,
 		Hosts:            hosts,
+		TrafficPorts:     s.TrafficPorts,
+		TrafficUsername:  s.TrafficUsername,
+		TrafficPassword:  s.TrafficPassword,
 	})
 }
 

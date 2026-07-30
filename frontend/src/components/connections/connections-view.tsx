@@ -25,6 +25,7 @@ const maxTableRows = 100;
 const columns = [
   { key: "process", align: "left" as const },
   { key: "network", align: "left" as const },
+  { key: "inbound", align: "left" as const },
   { key: "destination", align: "left" as const },
   { key: "source", align: "left" as const },
   { key: "download", align: "right" as const },
@@ -126,6 +127,9 @@ export function ConnectionsView({
                     </TableCell>
                     <TableCell className="text-muted-foreground">
                       {connection.network?.toUpperCase() || "—"}
+                    </TableCell>
+                    <TableCell className="max-w-[130px] truncate text-[11px] text-muted-foreground">
+                      {connection.inbound || "—"}
                     </TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-[11px] text-primary">
                       {connection.destination || "—"}

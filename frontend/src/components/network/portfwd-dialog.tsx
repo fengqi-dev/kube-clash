@@ -97,6 +97,7 @@ export function PortForwardDialog({
         namespace: target.namespace,
         kind,
         name: target.name,
+        protocol: selectedPort.protocol,
         remotePort: selectedPort.port,
         localPort: parsedLocal,
       });

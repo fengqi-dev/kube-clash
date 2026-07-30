@@ -20,6 +20,7 @@ type Connection struct {
 	UploadSpeed   int64  `json:"uploadSpeed,omitempty"`
 	DownloadSpeed int64  `json:"downloadSpeed,omitempty"`
 	StartedAt     string `json:"startedAt"`
+	Inbound       string `json:"inbound"`
 	Outbound      string `json:"outbound"`
 	Rule          string `json:"rule"`
 }

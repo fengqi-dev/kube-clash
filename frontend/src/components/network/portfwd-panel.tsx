@@ -370,7 +370,7 @@ export function PortForwardPanel({
                   ) : null}
                 </TableCell>
                 <TableCell className="font-mono text-[12px] text-muted-foreground">
-                  {item.address} → :{item.remotePort}
+                  {(item.protocol || "tcp").toUpperCase()} {item.address} → :{item.remotePort}
                 </TableCell>
                 <TableCell>
                   <div className="flex items-center gap-1.5">

@@ -30,6 +30,52 @@ type RunningCore interface {
 	Done() <-chan struct{}
 	Err() error
 	Snapshot(ctx context.Context) (Metrics, error)
+	TrafficEndpoints() TrafficEndpoints
+}
+
+type TrafficEndpoint struct {
+	Address  string
+	Username string
+	Password string
+}
+
+type TrafficEndpoints struct {
+	PortForward   TrafficEndpoint
+	Exchange      TrafficEndpoint
+	Preview       TrafficEndpoint
+	MirrorPrimary TrafficEndpoint
+	MirrorShadow  TrafficEndpoint
+}
+
+func (e TrafficEndpoints) Validate() error {
+	items := []struct {
+		name     string
+		endpoint TrafficEndpoint
+	}{
+		{PortForwardInbound, e.PortForward},
+		{ExchangeInbound, e.Exchange},
+		{PreviewInbound, e.Preview},
+		{MirrorPrimaryInbound, e.MirrorPrimary},
+		{MirrorShadowInbound, e.MirrorShadow},
+	}
+	for _, item := range items {
+		host, rawPort, err := net.SplitHostPort(item.endpoint.Address)
+		if err != nil {
+			return fmt.Errorf("%s address: %w", item.name, err)
+		}
+		ip := net.ParseIP(host)
+		if ip == nil || !ip.IsLoopback() {
+			return fmt.Errorf("%s must listen on loopback", item.name)
+		}
+		port, err := strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 {
+			return fmt.Errorf("%s has invalid port", item.name)
+		}
+		if item.endpoint.Username == "" || item.endpoint.Password == "" {
+			return fmt.Errorf("%s credentials are required", item.name)
+		}
+	}
+	return nil
 }
 
 const DefaultMetricsInterval = time.Second
@@ -72,6 +118,20 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
+	trafficPorts, err := availableTrafficPorts(
+		bridgePort, controllerPort, publicDNSPort, internalDNSPort,
+	)
+	if err != nil {
+		return nil, err
+	}
+	trafficUsername, err := randomSecret()
+	if err != nil {
+		return nil, err
+	}
+	trafficPassword, err := randomSecret()
+	if err != nil {
+		return nil, err
+	}
 	tunAddress, err := selectTUNAddress()
 	if err != nil {
 		return nil, err
@@ -96,6 +156,9 @@ func (r *Runtime) Start(
 		TUNAddress:       tunAddress,
 		Namespace:        namespace,
 		Hosts:            normalizedHosts,
+		TrafficPorts:     trafficPorts,
+		TrafficUsername:  trafficUsername,
+		TrafficPassword:  trafficPassword,
 	}
 	if r.PrivilegedStart == nil {
 		return nil, errors.New("privileged helper is required")
@@ -123,6 +186,7 @@ func (r *Runtime) Start(
 		resolverDomains:   resolverDomains,
 		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
+		trafficEndpoints:  trafficEndpoints(trafficPorts, trafficUsername, trafficPassword),
 	}
 	stop, startErr := r.PrivilegedStart(ctx, spec)
 	if startErr != nil {
@@ -187,6 +251,7 @@ type Process struct {
 	closeOnce         sync.Once
 	errMu             sync.RWMutex
 	waitErr           error
+	trafficEndpoints  TrafficEndpoints
 }
 
 func (p *Process) Done() <-chan struct{} { return p.done }
@@ -196,6 +261,8 @@ func (p *Process) Err() error {
 	defer p.errMu.RUnlock()
 	return p.waitErr
 }
+
+func (p *Process) TrafficEndpoints() TrafficEndpoints { return p.trafficEndpoints }
 
 func (p *Process) Snapshot(ctx context.Context) (Metrics, error) {
 	response, err := p.request(ctx, "/connections")
@@ -232,6 +299,7 @@ type clashConnection struct {
 		Host            string `json:"host"`
 		Process         string `json:"process"`
 		ProcessPath     string `json:"processPath"`
+		Type            string `json:"type"`
 	} `json:"metadata"`
 	Upload   int64    `json:"upload"`
 	Download int64    `json:"download"`
@@ -266,6 +334,7 @@ func mapClashMetrics(raw clashConnections) Metrics {
 			Upload:      item.Upload,
 			Download:    item.Download,
 			StartedAt:   item.Start,
+			Inbound:     inboundTag(item.Metadata.Type),
 			Outbound:    outbound,
 			Rule:        item.Rule,
 		})
@@ -280,6 +349,13 @@ func mapClashMetrics(raw clashConnections) Metrics {
 		ActiveConnections: len(connections),
 		Connections:       connections,
 	}
+}
+
+func inboundTag(value string) string {
+	if _, tag, found := strings.Cut(value, "/"); found {
+		return tag
+	}
+	return value
 }
 
 func joinHostPort(host, port string) string {
@@ -355,6 +431,53 @@ func availablePort() (int, error) {
 	}
 	defer listener.Close()
 	return listener.Addr().(*net.TCPAddr).Port, nil
+}
+
+func availableTrafficPorts(excluded ...int) (TrafficInboundPorts, error) {
+	ports := TrafficInboundPorts{}
+	targets := []*int{
+		&ports.PortForward,
+		&ports.Exchange,
+		&ports.Preview,
+		&ports.MirrorPrimary,
+		&ports.MirrorShadow,
+	}
+	seen := make(map[int]struct{}, len(targets)+len(excluded))
+	for _, port := range excluded {
+		seen[port] = struct{}{}
+	}
+	for _, target := range targets {
+		for {
+			port, err := availablePort()
+			if err != nil {
+				return TrafficInboundPorts{}, err
+			}
+			if _, exists := seen[port]; exists {
+				continue
+			}
+			seen[port] = struct{}{}
+			*target = port
+			break
+		}
+	}
+	return ports, nil
+}
+
+func trafficEndpoints(ports TrafficInboundPorts, username, password string) TrafficEndpoints {
+	endpoint := func(port int) TrafficEndpoint {
+		return TrafficEndpoint{
+			Address:  net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+			Username: username,
+			Password: password,
+		}
+	}
+	return TrafficEndpoints{
+		PortForward:   endpoint(ports.PortForward),
+		Exchange:      endpoint(ports.Exchange),
+		Preview:       endpoint(ports.Preview),
+		MirrorPrimary: endpoint(ports.MirrorPrimary),
+		MirrorShadow:  endpoint(ports.MirrorShadow),
+	}
 }
 
 func randomSecret() (string, error) {

@@ -89,6 +89,38 @@ func TestGenerateRejectsInvalidDiscovery(t *testing.T) {
 	}
 }
 
+func TestGenerateFixedTrafficInbounds(t *testing.T) {
+	content, err := Generate(cluster.Discovery{
+		PodCIDRs: []string{"10.244.0.0/16"},
+	}, Options{
+		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "test-secret",
+		DNSPort: 1053,
+		TrafficPorts: TrafficInboundPorts{
+			PortForward: 18081, Exchange: 18082, Preview: 18083,
+			MirrorPrimary: 18084, MirrorShadow: 18085,
+		},
+		TrafficUsername: "traffic-user-1234",
+		TrafficPassword: "traffic-password-1234567890123456",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(content)
+	for _, item := range []string{
+		`"tag": "portfwd-in"`,
+		`"tag": "exchange-in"`,
+		`"tag": "preview-in"`,
+		`"tag": "mirror-primary-in"`,
+		`"tag": "mirror-shadow-in"`,
+		`"tag": "local"`,
+		`"username": "traffic-user-1234"`,
+	} {
+		if !strings.Contains(text, item) {
+			t.Fatalf("generated config missing %q:\n%s", item, text)
+		}
+	}
+}
+
 func TestResolverDomains(t *testing.T) {
 	got := ResolverDomains("demo")
 	want := []string{"cluster.local", "svc.cluster.local", "svc", "demo.svc.cluster.local"}

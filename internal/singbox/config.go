@@ -15,10 +15,44 @@ import (
 
 const (
 	KubernetesOutbound = "kubernetes"
+	LocalOutbound      = "local"
 	DirectOutbound     = "direct"
 	DefaultDNSListen   = "127.0.0.1"
 	DefaultDNSPort     = 1053
+
+	PortForwardInbound   = "portfwd-in"
+	ExchangeInbound      = "exchange-in"
+	PreviewInbound       = "preview-in"
+	MirrorPrimaryInbound = "mirror-primary-in"
+	MirrorShadowInbound  = "mirror-shadow-in"
 )
+
+// TrafficInboundPorts contains the fixed loopback SOCKS inbounds used by
+// KubeLoop's feature adapters. Targets remain dynamic and are carried in the
+// SOCKS request, so feature sessions do not require a sing-box reload.
+type TrafficInboundPorts struct {
+	PortForward   int `json:"portForward"`
+	Exchange      int `json:"exchange"`
+	Preview       int `json:"preview"`
+	MirrorPrimary int `json:"mirrorPrimary"`
+	MirrorShadow  int `json:"mirrorShadow"`
+}
+
+func (p TrafficInboundPorts) items() []struct {
+	tag  string
+	port int
+} {
+	return []struct {
+		tag  string
+		port int
+	}{
+		{PortForwardInbound, p.PortForward},
+		{ExchangeInbound, p.Exchange},
+		{PreviewInbound, p.Preview},
+		{MirrorPrimaryInbound, p.MirrorPrimary},
+		{MirrorShadowInbound, p.MirrorShadow},
+	}
+}
 
 // HostAlias maps a DNS name to an IPv4 address for the local dns-in resolver.
 type HostAlias struct {
@@ -37,6 +71,9 @@ type Options struct {
 	TUNAddress       string
 	Namespace        string
 	Hosts            []HostAlias
+	TrafficPorts     TrafficInboundPorts
+	TrafficUsername  string
+	TrafficPassword  string
 }
 
 func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
@@ -118,17 +155,88 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 	}
 	dnsServers = append(dnsServers, map[string]any{"type": "local", "tag": "local"})
 
+	localInbounds := []string{ExchangeInbound, PreviewInbound, MirrorShadowInbound}
 	routeRules := []map[string]any{
 		{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
-		{"action": "sniff"},
-		{"protocol": "dns", "action": "hijack-dns"},
-		{"domain_suffix": []string{"cluster.local"}, "outbound": KubernetesOutbound},
+		{"inbound": []string{PortForwardInbound}, "outbound": KubernetesOutbound},
+		{"inbound": []string{MirrorPrimaryInbound}, "outbound": KubernetesOutbound},
 	}
+	for _, route := range routes {
+		routeRules = append(routeRules, map[string]any{
+			"inbound": localInbounds,
+			"ip_cidr": []string{route},
+			"action":  "reject",
+		})
+	}
+	routeRules = append(routeRules,
+		map[string]any{
+			"inbound":  localInbounds,
+			"ip_cidr":  []string{"127.0.0.0/8", "::1/128"},
+			"outbound": LocalOutbound,
+		},
+		map[string]any{
+			"inbound":  localInbounds,
+			"domain":   []string{"localhost"},
+			"outbound": LocalOutbound,
+		},
+		map[string]any{
+			"inbound":       localInbounds,
+			"ip_is_private": true,
+			"outbound":      LocalOutbound,
+		},
+		map[string]any{"inbound": localInbounds, "action": "reject"},
+		map[string]any{"action": "sniff"},
+		map[string]any{"protocol": "dns", "action": "hijack-dns"},
+		map[string]any{
+			"domain_suffix": []string{"cluster.local"}, "outbound": KubernetesOutbound,
+		},
+	)
 	for _, route := range routes {
 		routeRules = append(routeRules, map[string]any{
 			"ip_cidr":  []string{route},
 			"outbound": KubernetesOutbound,
 		})
+	}
+
+	inbounds := []map[string]any{
+		{
+			// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
+			// (or platform split DNS) + dns-in instead of TUN DNS hijack.
+			"type":          "tun",
+			"tag":           "tun-in",
+			"address":       []string{options.TUNAddress},
+			"mtu":           9000,
+			"auto_route":    true,
+			"strict_route":  true,
+			"stack":         "mixed",
+			"route_address": routes,
+		},
+		{
+			"type":        "direct",
+			"tag":         "dns-in",
+			"listen":      options.DNSHost,
+			"listen_port": options.DNSPort,
+		},
+	}
+	if options.TrafficPorts != (TrafficInboundPorts{}) {
+		if options.TrafficUsername == "" || options.TrafficPassword == "" {
+			return nil, errors.New("traffic inbound credentials are required")
+		}
+		for _, item := range options.TrafficPorts.items() {
+			if err := validatePort(item.port, item.tag); err != nil {
+				return nil, err
+			}
+			inbounds = append(inbounds, map[string]any{
+				"type":        "socks",
+				"tag":         item.tag,
+				"listen":      "127.0.0.1",
+				"listen_port": item.port,
+				"users": []map[string]any{{
+					"username": options.TrafficUsername,
+					"password": options.TrafficPassword,
+				}},
+			})
+		}
 	}
 
 	config := map[string]any{
@@ -139,26 +247,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"final":    "local",
 			"strategy": "ipv4_only",
 		},
-		"inbounds": []map[string]any{
-			{
-				// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
-				// (or platform split DNS) + dns-in instead of TUN DNS hijack.
-				"type":          "tun",
-				"tag":           "tun-in",
-				"address":       []string{options.TUNAddress},
-				"mtu":           9000,
-				"auto_route":    true,
-				"strict_route":  true,
-				"stack":         "mixed",
-				"route_address": routes,
-			},
-			{
-				"type":        "direct",
-				"tag":         "dns-in",
-				"listen":      options.DNSHost,
-				"listen_port": options.DNSPort,
-			},
-		},
+		"inbounds": inbounds,
 		"outbounds": []map[string]any{
 			{
 				"type":        "socks",
@@ -167,6 +256,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 				"server_port": options.BridgePort,
 				"version":     "5",
 			},
+			{"type": "direct", "tag": LocalOutbound},
 			{"type": "direct", "tag": DirectOutbound},
 		},
 		"route": map[string]any{

@@ -40,6 +40,7 @@ func (m *Manager) persistPortForwards() {
 			Namespace:  item.Namespace,
 			Kind:       item.Kind,
 			Name:       item.Name,
+			Protocol:   item.Protocol,
 			RemotePort: item.RemotePort,
 			LocalPort:  item.LocalPort,
 		})
@@ -148,12 +149,18 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 		if cluster == nil {
 			continue
 		}
+		if cluster.Connected && contextName == snap.UI.LastContext {
+			// Restore these after the Session core is ready so they use the
+			// sing-box portfwd-in path instead of the legacy API forwarder.
+			continue
+		}
 		for _, item := range cluster.PortForwards {
 			_, err := m.portfwd.Start(ctx, portfwd.Request{
 				Context:    contextName,
 				Namespace:  item.Namespace,
 				Kind:       item.Kind,
 				Name:       item.Name,
+				Protocol:   item.Protocol,
 				RemotePort: item.RemotePort,
 				LocalPort:  item.LocalPort,
 			})
@@ -194,6 +201,26 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 	}()
 
 	cluster := m.store.Cluster(contextName)
+	for _, item := range cluster.PortForwards {
+		if m.hasPortForward(contextName, item) {
+			continue
+		}
+		_, err := m.portfwd.Start(ctx, portfwd.Request{
+			Context:    contextName,
+			Namespace:  item.Namespace,
+			Kind:       item.Kind,
+			Name:       item.Name,
+			Protocol:   item.Protocol,
+			RemotePort: item.RemotePort,
+			LocalPort:  item.LocalPort,
+		})
+		if err != nil {
+			log.Printf(
+				"restore port-forward %s/%s/%s: %v",
+				contextName, item.Kind, item.Name, err,
+			)
+		}
+	}
 	for _, item := range cluster.Exchanges {
 		_, err := m.intercept.StartIntercept(ctx, intercept.Mapping{
 			Namespace: item.Namespace,
@@ -224,6 +251,25 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 			log.Printf("restore preview %s/%s: %v", item.Namespace, item.Name, err)
 		}
 	}
+}
+
+func (m *Manager) hasPortForward(contextName string, want store.PortForwardSpec) bool {
+	wantProtocol := want.Protocol
+	if wantProtocol == "" {
+		wantProtocol = "tcp"
+	}
+	for _, item := range m.portfwd.List() {
+		if item.Context == contextName &&
+			item.Namespace == want.Namespace &&
+			item.Kind == want.Kind &&
+			item.Name == want.Name &&
+			item.Protocol == wantProtocol &&
+			item.RemotePort == want.RemotePort &&
+			item.LocalPort == want.LocalPort {
+			return true
+		}
+	}
+	return false
 }
 
 func (m *Manager) isRestoring() bool {
