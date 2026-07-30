@@ -1,10 +1,12 @@
 //go:build ignore
 
 // Command helper-prebuild builds the platform helper before Wails compiles the
-// desktop application. Wails runs build hooks from build/bin.
+// desktop application so it can be embedded from build/embedded.
 //
-// On Windows it also builds the install/uninstall service tools and stages them
-// under build/bin/resources for the NSIS package (Clash Verge layout).
+// Wails runs build hooks from build/bin. Package assets that must live next to
+// the final binary (sing-box, Windows resources/) are staged in
+// stage-package-assets.go via postBuildHooks — wails -clean wipes build/bin
+// during CompileProject after preBuildHooks.
 package main
 
 import (
@@ -56,14 +58,8 @@ func main() {
 	}
 
 	embeddedDir := filepath.Join(root, "build", "embedded")
-	resourcesDir := filepath.Join(root, "build", "bin", "resources")
 	if err := os.MkdirAll(embeddedDir, 0o755); err != nil {
 		fatalf("create embedded helper directory: %v", err)
-	}
-	if goos == "windows" {
-		if err := os.MkdirAll(resourcesDir, 0o755); err != nil {
-			fatalf("create package resources directory: %v", err)
-		}
 	}
 
 	for _, target := range targets {
@@ -92,31 +88,7 @@ func main() {
 		if err := cmd.Run(); err != nil {
 			fatalf("build %s: %v", name, err)
 		}
-		if goos == "windows" {
-			dest := filepath.Join(resourcesDir, name)
-			if err := copyFile(output, dest); err != nil {
-				fatalf("stage %s for packaging: %v", name, err)
-			}
-		}
 	}
-
-	// Stage fixed sing-box into build/bin for the installer / portable package.
-	bundle := exec.Command("go", "run", "./build/bundle-singbox.go", goos+"/"+goarch)
-	bundle.Dir = root
-	bundle.Stdout = os.Stdout
-	bundle.Stderr = os.Stderr
-	fmt.Printf("==> Bundling sing-box for %s/%s\n", goos, goarch)
-	if err := bundle.Run(); err != nil {
-		fatalf("bundle sing-box: %v", err)
-	}
-}
-
-func copyFile(src, dst string) error {
-	data, err := os.ReadFile(src)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(dst, data, 0o755)
 }
 
 func findRepositoryRoot() (string, error) {

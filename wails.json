@@ -9,6 +9,9 @@
   "preBuildHooks": {
     "*/*": "go run ../../build/helper-prebuild.go ${platform}"
   },
+  "postBuildHooks": {
+    "*/*": "go run ../../build/stage-package-assets.go ${platform}"
+  },
   "author": {
     "name": "KubeLoop"
   },
