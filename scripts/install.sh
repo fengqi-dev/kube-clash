@@ -1,17 +1,19 @@
 #!/usr/bin/env bash
-# Download the latest KubeLoop desktop release (macOS DMG or Linux tarball).
+# Download the latest KubeLoop desktop release.
 #
 # Usage:
 #   curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
 #   VERSION=v1.1.0 ./scripts/install.sh
+#   PACKAGE=deb|rpm|tarball ./scripts/install.sh   # Linux only
 #
 # macOS: downloads the .dmg into DEST (default: $PWD)
-# Linux: downloads and extracts the .tar.gz into DEST (default: $PWD)
+# Linux: prefers .deb/.rpm when available, otherwise extracts the .tar.gz
 set -euo pipefail
 
 REPO="${REPO:-fengqi-dev/kube-loop}"
 DEST="${DEST:-$PWD}"
 TAG="${VERSION:-${TAG:-}}"
+PACKAGE="${PACKAGE:-auto}"
 
 os="$(uname -s | tr '[:upper:]' '[:lower:]')"
 case "${os}" in
@@ -51,15 +53,13 @@ asset_exists() {
   printf '%s' "${json}" | grep -Fq "\"name\": \"${1}\""
 }
 
-pick_asset() {
-  local name
-  for name in "$@"; do
-    if asset_exists "${name}"; then
-      printf '%s' "${name}"
-      return 0
-    fi
-  done
-  return 1
+require_asset() {
+  local name="$1"
+  if ! asset_exists "${name}"; then
+    echo "missing ${name} in ${TAG}" >&2
+    exit 1
+  fi
+  printf '%s' "${name}"
 }
 
 download_asset() {
@@ -73,13 +73,7 @@ download_asset() {
 mkdir -p "${DEST}"
 
 if [[ "${os}" == "darwin" ]]; then
-  asset="$(pick_asset \
-    "kubeloop-${ver}-darwin-${arch}.dmg" \
-    "kubeloop-darwin-${arch}.dmg" || true)"
-  if [[ -z "${asset}" ]]; then
-    echo "no DMG for macOS/${arch} in ${TAG}" >&2
-    exit 1
-  fi
+  asset="$(require_asset "kubeloop-${ver}-darwin-${arch}.dmg")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Saved ${out}"
@@ -87,25 +81,73 @@ if [[ "${os}" == "darwin" ]]; then
   exit 0
 fi
 
-asset="$(pick_asset \
-  "kubeloop-${ver}-linux-${arch}.tar.gz" \
-  "kubeloop-linux-${arch}.tar.gz" || true)"
-if [[ -z "${asset}" ]]; then
-  echo "no matching linux/${arch} tarball in ${TAG}" >&2
-  exit 1
-fi
+detect_linux_package() {
+  case "${PACKAGE}" in
+    deb|rpm|tarball) printf '%s' "${PACKAGE}" ;;
+    auto)
+      if command -v dpkg >/dev/null 2>&1 || [[ -f /etc/debian_version ]]; then
+        printf 'deb'
+      elif command -v rpm >/dev/null 2>&1 || command -v dnf >/dev/null 2>&1 || command -v yum >/dev/null 2>&1; then
+        printf 'rpm'
+      else
+        printf 'tarball'
+      fi
+      ;;
+    *)
+      echo "PACKAGE must be auto, deb, rpm, or tarball (got ${PACKAGE})" >&2
+      exit 1
+      ;;
+  esac
+}
 
-tmp="$(mktemp "${TMPDIR:-/tmp}/kubeloop.XXXXXX")"
-cleanup() { rm -f "${tmp}"; }
-trap cleanup EXIT
-download_asset "${asset}" "${tmp}"
-echo "Extracting into ${DEST}..."
-tar -xzf "${tmp}" -C "${DEST}"
-trap - EXIT
-cleanup
+install_deb() {
+  local asset out
+  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.deb")"
+  out="${DEST}/${asset}"
+  download_asset "${asset}" "${out}"
+  echo "Installing ${out}..."
+  if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
+    sudo dpkg -i "${out}"
+  else
+    dpkg -i "${out}"
+  fi
+  echo "Installed kubeloop from ${asset}"
+}
 
-if [[ -x "${DEST}/KubeLoop" ]]; then
-  echo "Installed binary: ${DEST}/KubeLoop"
-else
-  echo "Extracted into ${DEST}"
-fi
+install_rpm() {
+  local asset out
+  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.rpm")"
+  out="${DEST}/${asset}"
+  download_asset "${asset}" "${out}"
+  echo "Installing ${out}..."
+  if command -v sudo >/dev/null 2>&1 && [[ "$(id -u)" -ne 0 ]]; then
+    sudo rpm -Uvh "${out}"
+  else
+    rpm -Uvh "${out}"
+  fi
+  echo "Installed kubeloop from ${asset}"
+}
+
+install_tarball() {
+  local asset tmp
+  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.tar.gz")"
+  tmp="$(mktemp "${TMPDIR:-/tmp}/kubeloop.XXXXXX")"
+  cleanup() { rm -f "${tmp}"; }
+  trap cleanup EXIT
+  download_asset "${asset}" "${tmp}"
+  echo "Extracting into ${DEST}..."
+  tar -xzf "${tmp}" -C "${DEST}"
+  trap - EXIT
+  cleanup
+  if [[ -x "${DEST}/KubeLoop" ]]; then
+    echo "Installed binary: ${DEST}/KubeLoop"
+  else
+    echo "Extracted into ${DEST}"
+  fi
+}
+
+case "$(detect_linux_package)" in
+  deb) install_deb ;;
+  rpm) install_rpm ;;
+  tarball) install_tarball ;;
+esac

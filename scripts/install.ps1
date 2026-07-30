@@ -22,30 +22,15 @@ if ($Version) {
 
 $tag = $rel.tag_name
 $ver = $tag.TrimStart("v")
-$names = if ($Package -eq "installer") {
-  @(
-    "kubeloop-$ver-windows-$arch-installer.exe",
-    "kubeloop-windows-$arch-installer.exe"
-  )
+$name = if ($Package -eq "installer") {
+  "kubeloop-$ver-windows-$arch-installer.exe"
 } else {
-  @(
-    "kubeloop-$ver-windows-$arch.zip",
-    "kubeloop-windows-$arch.zip"
-  )
+  "kubeloop-$ver-windows-$arch.zip"
 }
 
-$asset = $rel.assets | Where-Object { $names -contains $_.name } | Select-Object -First 1
-if (-not $asset -and $Package -eq "installer") {
-  # Fall back to portable zip when the NSIS installer is absent (e.g. v1.0.0).
-  $names = @(
-    "kubeloop-$ver-windows-$arch.zip",
-    "kubeloop-windows-$arch.zip"
-  )
-  $asset = $rel.assets | Where-Object { $names -contains $_.name } | Select-Object -First 1
-  $Package = "portable"
-}
+$asset = $rel.assets | Where-Object { $_.name -eq $name } | Select-Object -First 1
 if (-not $asset) {
-  throw "no matching Windows/$arch asset in $tag"
+  throw "missing $name in $tag"
 }
 
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
@@ -53,7 +38,7 @@ $out = Join-Path $Dest $asset.name
 Write-Host "Downloading $($asset.name) ($tag)..."
 Invoke-WebRequest -Uri $asset.browser_download_url -OutFile $out
 
-if ($Package -eq "installer" -or $out -like "*.exe") {
+if ($Package -eq "installer") {
   Write-Host "Starting installer: $out"
   Start-Process -FilePath $out
 } else {
