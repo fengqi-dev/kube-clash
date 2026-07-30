@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 
 	"github.com/energye/systray"
+	"github.com/fengqi-dev/kube-loop/internal/locale"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -18,7 +19,7 @@ const maxRecentClusters = 5
 // Controller owns the system tray icon and menu.
 type Controller struct {
 	host     Host
-	strings  stringsLocal
+	strings  locale.Strings
 	quitting atomic.Bool
 	ready    atomic.Bool
 
@@ -36,7 +37,7 @@ type Controller struct {
 // Start launches the tray in a background goroutine.
 // Call this before wails.Run so the tray message loop is independent of WebView.
 func Start(host Host) *Controller {
-	c := &Controller{host: host, strings: locale()}
+	c := &Controller{host: host, strings: locale.T()}
 	go systray.Run(c.onReady, c.onExit)
 	return c
 }
@@ -62,7 +63,7 @@ func (c *Controller) BeforeClose(ctx context.Context) (prevent bool) {
 func (c *Controller) onReady() {
 	systray.SetIcon(iconBytes())
 	systray.SetTitle("KubeLoop")
-	systray.SetTooltip(c.strings.tooltipDisconnected)
+	systray.SetTooltip(c.strings.TooltipDisconnected)
 
 	systray.SetOnClick(func(systray.IMenu) {
 		c.showWindow()
@@ -78,12 +79,12 @@ func (c *Controller) onReady() {
 	})
 
 	c.mu.Lock()
-	c.statusItem = systray.AddMenuItem(c.strings.statusIdle, "")
+	c.statusItem = systray.AddMenuItem(c.strings.StatusIdle, "")
 	c.statusItem.Disable()
 	systray.AddSeparator()
 
-	c.recentRoot = systray.AddMenuItem(c.strings.recent, "")
-	c.recentEmpty = c.recentRoot.AddSubMenuItem(c.strings.noRecent, "")
+	c.recentRoot = systray.AddMenuItem(c.strings.Recent, "")
+	c.recentEmpty = c.recentRoot.AddSubMenuItem(c.strings.NoRecent, "")
 	c.recentEmpty.Disable()
 	c.recentItems = make([]*systray.MenuItem, 0, maxRecentClusters)
 	for i := 0; i < maxRecentClusters; i++ {
@@ -93,16 +94,16 @@ func (c *Controller) onReady() {
 	}
 
 	systray.AddSeparator()
-	c.connectItem = systray.AddMenuItem(c.strings.connect, "")
+	c.connectItem = systray.AddMenuItem(c.strings.Connect, "")
 	c.connectItem.Click(func() { c.connectPreferred() })
-	c.disconnectItem = systray.AddMenuItem(c.strings.disconnect, "")
+	c.disconnectItem = systray.AddMenuItem(c.strings.Disconnect, "")
 	c.disconnectItem.Click(func() { c.disconnect() })
 	c.disconnectItem.Disable()
 
 	systray.AddSeparator()
-	c.showItem = systray.AddMenuItem(c.strings.showWindow, "")
+	c.showItem = systray.AddMenuItem(c.strings.ShowWindow, "")
 	c.showItem.Click(func() { c.showWindow() })
-	c.quitItem = systray.AddMenuItem(c.strings.quit, "")
+	c.quitItem = systray.AddMenuItem(c.strings.Quit, "")
 	c.quitItem.Click(func() { c.requestQuit() })
 	c.mu.Unlock()
 
@@ -175,8 +176,8 @@ func (c *Controller) requestQuit() {
 	c.showWindow()
 	selection, err := runtime.MessageDialog(ctx, runtime.MessageDialogOptions{
 		Type:          runtime.QuestionDialog,
-		Title:         c.strings.quitTitle,
-		Message:       c.strings.quitMessage,
+		Title:         c.strings.QuitTitle,
+		Message:       c.strings.QuitMessage,
 		DefaultButton: "No",
 		CancelButton:  "No",
 	})
@@ -207,8 +208,8 @@ func (c *Controller) refresh(state session.State) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	status := c.strings.statusIdle
-	tooltip := c.strings.tooltipDisconnected
+	status := c.strings.StatusIdle
+	tooltip := c.strings.TooltipDisconnected
 	connecting := state.Phase == session.PhaseChecking ||
 		state.Phase == session.PhaseInstalling ||
 		state.Phase == session.PhaseDiscovering ||
@@ -219,18 +220,18 @@ func (c *Controller) refresh(state session.State) {
 		if state.Namespace != "" {
 			label = state.Context + " / " + state.Namespace
 		}
-		status = fmt.Sprintf(c.strings.statusConnected, label)
-		tooltip = fmt.Sprintf(c.strings.tooltipConnected, label)
+		status = fmt.Sprintf(c.strings.StatusConnected, label)
+		tooltip = fmt.Sprintf(c.strings.TooltipConnected, label)
 		c.connectItem.Disable()
 		c.disconnectItem.Enable()
 	case connecting:
-		status = c.strings.statusConnecting
-		tooltip = c.strings.statusConnecting
+		status = c.strings.StatusConnecting
+		tooltip = c.strings.StatusConnecting
 		c.connectItem.Disable()
 		c.disconnectItem.Enable()
 	case state.Phase == session.PhaseError:
-		status = c.strings.statusError
-		tooltip = c.strings.statusError
+		status = c.strings.StatusError
+		tooltip = c.strings.StatusError
 		c.connectItem.Enable()
 		c.disconnectItem.Disable()
 	default:
@@ -245,7 +246,7 @@ func (c *Controller) refresh(state session.State) {
 func (c *Controller) refreshRecentLocked(state session.State) {
 	recents := c.host.RecentClusters()
 	if len(recents) == 0 {
-		c.recentEmpty.SetTitle(c.strings.noRecent)
+		c.recentEmpty.SetTitle(c.strings.NoRecent)
 		c.recentEmpty.Show()
 		c.recentEmpty.Disable()
 		for _, item := range c.recentItems {

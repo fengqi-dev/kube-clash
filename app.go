@@ -10,6 +10,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/locale"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
@@ -158,10 +159,11 @@ func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
 	if a.ctx == nil {
 		return cluster.ClusterInventory{}, errors.New("application is not ready")
 	}
+	s := locale.T()
 	path, err := runtime.OpenFileDialog(a.ctx, runtime.OpenDialogOptions{
-		Title: "Select kubeconfig",
+		Title: s.SelectKubeconfig,
 		Filters: []runtime.FileFilter{
-			{DisplayName: "Kubeconfig", Pattern: "*.yaml;*.yml;*.conf;*"},
+			{DisplayName: s.KubeconfigFilter, Pattern: "*.yaml;*.yml;*.conf;*"},
 		},
 	})
 	if err != nil {
