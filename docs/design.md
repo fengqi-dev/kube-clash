@@ -226,14 +226,21 @@ sing-box ships as a managed independent process in the platform package and is r
 
 The desktop generates a minimal config — no proxy subscriptions and no takeover of public internet traffic. sing-box exposes a health External Controller on `127.0.0.1` only; the Controller Secret is random per session.
 
-The Privileged Helper is a separate, least-privilege system service that accepts IPC only from a signed local client. It:
+The Privileged Helper is a separate, least-privilege system service. Its
+token-authenticated local IPC accepts a field-constrained session description,
+not commands or filesystem paths. It:
 
+- Downloads the pinned official sing-box archive, verifies its embedded SHA-256,
+  and installs the core under protected system storage;
+- Regenerates the sing-box config in a protected per-session directory;
 - Creates and destroys utun/TUN;
 - Adds and removes explicit Pod/Service routes;
 - Configures `cluster.local` split DNS;
 - Cleans residual network config on crash recovery.
 
-The Helper does not read kubeconfig, hold Kubernetes credentials, or connect to the internet.
+The Helper does not read kubeconfig or hold Kubernetes credentials. It only uses
+the network to obtain the pinned, checksum-verified sing-box release when the
+protected core is not already installed.
 
 sing-box is GPLv3. Distributions that bundle it must keep license and copyright notices and provide corresponding source as required. sing-box stays an unmodified separate process; the release pipeline still produces third-party notices and source-access instructions.
 

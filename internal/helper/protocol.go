@@ -1,6 +1,10 @@
 package helper
 
+import "github.com/fengqi-dev/kube-loop/internal/singbox"
+
 const (
+	ProtocolVersion = 2
+
 	OpPing   = "ping"
 	OpStart  = "start"
 	OpStop   = "stop"
@@ -9,10 +13,10 @@ const (
 
 // Request is a single JSON-line RPC request.
 type Request struct {
-	Op         string `json:"op"`
-	Token      string `json:"token,omitempty"`
-	WorkDir    string `json:"workDir,omitempty"`
-	BinaryPath string `json:"binaryPath,omitempty"`
+	Op        string               `json:"op"`
+	Token     string               `json:"token,omitempty"`
+	Session   *singbox.SessionSpec `json:"session,omitempty"`
+	SessionID string               `json:"sessionId,omitempty"`
 }
 
 // Response is a single JSON-line RPC response.
@@ -20,6 +24,7 @@ type Response struct {
 	OK        bool   `json:"ok"`
 	Error     string `json:"error,omitempty"`
 	Version   string `json:"version,omitempty"`
+	Protocol  int    `json:"protocol,omitempty"`
 	Installed bool   `json:"installed,omitempty"`
 	Running   bool   `json:"running,omitempty"`
 	PID       int    `json:"pid,omitempty"`
@@ -38,6 +43,7 @@ type Status struct {
 	Installed bool   `json:"installed"`
 	Running   bool   `json:"running"`
 	Version   string `json:"version,omitempty"`
+	Protocol  int    `json:"protocol,omitempty"`
 	Expected  string `json:"expected"`
 	Socket    string `json:"socket"`
 	Error     string `json:"error,omitempty"`

@@ -40,12 +40,7 @@ func SessionsRoot() (string, error) {
 }
 
 func SystemStateDir() string {
-	switch runtime.GOOS {
-	case "windows":
-		return filepath.Join(os.Getenv("ProgramData"), "KubeLoop")
-	default:
-		return "/var/lib/kubeloop"
-	}
+	return platformSystemStateDir()
 }
 
 func SystemTokenPath() string {
@@ -57,14 +52,7 @@ func SystemAuthPath() string {
 }
 
 func BinaryInstallPath() string {
-	switch runtime.GOOS {
-	case "darwin":
-		return "/Library/PrivilegedHelperTools/" + ServiceLabel
-	case "windows":
-		return filepath.Join(os.Getenv("ProgramFiles"), "KubeLoop", "kubeloop-helper.exe")
-	default:
-		return "/usr/local/libexec/kubeloop-helper"
-	}
+	return platformBinaryInstallPath()
 }
 
 func SocketPath() string {
@@ -74,8 +62,4 @@ func SocketPath() string {
 	default:
 		return "/var/run/kubeloop/helper.sock"
 	}
-}
-
-func Disabled() bool {
-	return os.Getenv("KUBELOOP_HELPER") == "0"
 }

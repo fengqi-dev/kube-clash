@@ -15,17 +15,20 @@ import (
 func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir string) error {
 	installScript := fmt.Sprintf(`
 $ErrorActionPreference = 'Stop'
-$workdir = Join-Path ([IO.Path]::GetTempPath()) ('kubeloop-helper-' + [Guid]::NewGuid().ToString('N'))
+$programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
+$stagingRoot = Join-Path $programFiles 'KubeLoop'
+New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
+$workdir = Join-Path $stagingRoot ('.install-' + [Guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $workdir | Out-Null
 try {
-    $acl = New-Object System.Security.AccessControl.DirectorySecurity
+    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
     $acl.SetAccessRuleProtection($true, $false)
     $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
     $propagate = [System.Security.AccessControl.PropagationFlags]::None
     $allow = [System.Security.AccessControl.AccessControlType]::Allow
     foreach ($sidValue in @('S-1-5-32-544', 'S-1-5-18')) {
-        $sid = New-Object System.Security.Principal.SecurityIdentifier($sidValue)
-        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+        $sid = [System.Security.Principal.SecurityIdentifier]::new($sidValue)
+        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
             $sid, 'FullControl', $inherit, $propagate, $allow)
         $acl.AddAccessRule($rule)
     }
@@ -57,7 +60,17 @@ Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue
 func runElevatedPowerShell(ctx context.Context, script string) error {
 	encoded := encodePowerShellCommand(script)
 	command := fmt.Sprintf(
-		"$p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','%s') -Verb RunAs -Wait -PassThru; exit $p.ExitCode",
+		`$id = [Guid]::NewGuid().ToString('N')
+$stdout = Join-Path ([IO.Path]::GetTempPath()) ('kubeloop-elevated-' + $id + '.out')
+$stderr = Join-Path ([IO.Path]::GetTempPath()) ('kubeloop-elevated-' + $id + '.err')
+try {
+    $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile','-ExecutionPolicy','Bypass','-EncodedCommand','%s') -Verb RunAs -Wait -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+    if (Test-Path -LiteralPath $stdout) { Get-Content -LiteralPath $stdout }
+    if (Test-Path -LiteralPath $stderr) { Get-Content -LiteralPath $stderr }
+    exit $p.ExitCode
+} finally {
+    Remove-Item -LiteralPath $stdout,$stderr -Force -ErrorAction SilentlyContinue
+}`,
 		encoded,
 	)
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command)

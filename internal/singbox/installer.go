@@ -54,17 +54,20 @@ var releaseAssets = map[string]releaseAsset{
 }
 
 type Installer struct {
-	HTTPClient  *http.Client
-	BaseDir     string
-	GOOS        string
-	GOARCH      string
-	Asset       *releaseAsset
-	DownloadURL func(releaseAsset) string
+	HTTPClient      *http.Client
+	BaseDir         string
+	GOOS            string
+	GOARCH          string
+	Asset           *releaseAsset
+	DownloadURL     func(releaseAsset) string
+	DisableOverride bool
 }
 
 func (i *Installer) Ensure(ctx context.Context) (string, error) {
-	if override := os.Getenv("KUBELOOP_SINGBOX_PATH"); override != "" {
-		return validateBinary(override)
+	if !i.DisableOverride {
+		if override := os.Getenv("KUBELOOP_SINGBOX_PATH"); override != "" {
+			return validateBinary(override)
+		}
 	}
 	goos, goarch := i.platform()
 	asset, ok := releaseAssets[goos+"/"+goarch]

@@ -80,7 +80,6 @@ jobs:
           CGO_LDFLAGS: ${{ runner.os == 'macOS' && '-framework UniformTypeIdentifiers' || '' }}
           VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
-          ./build/bundle-helper.sh "${GITHUB_REF_NAME}"
           if [[ "${RUNNER_OS}" == "Linux" ]]; then
             wails build -clean -tags webkit2_41 \
               -ldflags "-X main.version=${GITHUB_REF_NAME}"
@@ -94,7 +93,6 @@ jobs:
         env:
           VITE_APP_VERSION: ${{ github.ref_name }}
         run: |
-          ./build/bundle-helper.sh "${GITHUB_REF_NAME}"
           wails build -clean -ldflags "-X main.version=${GITHUB_REF_NAME}"
 
       - name: Package desktop application

@@ -1,6 +1,8 @@
 package helper
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"fmt"
 	"io"
 	"os"
@@ -21,7 +23,8 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(out, in); err != nil {
+	copiedHash := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(out, copiedHash), in); err != nil {
 		_ = out.Close()
 		_ = os.Remove(tmp)
 		return err
@@ -30,7 +33,27 @@ func copyFile(src, dst string, mode os.FileMode) error {
 		_ = os.Remove(tmp)
 		return err
 	}
-	if err := os.Rename(tmp, dst); err != nil {
+	staged, err := os.Open(tmp)
+	if err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	stagedHash := sha256.New()
+	_, hashErr := io.Copy(stagedHash, staged)
+	closeErr := staged.Close()
+	if hashErr != nil {
+		_ = os.Remove(tmp)
+		return hashErr
+	}
+	if closeErr != nil {
+		_ = os.Remove(tmp)
+		return closeErr
+	}
+	if !bytes.Equal(copiedHash.Sum(nil), stagedHash.Sum(nil)) {
+		_ = os.Remove(tmp)
+		return fmt.Errorf("staged helper hash does not match source")
+	}
+	if err := replaceFile(tmp, dst); err != nil {
 		_ = os.Remove(tmp)
 		return err
 	}
@@ -49,6 +72,9 @@ func InstallFromCLI(source, token string, uid int, version, homeDir string) erro
 	}
 	if homeDir == "" {
 		return fmt.Errorf("--home is required")
+	}
+	if err := prepareBinaryInstall(); err != nil {
+		return fmt.Errorf("prepare helper binary install: %w", err)
 	}
 	if err := copyFile(source, BinaryInstallPath(), 0o755); err != nil {
 		return fmt.Errorf("install helper binary: %w", err)

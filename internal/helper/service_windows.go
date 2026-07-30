@@ -3,10 +3,12 @@
 package helper
 
 import (
+	"errors"
 	"fmt"
-	"os/exec"
+	"syscall"
 	"time"
 
+	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
@@ -18,15 +20,27 @@ func enableService(binaryPath string) error {
 	}
 	defer manager.Disconnect()
 
-	if service, openErr := manager.OpenService(ServiceNameWin); openErr == nil {
-		_ = service.Close()
-		manager.Disconnect()
-		_ = disableService()
-		manager, err = mgr.Connect()
-		if err != nil {
-			return err
+	service, openErr := manager.OpenService(ServiceNameWin)
+	if openErr == nil {
+		defer service.Close()
+		cfg, configErr := service.Config()
+		if configErr != nil {
+			return fmt.Errorf("read windows service config: %w", configErr)
 		}
-		defer manager.Disconnect()
+		cfg.BinaryPathName = syscall.EscapeArg(binaryPath) + " run"
+		cfg.DisplayName = "KubeLoop Helper"
+		cfg.Description = "Privileged helper for KubeLoop TUN networking"
+		cfg.StartType = mgr.StartAutomatic
+		if err := service.UpdateConfig(cfg); err != nil {
+			return fmt.Errorf("update windows service: %w", err)
+		}
+		if err := service.Start(); err != nil {
+			return fmt.Errorf("restart windows service: %w", err)
+		}
+		return waitServiceRunning(service, 15*time.Second)
+	}
+	if !errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return fmt.Errorf("open windows service: %w", openErr)
 	}
 
 	cfg := mgr.Config{
@@ -34,41 +48,97 @@ func enableService(binaryPath string) error {
 		Description: "Privileged helper for KubeLoop TUN networking",
 		StartType:   mgr.StartAutomatic,
 	}
-	service, err := manager.CreateService(ServiceNameWin, binaryPath, cfg, "run")
+	service, err = manager.CreateService(ServiceNameWin, binaryPath, cfg, "run")
 	if err != nil {
 		return fmt.Errorf("create windows service: %w", err)
 	}
 	defer service.Close()
-	if err := service.Start("run"); err != nil {
+	if err := service.Start(); err != nil {
 		return fmt.Errorf("start windows service: %w", err)
 	}
 	return waitServiceRunning(service, 15*time.Second)
 }
 
-func disableService() error {
+func stopServiceForUpgrade() error {
 	manager, err := mgr.Connect()
 	if err != nil {
-		_ = exec.Command("sc.exe", "stop", ServiceNameWin).Run()
-		_ = exec.Command("sc.exe", "delete", ServiceNameWin).Run()
-		return nil
+		return fmt.Errorf("connect service manager: %w", err)
 	}
 	defer manager.Disconnect()
 	service, err := manager.OpenService(ServiceNameWin)
-	if err != nil {
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
 	}
+	if err != nil {
+		return fmt.Errorf("open windows service: %w", err)
+	}
 	defer service.Close()
-	_, _ = service.Control(svc.Stop)
-	deadline := time.Now().Add(10 * time.Second)
+	return stopWindowsService(service, 20*time.Second)
+}
+
+func stopWindowsService(service *mgr.Service, timeout time.Duration) error {
+	status, err := service.Query()
+	if err != nil {
+		return fmt.Errorf("query windows service: %w", err)
+	}
+	if status.State == svc.Stopped {
+		return nil
+	}
+	if _, err := service.Control(svc.Stop); err != nil &&
+		!errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+		return fmt.Errorf("stop windows service: %w", err)
+	}
+	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		status, queryErr := service.Query()
-		if queryErr != nil || status.State == svc.Stopped {
-			break
+		if queryErr != nil {
+			return fmt.Errorf("query stopping windows service: %w", queryErr)
 		}
-		time.Sleep(200 * time.Millisecond)
+		if status.State == svc.Stopped {
+			return nil
+		}
+		time.Sleep(100 * time.Millisecond)
 	}
-	_ = service.Delete()
-	return nil
+	return fmt.Errorf("timed out waiting for %s to stop", ServiceNameWin)
+}
+
+func disableService() error {
+	manager, err := mgr.Connect()
+	if err != nil {
+		return fmt.Errorf("connect service manager: %w", err)
+	}
+	defer manager.Disconnect()
+	service, err := manager.OpenService(ServiceNameWin)
+	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("open windows service: %w", err)
+	}
+	if err := stopWindowsService(service, 20*time.Second); err != nil {
+		_ = service.Close()
+		return err
+	}
+	if err := service.Delete(); err != nil {
+		_ = service.Close()
+		return fmt.Errorf("delete windows service: %w", err)
+	}
+	if err := service.Close(); err != nil {
+		return fmt.Errorf("close windows service: %w", err)
+	}
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		probe, openErr := manager.OpenService(ServiceNameWin)
+		if errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
+			return nil
+		}
+		if openErr != nil {
+			return fmt.Errorf("verify windows service deletion: %w", openErr)
+		}
+		_ = probe.Close()
+		time.Sleep(100 * time.Millisecond)
+	}
+	return fmt.Errorf("timed out waiting for %s deletion", ServiceNameWin)
 }
 
 func waitServiceRunning(service *mgr.Service, timeout time.Duration) error {

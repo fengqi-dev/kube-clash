@@ -70,8 +70,9 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
   Token；不以 Service / Ingress 对外发布。
 - 路由仅覆盖已发现的 Pod / Service 网段；非集群流量保持直连。
 - 流量交换 / 镜像 / 预览对 Service、Endpoints、EndpointSlice 的修改，在停止或断开时始终恢复。
-- 特权 Helper 只接受本机 IPC，用于在 `~/.kubeloop` 会话目录下启停 TUN；它不访问
-  Kubernetes API。
+- 特权 Helper 只接受带认证的本机 IPC 和字段受限的 Session 描述，不接受调用方传入的
+  命令、可执行文件路径或配置路径。它在系统保护目录内重新生成配置并管理校验后的内核，
+  且不访问 Kubernetes API。
 
 ## 平台说明
 
@@ -89,13 +90,12 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 npm install --prefix frontend
-wails dev
+wails dev # 自动构建并内嵌当前平台的 Helper
 ```
 
 ```bash
 # VERSION 会同时注入 Go、前端、Helper，以及 Gateway 镜像/二进制
 VERSION=v0.1.0
-./build/bundle-helper.sh "$VERSION"   # 内嵌；运行时释放到 ~/.kubeloop/helper
 VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
 # Gateway 镜像（发版 CI）：docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
 ```
@@ -103,13 +103,8 @@ VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
 开发常用覆盖：
 
 ```bash
-# 使用本地 sing-box / Gateway 镜像
-KUBELOOP_SINGBOX_PATH=/path/to/sing-box \
-KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
-wails dev
-
-# 不装系统 Helper，改为每次连接提权
-KUBELOOP_HELPER=0 wails dev
+# 使用本地 Gateway 镜像
+KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
 ```
 
 ```bash
