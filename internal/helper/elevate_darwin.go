@@ -10,14 +10,24 @@ import (
 	"strings"
 )
 
-func ElevateInstall(ctx context.Context, source, token string, uid int, homeDir string) error {
-	args := installArgs(source, token, uid, homeDir)
-	quoted := make([]string, 0, len(args)+1)
-	quoted = append(quoted, shellQuote(source))
-	for _, arg := range args {
-		quoted = append(quoted, shellQuote(arg))
-	}
-	script := "do shell script " + strconv.Quote(strings.Join(quoted, " ")) +
+func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir string) error {
+	command := `set -eu
+workdir="$(mktemp -d "${TMPDIR:-/private/tmp}/kubeloop-helper.XXXXXX")"
+trap 'rm -rf "$workdir"' EXIT HUP INT TERM
+staged="$workdir/kubeloop-helper"
+/bin/cp ` + shellQuote(source) + ` "$staged"
+actual="$(/usr/bin/shasum -a 256 "$staged")"
+actual="${actual%% *}"
+if [ "$actual" != ` + shellQuote(expectedSHA256) + ` ]; then
+	echo "bundled helper checksum mismatch" >&2
+	exit 1
+fi
+/bin/chmod 700 "$staged"
+"$staged" install --source "$staged" --token ` + shellQuote(token) +
+		` --uid ` + shellQuote(strconv.Itoa(uid)) +
+		` --version ` + shellQuote(Version) +
+		` --home ` + shellQuote(homeDir)
+	script := "do shell script " + strconv.Quote(command) +
 		" with administrator privileges"
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
 	output, err := cmd.CombinedOutput()

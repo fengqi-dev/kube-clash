@@ -95,8 +95,8 @@ wails dev
 ```bash
 # VERSION 会同时注入 Go、前端、Helper，以及 Gateway 镜像/二进制
 VERSION=v0.1.0
+./build/bundle-helper.sh "$VERSION"   # 内嵌；运行时释放到 ~/.kubeloop/helper
 VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
-./build/bundle-helper.sh "$VERSION"   # 将 kubeloop-helper 放到应用旁或 .app 内
 # Gateway 镜像（发版 CI）：docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
 ```
 

@@ -36,18 +36,15 @@
         "cwd": "${workspaceFolder}"
       },
       "command": "./build/bundle-helper.sh",
-      "args": ["dev", "build/bin"],
+      "args": ["dev"],
       "windows": {
-        "command": "go",
-        "args": [
-          "build",
-          "-trimpath",
-          "-ldflags",
-          "-s -w -X main.version=dev",
-          "-o",
-          "build/bin/kubeloop-helper.exe",
-          "./cmd/kubeloop-helper"
-        ]
+        "options": {
+          "shell": {
+            "executable": "bash",
+            "args": ["-lc"]
+          }
+        },
+        "command": "./build/bundle-helper.sh dev"
       },
       "problemMatcher": ["$go"]
     },

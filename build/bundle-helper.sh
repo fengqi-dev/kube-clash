@@ -1,12 +1,13 @@
 #!/usr/bin/env bash
-# Build kubeloop-helper and place it next to the desktop app for packaging.
+# Build kubeloop-helper before the desktop application so it can be embedded.
+# At runtime the desktop app materializes it under ~/.kubeloop/helper/.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "${ROOT}"
 
 VERSION="${1:-dev}"
-OUT_DIR="${2:-build/bin}"
+OUT_DIR="${2:-build/embedded}"
 mkdir -p "${OUT_DIR}"
 
 HELPER_NAME="kubeloop-helper"
@@ -18,13 +19,5 @@ echo "==> Building ${HELPER_NAME} (version=${VERSION})"
 go build -trimpath -ldflags "-s -w -X main.version=${VERSION}" \
   -o "${OUT_DIR}/${HELPER_NAME}" \
   ./cmd/kubeloop-helper
-
-# Nest into macOS .app bundle when present.
-shopt -s nullglob
-for app in "${OUT_DIR}"/*.app; do
-  dest="${app}/Contents/Helpers"
-  mkdir -p "${dest}"
-  cp "${OUT_DIR}/${HELPER_NAME}" "${dest}/${HELPER_NAME}"
-  chmod 755 "${dest}/${HELPER_NAME}"
-  echo "==> Copied helper into ${dest}/"
-done
+chmod 755 "${OUT_DIR}/${HELPER_NAME}"
+echo "==> Ready to embed ${OUT_DIR}/${HELPER_NAME}"
