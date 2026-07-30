@@ -6,6 +6,9 @@ on:
     paths:
       - "site/**"
       - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_call:
   workflow_dispatch:
 
 concurrency:

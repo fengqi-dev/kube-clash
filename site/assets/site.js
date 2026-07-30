@@ -54,7 +54,7 @@ const dictionary = {
     "started.steps.title": "Connect once",
     "started.step1.title": "Install KubeLoop",
     "started.step1.body":
-      "Download a platform archive from GitHub Releases (or build from source with Wails). macOS: if Gatekeeper blocks the app, right-click → Open, or run xattr -cr KubeLoop.app. Windows: if SmartScreen appears, choose More info → Run anyway. Linux: extract and run.",
+      "Download a platform package from GitHub Releases (or build from source with Wails). macOS: open the DMG and drag KubeLoop.app into Applications (or extract the tar.gz); if Gatekeeper blocks it, right-click → Open, or run xattr -cr KubeLoop.app. Windows: run the NSIS installer, or extract the portable zip; if SmartScreen appears, choose More info → Run anyway. Linux: install the deb / rpm, or extract the tar.gz and run KubeLoop.",
     "started.step2.title": "Confirm kubeconfig access",
     "started.step2.body":
       "Make sure this machine can reach the cluster API with a normal kubeconfig.",
@@ -87,7 +87,7 @@ const dictionary = {
     "product.tools.exchange.body": "Replace a ClusterIP Service with a process on your machine.",
     "product.tools.mirror.title": "Mirror",
     "product.tools.mirror.body":
-      "Keep cluster Pods as the primary path and tee a copy of TCP requests to a local process.",
+      "Keep cluster Pods as the primary path and tee a copy of TCP/UDP requests to a local process.",
     "product.tools.preview.title": "Preview",
     "product.tools.preview.body": "Expose a local app as a temporary ClusterIP Service.",
     "product.tools.portfwd.title": "Port Forward",
@@ -119,7 +119,7 @@ const dictionary = {
     "workflows.w5.label": "Mirror",
     "workflows.w5.title": "Debug without replacing the Service",
     "workflows.w5.body":
-      "Cluster Pods keep answering clients; a copy of each TCP request is sent to your local process.",
+      "Cluster Pods keep answering clients; a copy of each TCP/UDP request is sent to your local process.",
     "workflows.w5.hint": "Mirror",
     "workflows.w6.label": "Host alias",
     "workflows.w6.title": "Map a custom domain to a cluster IP",
@@ -207,7 +207,7 @@ const dictionary = {
     "started.steps.title": "连接一次",
     "started.step1.title": "安装 KubeLoop",
     "started.step1.body":
-      "从 GitHub Releases 下载对应平台压缩包（或用 Wails 从源码构建）。macOS：若被 Gatekeeper 拦截，可右键 → 打开，或执行 xattr -cr KubeLoop.app。Windows：若出现 SmartScreen，选择「更多信息 → 仍要运行」。Linux：解压后直接运行。",
+      "从 GitHub Releases 下载对应平台包（或用 Wails 从源码构建）。macOS：打开 DMG，将 KubeLoop.app 拖入 Applications（或解压 tar.gz）；若被 Gatekeeper 拦截，可右键 → 打开，或执行 xattr -cr KubeLoop.app。Windows：运行 NSIS 安装包，或解压便携 zip；若出现 SmartScreen，选择「更多信息 → 仍要运行」。Linux：安装 deb / rpm，或解压 tar.gz 后运行 KubeLoop。",
     "started.step2.title": "确认 kubeconfig 可用",
     "started.step2.body": "确保本机可用普通 kubeconfig 访问集群 API。",
     "started.step3.title": "选择 Context 并连接",
@@ -235,7 +235,7 @@ const dictionary = {
     "product.tools.exchange.title": "Exchange",
     "product.tools.exchange.body": "用本机进程替换现有 ClusterIP Service。",
     "product.tools.mirror.title": "Mirror",
-    "product.tools.mirror.body": "集群原 Pod 继续响应客户端，同时将 TCP 请求拷贝一份到本机进程。",
+    "product.tools.mirror.body": "集群原 Pod 继续响应客户端，同时将 TCP/UDP 请求拷贝一份到本机进程。",
     "product.tools.preview.title": "Preview",
     "product.tools.preview.body": "把本机应用临时暴露为 ClusterIP Service。",
     "product.tools.portfwd.title": "端口转发",
@@ -265,7 +265,7 @@ const dictionary = {
     "workflows.w4.hint": "Exchange",
     "workflows.w5.label": "Mirror",
     "workflows.w5.title": "不替换 Service 也能调试",
-    "workflows.w5.body": "集群原 Pod 继续响应客户端，同时将 TCP 请求拷贝到本机进程。",
+    "workflows.w5.body": "集群原 Pod 继续响应客户端，同时将 TCP/UDP 请求拷贝到本机进程。",
     "workflows.w5.hint": "Mirror",
     "workflows.w6.label": "主机别名",
     "workflows.w6.title": "把自定义域名指到集群 IP",
