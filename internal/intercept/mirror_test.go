@@ -1,7 +1,9 @@
 package intercept
 
 import (
+	"net"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
@@ -23,6 +25,25 @@ func TestPrimaryAddressMatchesPortName(t *testing.T) {
 	}
 	if addr != "10.244.0.5:8080" {
 		t.Fatalf("addr=%q", addr)
+	}
+}
+
+func TestShadowWriterDoesNotBlockWhenLocalTargetStalls(t *testing.T) {
+	local, stalledPeer := net.Pipe()
+	defer stalledPeer.Close()
+	writer := newShadowWriter(local)
+	payload := make([]byte, 32<<10)
+	started := time.Now()
+	for range mirrorShadowQueueSize * 4 {
+		if _, err := writer.Write(payload); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("shadow writes blocked primary path for %s", elapsed)
 	}
 }
 

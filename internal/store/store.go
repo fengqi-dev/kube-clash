@@ -55,6 +55,7 @@ type PortForwardSpec struct {
 	Namespace  string `json:"namespace"`
 	Kind       string `json:"kind"`
 	Name       string `json:"name"`
+	Protocol   string `json:"protocol,omitempty"`
 	RemotePort uint16 `json:"remotePort"`
 	LocalPort  uint16 `json:"localPort,omitempty"`
 }

@@ -191,7 +191,7 @@ export function ActiveSessions({
                   {item.kind}/{item.namespace}/{item.name}
                 </TableCell>
                 <TableCell className="font-mono text-[12px] text-muted-foreground">
-                  {item.address} → :{item.remotePort}
+                  {(item.protocol || "tcp").toUpperCase()} {item.address} → :{item.remotePort}
                 </TableCell>
                 <TableCell>
                   <div className="flex gap-1">

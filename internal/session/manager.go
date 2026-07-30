@@ -21,6 +21,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"github.com/fengqi-dev/kube-loop/internal/traffic"
 )
 
 type Phase string
@@ -363,9 +364,16 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "无法启动 Service Intercept 控制通道", err)
 		return
 	}
-	resources = append(resources, closerFunc(func() {
-		_ = m.intercept.StopAll(context.Background())
-	}))
+	var interceptCloseOnce sync.Once
+	closeIntercept := closerFunc(func() {
+		interceptCloseOnce.Do(func() {
+			_ = m.intercept.StopAll(context.Background())
+		})
+	})
+	// Keep an early guard for failures before sing-box starts. The same
+	// idempotent closer is appended again after the core so normal teardown
+	// restores Kubernetes resources before closing the data plane.
+	resources = append(resources, closeIntercept)
 
 	bridgeContext, stopBridge := context.WithCancel(ctx)
 	resources = append(resources, closerFunc(stopBridge))
@@ -386,6 +394,27 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	resources = append(resources, core)
+	trafficEndpoints := core.TrafficEndpoints()
+	if err := trafficEndpoints.Validate(); err != nil {
+		m.fail(ctx, state, "sing-box 业务入站不可用", err)
+		return
+	}
+	m.intercept.SetTrafficDialers(intercept.TrafficDialers{
+		Exchange:      trafficDialer(trafficEndpoints.Exchange),
+		Preview:       trafficDialer(trafficEndpoints.Preview),
+		MirrorPrimary: trafficDialer(trafficEndpoints.MirrorPrimary),
+		MirrorShadow:  trafficDialer(trafficEndpoints.MirrorShadow),
+	})
+	m.portfwd.SetTrafficDialer(
+		request.Context, portForwardTrafficDialer(trafficEndpoints.PortForward),
+	)
+	resources = append(resources, closerFunc(func() {
+		m.intercept.SetTrafficDialers(intercept.TrafficDialers{})
+		m.portfwd.StopRouted()
+		m.portfwd.SetTrafficDialer("", nil)
+		m.persistPortForwards()
+	}))
+	resources = append(resources, closeIntercept)
 
 	connectedAt := time.Now()
 	state.Phase = PhaseConnected
@@ -454,6 +483,24 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			m.publish(next)
 		}
 	}
+}
+
+func trafficDialer(endpoint singbox.TrafficEndpoint) intercept.TrafficDialer {
+	if endpoint.Address == "" {
+		return nil
+	}
+	return traffic.Dialer{Endpoint: traffic.Endpoint{
+		Address: endpoint.Address, Username: endpoint.Username, Password: endpoint.Password,
+	}}
+}
+
+func portForwardTrafficDialer(endpoint singbox.TrafficEndpoint) portfwd.TrafficDialer {
+	if endpoint.Address == "" {
+		return nil
+	}
+	return traffic.Dialer{Endpoint: traffic.Endpoint{
+		Address: endpoint.Address, Username: endpoint.Username, Password: endpoint.Password,
+	}}
 }
 
 func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
@@ -720,8 +767,9 @@ func (m *Manager) StartPortForwardSession(
 	if err == nil {
 		m.persistPortForwards()
 		m.AppendLog("INFO", fmt.Sprintf(
-			"started port-forward %s/%s/%s:%d → :%d",
-			request.Kind, request.Namespace, request.Name, request.RemotePort, info.LocalPort,
+			"started port-forward %s/%s/%s:%d/%s → :%d",
+			request.Kind, request.Namespace, request.Name, request.RemotePort,
+			info.Protocol, info.LocalPort,
 		))
 	}
 	return info, err

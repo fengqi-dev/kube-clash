@@ -21,6 +21,12 @@ func validSessionSpec() SessionSpec {
 		TUNAddress:       "198.19.0.1/30",
 		Namespace:        "default",
 		Hosts:            []HostAlias{{Domain: "api.default.svc", IP: "10.96.0.1"}},
+		TrafficPorts: TrafficInboundPorts{
+			PortForward: 1081, Exchange: 1082, Preview: 1083,
+			MirrorPrimary: 1084, MirrorShadow: 1085,
+		},
+		TrafficUsername: strings.Repeat("u", 32),
+		TrafficPassword: strings.Repeat("p", 64),
 	}
 }
 
@@ -53,6 +59,9 @@ func TestSessionSpecRejectsPrivilegeBoundaryInputs(t *testing.T) {
 		{"path session ID", func(s *SessionSpec) { s.ID = "../../owned" }},
 		{"remote bridge", func(s *SessionSpec) { s.BridgeHost = "10.0.0.1" }},
 		{"remote DNS", func(s *SessionSpec) { s.DNSHost = "10.0.0.53" }},
+		{"duplicate traffic port", func(s *SessionSpec) {
+			s.TrafficPorts.Exchange = s.TrafficPorts.PortForward
+		}},
 		{"arbitrary TUN range", func(s *SessionSpec) { s.TUNAddress = "10.0.0.1/24" }},
 		{"resolver path", func(s *SessionSpec) {
 			s.Hosts = []HostAlias{{Domain: "../resolver", IP: "10.96.0.1"}}

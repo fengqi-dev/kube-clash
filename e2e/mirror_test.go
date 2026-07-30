@@ -40,6 +40,11 @@ func TestServiceMirrorTCPAndUDP(t *testing.T) {
 	defer localUDP.Close()
 
 	manager := intercept.NewManager(provider)
+	dataPlane := startTrafficDataPlane(t, ctx, provider, forwarder.Address())
+	manager.SetTrafficDialers(intercept.TrafficDialers{
+		MirrorPrimary: dataPlane.dialer(dataPlane.endpoints.MirrorPrimary),
+		MirrorShadow:  dataPlane.dialer(dataPlane.endpoints.MirrorShadow),
+	})
 	if err := manager.Start(ctx, kubeContext(), gateway.IP, forwarder.Address()); err != nil {
 		t.Fatal(err)
 	}

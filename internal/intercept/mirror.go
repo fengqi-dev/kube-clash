@@ -7,12 +7,15 @@ import (
 	"net"
 	"strconv"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
+
+const mirrorShadowQueueSize = 16
 
 const (
 	ModeExchange = "exchange"
@@ -120,22 +123,21 @@ func closeWrite(conn net.Conn) {
 func mirrorTCP(client, primary net.Conn, local net.Conn) {
 	defer client.Close()
 	defer primary.Close()
+	var shadow *shadowWriter
 	if local != nil {
-		defer local.Close()
 		go func() { _, _ = io.Copy(io.Discard, local) }()
+		shadow = newShadowWriter(local)
+		defer shadow.Close()
 	}
 
 	done := make(chan struct{}, 2)
 	go func() {
 		dst := io.Writer(primary)
-		if local != nil {
-			dst = io.MultiWriter(primary, local)
+		if shadow != nil {
+			dst = io.MultiWriter(primary, shadow)
 		}
 		_, _ = io.Copy(dst, client)
 		closeWrite(primary)
-		if local != nil {
-			closeWrite(local)
-		}
 		done <- struct{}{}
 	}()
 	go func() {
@@ -149,11 +151,11 @@ func mirrorTCP(client, primary net.Conn, local net.Conn) {
 // mirrorUDP forwards client datagrams to primary (response path) and tees
 // requests to local (responses discarded). primaryFramed is true when primary
 // is a Gateway UDP tunnel that uses length-prefixed datagrams.
-func mirrorUDP(client, primary net.Conn, primaryFramed bool, local *net.UDPConn) {
+func mirrorUDP(client, primary net.Conn, primaryFramed bool, local net.Conn) {
 	defer client.Close()
 	defer primary.Close()
+	var shadow *shadowWriter
 	if local != nil {
-		defer local.Close()
 		go func() {
 			buf := make([]byte, tunnel.MaxDatagramSize)
 			for {
@@ -162,6 +164,8 @@ func mirrorUDP(client, primary net.Conn, primaryFramed bool, local *net.UDPConn)
 				}
 			}
 		}()
+		shadow = newShadowWriter(local)
+		defer shadow.Close()
 	}
 
 	done := make(chan struct{})
@@ -181,8 +185,8 @@ func mirrorUDP(client, primary net.Conn, primaryFramed bool, local *net.UDPConn)
 			if err := writeMirrorUDP(primary, primaryFramed, payload); err != nil {
 				return
 			}
-			if local != nil {
-				_, _ = local.Write(payload)
+			if shadow != nil {
+				_, _ = shadow.Write(payload)
 			}
 		}
 	}()
@@ -216,6 +220,77 @@ func mirrorUDP(client, primary net.Conn, primaryFramed bool, local *net.UDPConn)
 	}()
 
 	<-done
+}
+
+// shadowWriter decouples Mirror's best-effort local copy from the primary
+// request path. Once its bounded queue fills, it closes the shadow connection
+// and silently discards subsequent bytes for that stream; Primary never waits
+// for a slow local service.
+type shadowWriter struct {
+	conn    net.Conn
+	queue   chan []byte
+	mu      sync.Mutex
+	aborted bool
+	closed  bool
+	done    chan struct{}
+}
+
+func newShadowWriter(conn net.Conn) *shadowWriter {
+	writer := &shadowWriter{
+		conn: conn, queue: make(chan []byte, mirrorShadowQueueSize), done: make(chan struct{}),
+	}
+	go writer.run()
+	return writer
+}
+
+func (w *shadowWriter) Write(payload []byte) (int, error) {
+	copyOfPayload := append([]byte(nil), payload...)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.aborted || w.closed {
+		return len(payload), nil
+	}
+	select {
+	case w.queue <- copyOfPayload:
+	default:
+		w.aborted = true
+		_ = w.conn.Close()
+	}
+	return len(payload), nil
+}
+
+func (w *shadowWriter) Close() error {
+	w.mu.Lock()
+	if w.closed {
+		w.mu.Unlock()
+		return nil
+	}
+	w.closed = true
+	close(w.queue)
+	w.mu.Unlock()
+	select {
+	case <-w.done:
+	case <-time.After(50 * time.Millisecond):
+	}
+	return w.conn.Close()
+}
+
+func (w *shadowWriter) run() {
+	defer close(w.done)
+	for payload := range w.queue {
+		w.mu.Lock()
+		aborted := w.aborted
+		w.mu.Unlock()
+		if aborted {
+			continue
+		}
+		if _, err := w.conn.Write(payload); err != nil {
+			w.mu.Lock()
+			w.aborted = true
+			w.mu.Unlock()
+			_ = w.conn.Close()
+		}
+	}
 }
 
 func writeMirrorUDP(primary net.Conn, framed bool, payload []byte) error {

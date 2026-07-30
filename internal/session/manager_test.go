@@ -194,6 +194,15 @@ func (f *fakeProcess) Err() error            { return f.err }
 func (f *fakeProcess) Snapshot(context.Context) (singbox.Metrics, error) {
 	return singbox.Metrics{Connections: []singbox.Connection{}}, nil
 }
+func (f *fakeProcess) TrafficEndpoints() singbox.TrafficEndpoints {
+	endpoint := singbox.TrafficEndpoint{
+		Address: "127.0.0.1:18080", Username: "test-user", Password: "test-password",
+	}
+	return singbox.TrafficEndpoints{
+		PortForward: endpoint, Exchange: endpoint, Preview: endpoint,
+		MirrorPrimary: endpoint, MirrorShadow: endpoint,
+	}
+}
 func (f *fakeProcess) Close() error {
 	f.once.Do(func() { close(f.done) })
 	return nil
