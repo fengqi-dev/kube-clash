@@ -2,16 +2,19 @@
 
 ## sing-box
 
-KubeLoop is designed to distribute and run sing-box as a separate managed process.
+KubeLoop distributes and runs sing-box as a separate managed process.
 
 - Project: https://github.com/SagerNet/sing-box
 - Pinned version: v1.13.14
 - License: GNU General Public License v3.0
 - Source: https://github.com/SagerNet/sing-box/tree/v1.13.14
+- Full license text: https://www.gnu.org/licenses/gpl-3.0.txt
 
-sing-box binaries are downloaded on first connect (or provided via
-`KUBELOOP_SINGBOX_PATH`). Before a release bundles those binaries, the packaging
-process must include the complete GPLv3 license text, retain upstream notices,
-and provide the corresponding source in a manner compliant with GPLv3.
+Platform packages include the pinned upstream binary (and on Windows any
+sidecar DLLs from the same release archive, such as `libcronet.dll`) next to
+the application, together with `LICENSE.sing-box.txt`. The privileged helper
+runs that packaged binary in place and does not copy or download sing-box at
+runtime.
 
-Windows builds also require `wintun.dll` from the sing-box release archive.
+For local development and e2e, `KUBELOOP_SINGBOX_PATH` or the optional
+installer download path may still materialize a core under a cache directory.

@@ -230,17 +230,21 @@ The Privileged Helper is a separate, least-privilege system service. Its
 token-authenticated local IPC accepts a field-constrained session description,
 not commands or filesystem paths. It:
 
-- Downloads the pinned official sing-box archive, verifies its embedded SHA-256,
-  and installs the core under protected system storage;
+- Runs the pinned sing-box binary shipped in the platform package in place
+  (no runtime copy or download into protected storage);
 - Regenerates the sing-box config in a protected per-session directory;
 - Creates and destroys utun/TUN;
 - Adds and removes explicit Pod/Service routes;
 - Configures `cluster.local` split DNS;
 - Cleans residual network config on crash recovery.
 
-The Helper does not read kubeconfig or hold Kubernetes credentials. It only uses
-the network to obtain the pinned, checksum-verified sing-box release when the
-protected core is not already installed.
+On Windows the package layout mirrors common sidecar apps: a flat
+`Program Files\KubeLoop\` directory with `sing-box.exe` beside the app and
+`resources\` containing `kubeloop-helper.exe` plus dedicated
+`kubeloop-helper-install.exe` / `kubeloop-helper-uninstall.exe` tools used for
+UAC elevation.
+
+The Helper does not read kubeconfig or hold Kubernetes credentials.
 
 sing-box is GPLv3. Distributions that bundle it must keep license and copyright notices and provide corresponding source as required. sing-box stays an unmodified separate process; the release pipeline still produces third-party notices and source-access instructions.
 
