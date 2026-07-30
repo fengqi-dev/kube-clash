@@ -37,12 +37,12 @@ package_linux() {
   nfpm package \
     --config "${ROOT}/build/nfpm.yaml" \
     --packager deb \
-    --target "${DIST_DIR}/kubeloop_${version}_${ARCH}.deb"
+    --target "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.deb"
 
   nfpm package \
     --config "${ROOT}/build/nfpm.yaml" \
     --packager rpm \
-    --target "${DIST_DIR}/kubeloop-${version}-1.${ARCH}.rpm"
+    --target "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.rpm"
 }
 
 package_darwin() {
