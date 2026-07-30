@@ -41,6 +41,9 @@ func TestGatewayTCPAndDNS(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Wait until ClusterIP UDP is programmed; otherwise the gateway UDP dial
+	// can race kube-proxy and close the tunnel with EOF.
+	_ = waitClusterProbe(t, ctx, client, echoService.Spec.ClusterIP, 9090, "udp", "ping", "cluster-udp:")
 
 	gatewayAddress := forwarder.Address()
 	assertGatewayTCP(t, gatewayAddress, apiService.Spec.ClusterIP, 443)
