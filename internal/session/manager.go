@@ -173,14 +173,14 @@ const (
 
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	manager := &Manager{
-		provider:      provider,
-		core:          newSingboxRuntime(),
+		provider: provider,
+		core:     newSingboxRuntime(),
 		bridgeFactory: func(ctx context.Context, gatewayAddress string) (net.Listener, error) {
 			return socksbridge.Listen(ctx, gatewayAddress)
 		},
-		gatewayImage:  ResolveGatewayImage(""),
-		intercept:     intercept.NewManager(provider),
-		portfwd:       portfwd.NewManager(provider),
+		gatewayImage: ResolveGatewayImage(""),
+		intercept:    intercept.NewManager(provider),
+		portfwd:      portfwd.NewManager(provider),
 		state: State{
 			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
 		},
