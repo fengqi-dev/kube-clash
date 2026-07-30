@@ -4,6 +4,7 @@ import (
 	"embed"
 	"log"
 
+	"github.com/fengqi-dev/kube-loop/internal/tray"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
@@ -17,6 +18,8 @@ var version = "dev"
 
 func main() {
 	app := NewApp()
+	// Start tray before wails.Run so its Win32 message loop is not tied to WebView startup.
+	app.tray = tray.Start(&trayHost{app: app})
 	if err := wails.Run(&options.App{
 		Title:         "KubeLoop",
 		Width:         1080,
@@ -38,6 +41,7 @@ func main() {
 		},
 		AssetServer:      &assetserver.Options{Assets: assets},
 		OnStartup:        app.startup,
+		OnBeforeClose:    app.beforeClose,
 		OnShutdown:       app.shutdown,
 		Bind:             []interface{}{app},
 		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 1},

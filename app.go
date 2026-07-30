@@ -13,6 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"github.com/fengqi-dev/kube-loop/internal/tray"
 	"github.com/fengqi-dev/kube-loop/internal/update"
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 )
@@ -23,6 +24,7 @@ type App struct {
 	manager     *session.Manager
 	store       *store.Store
 	updater     *update.Checker
+	tray        *tray.Controller
 	once        sync.Once
 	updateMu    sync.RWMutex
 	updateCheck sync.Mutex
@@ -85,7 +87,17 @@ func (a *App) startup(ctx context.Context) {
 	})
 }
 
+func (a *App) beforeClose(ctx context.Context) (prevent bool) {
+	if a.tray == nil {
+		return false
+	}
+	return a.tray.BeforeClose(ctx)
+}
+
 func (a *App) shutdown(context.Context) {
+	if a.tray != nil {
+		a.tray.Stop()
+	}
 	_ = a.manager.Shutdown()
 }
 
