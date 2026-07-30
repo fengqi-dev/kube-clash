@@ -296,6 +296,7 @@ export namespace helper {
 	    installed: boolean;
 	    running: boolean;
 	    version?: string;
+	    protocol?: number;
 	    expected: string;
 	    socket: string;
 	    error?: string;
@@ -309,6 +310,7 @@ export namespace helper {
 	        this.installed = source["installed"];
 	        this.running = source["running"];
 	        this.version = source["version"];
+	        this.protocol = source["protocol"];
 	        this.expected = source["expected"];
 	        this.socket = source["socket"];
 	        this.error = source["error"];
