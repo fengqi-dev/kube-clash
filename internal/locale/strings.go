@@ -17,8 +17,8 @@ type Strings struct {
 	QuitTitle           string
 	QuitMessage         string
 
-	SelectKubeconfig   string
-	KubeconfigFilter   string
+	SelectKubeconfig string
+	KubeconfigFilter string
 }
 
 // T returns the string table for the preferred OS language.
