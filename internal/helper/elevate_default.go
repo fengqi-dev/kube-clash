@@ -7,7 +7,7 @@ import (
 	"fmt"
 )
 
-func ElevateInstall(context.Context, string, string, string, int, string) error {
+func ElevateInstall(context.Context, string, string, string, int, string, string) error {
 	return fmt.Errorf("helper install is unsupported on this platform")
 }
 

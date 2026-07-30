@@ -23,6 +23,9 @@ const elevatedResultPollInterval = 100 * time.Millisecond
 
 type elevatedRequest struct {
 	ExpectedSHA256 string `json:"expectedSha256,omitempty"`
+	ServiceSource  string `json:"serviceSource,omitempty"`
+	ServiceSHA256  string `json:"serviceSha256,omitempty"`
+	SingBoxPath    string `json:"singBoxPath,omitempty"`
 	Token          string `json:"token,omitempty"`
 	UID            int    `json:"uid,omitempty"`
 	Version        string `json:"version,omitempty"`
@@ -38,42 +41,51 @@ func ElevateInstall(
 	ctx context.Context,
 	source, expectedSHA256, token string,
 	uid int,
-	homeDir string,
+	homeDir, singBoxPath string,
 ) error {
 	ownerSID, err := currentUserSID()
 	if err != nil {
 		return fmt.Errorf("find current Windows user SID: %w", err)
 	}
-	return runElevatedHelper(ctx, source, "install", elevatedRequest{
-		ExpectedSHA256: expectedSHA256,
-		Token:          token,
-		UID:            uid,
-		Version:        Version,
-		HomeDir:        homeDir,
-		OwnerSID:       ownerSID,
+	installTool, err := LocateBundledInstallTool()
+	if err != nil {
+		return err
+	}
+	return runElevatedTool(ctx, installTool, elevatedRequest{
+		ServiceSource: source,
+		ServiceSHA256: expectedSHA256,
+		SingBoxPath:   singBoxPath,
+		Token:         token,
+		UID:           uid,
+		Version:       Version,
+		HomeDir:       homeDir,
+		OwnerSID:      ownerSID,
 	})
 }
 
 func ElevateUninstall(ctx context.Context, source string) error {
-	expectedSHA256, err := bundledHelperSHA256(source)
+	_ = source
+	uninstallTool, err := LocateBundledUninstallTool()
 	if err != nil {
 		return err
 	}
-	return runElevatedHelper(ctx, source, "uninstall", elevatedRequest{
-		ExpectedSHA256: expectedSHA256,
-	})
+	return runElevatedTool(ctx, uninstallTool, elevatedRequest{})
 }
 
-func runElevatedHelper(
-	ctx context.Context,
-	source, operation string,
-	request elevatedRequest,
-) error {
-	lockedSource, err := lockAndVerifyElevatedSource(source, request.ExpectedSHA256)
+func runElevatedTool(ctx context.Context, tool string, request elevatedRequest) error {
+	lockedTool, toolHash, err := lockAndHashElevatedSource(tool)
 	if err != nil {
 		return err
 	}
-	defer lockedSource.Close()
+	defer lockedTool.Close()
+	request.ExpectedSHA256 = toolHash
+	if request.ServiceSource != "" {
+		lockedService, lockErr := lockAndVerifyElevatedSource(request.ServiceSource, request.ServiceSHA256)
+		if lockErr != nil {
+			return lockErr
+		}
+		defer lockedService.Close()
+	}
 	ownerSID, err := currentUserSID()
 	if err != nil {
 		return fmt.Errorf("find current Windows user SID: %w", err)
@@ -101,34 +113,31 @@ func runElevatedHelper(
 	}
 
 	args := strings.Join([]string{
-		syscall.EscapeArg("elevated"),
-		syscall.EscapeArg("--operation"),
-		syscall.EscapeArg(operation),
 		syscall.EscapeArg("--request"),
 		syscall.EscapeArg(requestPath),
 		syscall.EscapeArg("--result"),
 		syscall.EscapeArg(resultPath),
 	}, " ")
 	verbPtr, _ := windows.UTF16PtrFromString("runas")
-	sourcePtr, err := windows.UTF16PtrFromString(source)
+	toolPtr, err := windows.UTF16PtrFromString(tool)
 	if err != nil {
-		return fmt.Errorf("encode elevated helper path: %w", err)
+		return fmt.Errorf("encode elevated tool path: %w", err)
 	}
 	argsPtr, err := windows.UTF16PtrFromString(args)
 	if err != nil {
-		return fmt.Errorf("encode elevated helper arguments: %w", err)
+		return fmt.Errorf("encode elevated tool arguments: %w", err)
 	}
-	cwdPtr, err := windows.UTF16PtrFromString(filepath.Dir(source))
+	cwdPtr, err := windows.UTF16PtrFromString(filepath.Dir(tool))
 	if err != nil {
-		return fmt.Errorf("encode elevated helper directory: %w", err)
+		return fmt.Errorf("encode elevated tool directory: %w", err)
 	}
 	if err := windows.ShellExecute(
-		0, verbPtr, sourcePtr, argsPtr, cwdPtr, windows.SW_HIDE,
+		0, verbPtr, toolPtr, argsPtr, cwdPtr, windows.SW_HIDE,
 	); err != nil {
 		if errors.Is(err, windows.ERROR_CANCELLED) {
 			return fmt.Errorf("Windows elevation was cancelled")
 		}
-		return fmt.Errorf("launch elevated helper: %w", err)
+		return fmt.Errorf("launch elevated helper tool: %w", err)
 	}
 	return waitElevatedResult(ctx, resultPath)
 }
@@ -137,9 +146,21 @@ func lockAndVerifyElevatedSource(source, expectedSHA256 string) (*os.File, error
 	if expectedSHA256 == "" {
 		return nil, fmt.Errorf("expected helper SHA-256 is required")
 	}
+	file, actual, err := lockAndHashElevatedSource(source)
+	if err != nil {
+		return nil, err
+	}
+	if !strings.EqualFold(actual, expectedSHA256) {
+		_ = file.Close()
+		return nil, fmt.Errorf("bundled helper checksum mismatch")
+	}
+	return file, nil
+}
+
+func lockAndHashElevatedSource(source string) (*os.File, string, error) {
 	sourcePtr, err := windows.UTF16PtrFromString(source)
 	if err != nil {
-		return nil, fmt.Errorf("encode elevated helper path: %w", err)
+		return nil, "", fmt.Errorf("encode elevated helper path: %w", err)
 	}
 	handle, err := windows.CreateFile(
 		sourcePtr,
@@ -151,23 +172,19 @@ func lockAndVerifyElevatedSource(source, expectedSHA256 string) (*os.File, error
 		0,
 	)
 	if err != nil {
-		return nil, fmt.Errorf("lock elevated helper source: %w", err)
+		return nil, "", fmt.Errorf("lock elevated helper source: %w", err)
 	}
 	file := os.NewFile(uintptr(handle), source)
 	if file == nil {
 		_ = windows.CloseHandle(handle)
-		return nil, fmt.Errorf("open locked elevated helper source")
+		return nil, "", fmt.Errorf("open locked elevated helper source")
 	}
 	hash := sha256.New()
 	if _, err := io.Copy(hash, file); err != nil {
 		_ = file.Close()
-		return nil, fmt.Errorf("hash locked elevated helper source: %w", err)
+		return nil, "", fmt.Errorf("hash locked elevated helper source: %w", err)
 	}
-	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
-		_ = file.Close()
-		return nil, fmt.Errorf("bundled helper checksum mismatch")
-	}
-	return file, nil
+	return file, hex.EncodeToString(hash.Sum(nil)), nil
 }
 
 func createElevatedExchangeFile(pattern, ownerSID string) (string, error) {

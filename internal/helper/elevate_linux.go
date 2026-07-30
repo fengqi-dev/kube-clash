@@ -22,17 +22,17 @@ if [ "$actual" != "$2" ]; then
 	exit 1
 fi
 chmod 700 "$staged"
-"$staged" install --source "$staged" --token "$3" --uid "$4" --version "$5" --home "$6"
+"$staged" install --source "$staged" --token "$3" --uid "$4" --version "$5" --home "$6" --sing-box "$7"
 `
 
-func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir string) error {
+func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir, singBoxPath string) error {
 	elevate := "pkexec"
 	if _, err := exec.LookPath("pkexec"); err != nil {
 		elevate = "sudo"
 	}
 	cmdArgs := []string{
 		"/bin/sh", "-c", linuxInstallScript, "kubeloop-installer",
-		source, expectedSHA256, token, strconv.Itoa(uid), Version, homeDir,
+		source, expectedSHA256, token, strconv.Itoa(uid), Version, homeDir, singBoxPath,
 	}
 	cmd := exec.CommandContext(ctx, elevate, cmdArgs...)
 	output, err := cmd.CombinedOutput()

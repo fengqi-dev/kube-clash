@@ -226,15 +226,18 @@ sing-box 作为客户端托管的独立进程随平台安装包分发，负责�
 Privileged Helper 是独立、最小权限的系统服务。本机 IPC 使用 Token 认证，只接受字段受限
 的 Session 描述，不接受命令或文件路径，负责：
 
-- 下载固定版本的官方 sing-box 压缩包，校验内置 SHA-256 后安装到系统保护目录；
+- 直接运行平台安装包内随附的固定版 sing-box（运行时不再复制或下载到系统目录）；
 - 在受保护的 Session 目录内重新生成 sing-box 配置；
 - 创建和销毁 utun/TUN；
 - 添加和删除明确的 Pod/Service 路由；
 - 配置 `cluster.local` split DNS；
 - 崩溃恢复时清理残留网络配置。
 
-Helper 不读取 kubeconfig，也不持有 Kubernetes 凭证；仅当系统保护目录尚未安装内核时，
-联网获取固定版本且经过校验的 sing-box Release。
+Windows 安装布局为扁平的 `Program Files\KubeLoop\`：`sing-box.exe` 与主程序同级，
+`resources\` 下包含 `kubeloop-helper.exe` 以及独立的
+`kubeloop-helper-install.exe` / `kubeloop-helper-uninstall.exe`（用于 UAC 提权）。
+
+Helper 不读取 kubeconfig，也不持有 Kubernetes 凭证。
 
 sing-box 使用 GPLv3。分发安装包时必须同时保留许可证、版权声明，并按许可证要求提供对应
 源码。sing-box 保持为独立进程，不修改其源码；项目仍需在发布流程中生成第三方许可证和源码

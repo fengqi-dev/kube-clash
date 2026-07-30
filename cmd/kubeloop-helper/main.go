@@ -27,8 +27,9 @@ func main() {
 		ver := fs.String("version", helper.Version, "helper version")
 		home := fs.String("home", "", "user home directory for session allowlist")
 		ownerSID := fs.String("sid", "", "Windows SID allowed to access the helper socket")
+		singBox := fs.String("sing-box", "", "path to packaged sing-box binary")
 		_ = fs.Parse(os.Args[2:])
-		if err := helper.InstallFromCLI(*source, *token, *uid, *ver, *home, *ownerSID); err != nil {
+		if err := helper.InstallFromCLI(*source, *token, *uid, *ver, *home, *ownerSID, *singBox); err != nil {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
