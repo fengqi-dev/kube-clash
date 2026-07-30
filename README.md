@@ -53,11 +53,15 @@ cluster. You do not need `kubectl` installed locally.
 
 ## Get started
 
-1. Download a platform package from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-   (darwin/windows/linux × amd64/arm64; or build from source — see below).
-   - **macOS**: open the `.dmg` and drag `KubeLoop.app` into Applications (or extract the
-     `.tar.gz`). If Gatekeeper blocks it, right-click → **Open**, or run
-     `xattr -cr KubeLoop.app`.
+1. Install a platform package (or build from source — see below).
+   - **macOS (Homebrew)**:
+     ```bash
+     brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+     brew install --cask kubeloop
+     ```
+   - **macOS (manual)**: download the `.dmg` from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+     and drag `KubeLoop.app` into Applications (or extract the `.tar.gz`). If Gatekeeper
+     blocks it, right-click → **Open**, or run `xattr -cr KubeLoop.app`.
    - **Windows**: run the NSIS installer (`kubeloop-*-windows-*-installer.exe`), or extract the
      portable zip. If SmartScreen appears, choose **More info** → **Run anyway**.
    - **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.

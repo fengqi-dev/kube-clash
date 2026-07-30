@@ -49,9 +49,14 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载对应平台包
-   （darwin / windows / linux × amd64 / arm64；或按下方说明自行构建）。
-   - **macOS**：打开 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
+1. 安装对应平台包（或按下方说明自行构建）。
+   - **macOS（Homebrew）**：
+     ```bash
+     brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+     brew install --cask kubeloop
+     ```
+   - **macOS（手动）**：从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+     下载 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
      若被 Gatekeeper 拦截，可右键 → **打开**，或执行 `xattr -cr KubeLoop.app`。
    - **Windows**：运行 NSIS 安装包（`kubeloop-*-windows-*-installer.exe`），或解压便携 zip。
      若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
