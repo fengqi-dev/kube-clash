@@ -7,6 +7,8 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
+	"strings"
 )
 
 func copyFile(src, dst string, mode os.FileMode) error {
@@ -60,7 +62,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return os.Chmod(dst, mode)
 }
 
-func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID string) error {
+func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, singBoxPath string) error {
 	if source == "" {
 		return fmt.Errorf("--source is required")
 	}
@@ -73,18 +75,96 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID st
 	if homeDir == "" {
 		return fmt.Errorf("--home is required")
 	}
-	if err := prepareBinaryInstall(); err != nil {
-		return fmt.Errorf("prepare helper binary install: %w", err)
+	if singBoxPath == "" {
+		located, locateErr := LocateBundledSingBox()
+		if locateErr == nil {
+			singBoxPath = located
+		} else if near := singBoxNearHelperSource(source); near != "" {
+			singBoxPath = near
+		} else {
+			return locateErr
+		}
 	}
-	if err := copyFile(source, BinaryInstallPath(), 0o755); err != nil {
-		return fmt.Errorf("install helper binary: %w", err)
+	if info, err := os.Stat(singBoxPath); err != nil || info.IsDir() {
+		return fmt.Errorf("sing-box binary not found at %s", singBoxPath)
+	}
+	if abs, err := filepath.Abs(singBoxPath); err == nil {
+		singBoxPath = abs
+	}
+	dest := BinaryInstallPath()
+	needsBinaryUpdate, err := helperNeedsBinaryUpdate(source, dest)
+	if err != nil {
+		return err
+	}
+	if needsBinaryUpdate {
+		if err := prepareBinaryInstall(); err != nil {
+			return fmt.Errorf("prepare helper binary install: %w", err)
+		}
+		if !sameInstallPath(source, dest) {
+			if err := copyFile(source, dest, 0o755); err != nil {
+				return fmt.Errorf("install helper binary: %w", err)
+			}
+		}
 	}
 	if err := WriteSystemAuth(AuthFile{
-		Token: token, UID: uid, Version: version, HomeDir: homeDir, OwnerSID: ownerSID,
+		Token:       token,
+		UID:         uid,
+		Version:     version,
+		HomeDir:     homeDir,
+		OwnerSID:    ownerSID,
+		SingBoxPath: singBoxPath,
 	}); err != nil {
 		return err
 	}
-	return enableService(BinaryInstallPath())
+	return enableService(dest)
+}
+
+func singBoxNearHelperSource(source string) string {
+	name := "sing-box"
+	if runtime.GOOS == "windows" {
+		name = "sing-box.exe"
+	}
+	dir := filepath.Dir(source)
+	for _, candidate := range []string{
+		filepath.Join(dir, name),
+		filepath.Join(dir, "..", name),
+		filepath.Join(filepath.Dir(dir), name),
+	} {
+		info, err := os.Stat(candidate)
+		if err == nil && !info.IsDir() {
+			abs, absErr := filepath.Abs(candidate)
+			if absErr != nil {
+				return filepath.Clean(candidate)
+			}
+			return abs
+		}
+	}
+	return ""
+}
+
+func helperNeedsBinaryUpdate(source, dest string) (bool, error) {
+	if sameInstallPath(source, dest) {
+		return false, nil
+	}
+	info, err := os.Stat(dest)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, fmt.Errorf("stat installed helper: %w", err)
+	}
+	if info.IsDir() {
+		return true, nil
+	}
+	srcHash, err := fileSHA256(source)
+	if err != nil {
+		return false, fmt.Errorf("hash helper source: %w", err)
+	}
+	dstHash, err := fileSHA256(dest)
+	if err != nil {
+		return true, nil
+	}
+	return !strings.EqualFold(srcHash, dstHash), nil
 }
 
 func UninstallFromCLI() error {
@@ -92,8 +172,24 @@ func UninstallFromCLI() error {
 		return err
 	}
 	_ = os.Remove(BinaryInstallPath())
+	if legacy := LegacyBinaryInstallPath(); legacy != "" {
+		_ = os.Remove(legacy)
+	}
 	_ = os.Remove(SystemAuthPath())
 	_ = os.Remove(SystemTokenPath())
 	_ = os.Remove(SocketPath())
 	return nil
+}
+
+func sameInstallPath(a, b string) bool {
+	aAbs, errA := filepath.Abs(a)
+	bAbs, errB := filepath.Abs(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	aAbs, bAbs = filepath.Clean(aAbs), filepath.Clean(bAbs)
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(aAbs, bAbs)
+	}
+	return aAbs == bAbs
 }

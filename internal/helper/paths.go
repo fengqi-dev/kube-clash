@@ -55,6 +55,16 @@ func BinaryInstallPath() string {
 	return platformBinaryInstallPath()
 }
 
+// LegacyBinaryInstallPath returns the previous Windows helper location, if any.
+func LegacyBinaryInstallPath() string {
+	return platformLegacyBinaryInstallPath()
+}
+
+// BundledSingBoxPath returns the platform-package sing-box path when known.
+func BundledSingBoxPath() string {
+	return platformBundledSingBoxPath()
+}
+
 func SocketPath() string {
 	switch runtime.GOOS {
 	case "windows":

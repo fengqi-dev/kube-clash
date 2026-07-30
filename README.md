@@ -63,7 +63,9 @@ cluster. You do not need `kubectl` installed locally.
      and drag `KubeLoop.app` into Applications (or extract the `.tar.gz`). If Gatekeeper
      blocks it, right-click → **Open**, or run `xattr -cr KubeLoop.app`.
    - **Windows**: run the NSIS installer (`kubeloop-*-windows-*-installer.exe`), or extract the
-     portable zip. If SmartScreen appears, choose **More info** → **Run anyway**.
+     portable zip into a folder (flat layout like `Program Files\KubeLoop\` with
+     `sing-box.exe` and `resources\` helper tools). If SmartScreen appears, choose
+     **More info** → **Run anyway**.
    - **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.
 2. Ensure your machine can reach the cluster API with a normal kubeconfig.
 3. Open KubeLoop, choose a **Context**, click **Connect**.
@@ -114,8 +116,9 @@ KubeLoop is built so cluster access stays scoped and recoverable:
 | | |
 | --- | --- |
 | **UI** | Light / dark (system-aware), English and 简体中文 |
-| **Data** | State and cores under `~/.kubeloop` |
-| **Helper** | Install once for TUN / DNS / routes; uninstall anytime in Settings |
+| **Data** | App state under `~/.kubeloop`; helper state under system-protected storage |
+| **Helper** | Install once for TUN / DNS / routes; uninstall anytime in Settings (Windows: `resources\kubeloop-helper-*.exe`) |
+| **Core** | Packages ship pinned sing-box beside the app; helper runs it in place (no copy/download) |
 | **Updates** | Checks GitHub Releases on startup; open the download page from Settings |
 
 ## For developers

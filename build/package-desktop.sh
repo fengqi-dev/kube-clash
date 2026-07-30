@@ -19,12 +19,16 @@ fi
 mkdir -p "${DIST_DIR}"
 
 package_linux() {
-  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.tar.gz" .
-
   if [[ ! -x "${BIN_DIR}/KubeLoop" ]]; then
     echo "expected Linux binary at build/bin/KubeLoop" >&2
     exit 1
   fi
+  if [[ ! -x "${BIN_DIR}/sing-box" ]]; then
+    echo "expected bundled sing-box at build/bin/sing-box" >&2
+    exit 1
+  fi
+
+  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.tar.gz" .
 
   if ! command -v nfpm >/dev/null 2>&1; then
     echo "nfpm is required to build deb/rpm packages" >&2
@@ -46,7 +50,7 @@ package_linux() {
 }
 
 package_darwin() {
-  local app_src app_stage stage dmg
+  local app_src app_stage stage dmg resources
 
   app_src="$(find "${BIN_DIR}" -maxdepth 1 -name '*.app' -print -quit)"
   if [[ -z "${app_src}" ]]; then
@@ -59,6 +63,18 @@ package_darwin() {
   if [[ "${app_src}" != "${app_stage}" ]]; then
     rm -rf "${app_stage}"
     mv "${app_src}" "${app_stage}"
+  fi
+
+  resources="${app_stage}/Contents/Resources"
+  mkdir -p "${resources}"
+  if [[ ! -f "${BIN_DIR}/sing-box" ]]; then
+    echo "expected bundled sing-box at build/bin/sing-box" >&2
+    exit 1
+  fi
+  cp "${BIN_DIR}/sing-box" "${resources}/sing-box"
+  chmod 755 "${resources}/sing-box"
+  if [[ -f "${BIN_DIR}/LICENSE.sing-box.txt" ]]; then
+    cp "${BIN_DIR}/LICENSE.sing-box.txt" "${resources}/LICENSE.sing-box.txt"
   fi
 
   tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-darwin-${ARCH}.tar.gz" KubeLoop.app

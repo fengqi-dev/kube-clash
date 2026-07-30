@@ -5,6 +5,7 @@ package helper
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ func enableService(binaryPath string) error {
 	}
 	defer manager.Disconnect()
 
+	wantBinary := syscall.EscapeArg(binaryPath) + " run"
 	service, openErr := manager.OpenService(ServiceNameWin)
 	if openErr == nil {
 		defer service.Close()
@@ -27,15 +29,31 @@ func enableService(binaryPath string) error {
 		if configErr != nil {
 			return fmt.Errorf("read windows service config: %w", configErr)
 		}
-		cfg.BinaryPathName = syscall.EscapeArg(binaryPath) + " run"
-		cfg.DisplayName = "KubeLoop Helper"
-		cfg.Description = "Privileged helper for KubeLoop TUN networking"
-		cfg.StartType = mgr.StartAutomatic
-		if err := service.UpdateConfig(cfg); err != nil {
-			return fmt.Errorf("update windows service: %w", err)
+		status, queryErr := service.Query()
+		if queryErr != nil {
+			return fmt.Errorf("query windows service: %w", queryErr)
 		}
-		if err := service.Start(); err != nil {
-			return fmt.Errorf("restart windows service: %w", err)
+		configChanged := !serviceBinaryPathMatches(cfg.BinaryPathName, wantBinary) ||
+			cfg.StartType != mgr.StartAutomatic ||
+			cfg.DisplayName != "KubeLoop Helper"
+		if configChanged {
+			cfg.BinaryPathName = wantBinary
+			cfg.DisplayName = "KubeLoop Helper"
+			cfg.Description = "Privileged helper for KubeLoop TUN networking"
+			cfg.StartType = mgr.StartAutomatic
+			if err := service.UpdateConfig(cfg); err != nil {
+				return fmt.Errorf("update windows service: %w", err)
+			}
+		}
+		// Always bounce so the service reloads system auth (e.g. SingBoxPath).
+		if status.State == svc.Running {
+			if err := stopWindowsService(service, 20*time.Second); err != nil {
+				return err
+			}
+		}
+		if err := service.Start(); err != nil &&
+			!errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+			return fmt.Errorf("start windows service: %w", err)
 		}
 		return waitServiceRunning(service, 15*time.Second)
 	}
@@ -53,10 +71,20 @@ func enableService(binaryPath string) error {
 		return fmt.Errorf("create windows service: %w", err)
 	}
 	defer service.Close()
-	if err := service.Start(); err != nil {
+	if err := service.Start(); err != nil &&
+		!errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
 		return fmt.Errorf("start windows service: %w", err)
 	}
 	return waitServiceRunning(service, 15*time.Second)
+}
+
+func serviceBinaryPathMatches(current, want string) bool {
+	normalize := func(value string) string {
+		value = strings.TrimSpace(value)
+		value = strings.Trim(value, `"'`)
+		return strings.ToLower(strings.ReplaceAll(value, `/`, `\`))
+	}
+	return normalize(current) == normalize(want)
 }
 
 func stopServiceForUpgrade() error {
@@ -151,7 +179,7 @@ func waitServiceRunning(service *mgr.Service, timeout time.Duration) error {
 		if status.State == svc.Running {
 			return nil
 		}
-		time.Sleep(200 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	return fmt.Errorf("timed out waiting for %s to run", ServiceNameWin)
 }

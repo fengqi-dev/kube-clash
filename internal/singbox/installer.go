@@ -56,11 +56,15 @@ var releaseAssets = map[string]releaseAsset{
 type Installer struct {
 	HTTPClient      *http.Client
 	BaseDir         string
+	BundledPath     string
 	GOOS            string
 	GOARCH          string
 	Asset           *releaseAsset
 	DownloadURL     func(releaseAsset) string
 	DisableOverride bool
+	// DisableDownload skips downloading/copying into BaseDir/cores and only
+	// returns an already-present bundled or override binary.
+	DisableDownload bool
 }
 
 func (i *Installer) Ensure(ctx context.Context) (string, error) {
@@ -69,6 +73,31 @@ func (i *Installer) Ensure(ctx context.Context) (string, error) {
 			return validateBinary(override)
 		}
 	}
+	var missing []string
+	for _, candidate := range i.bundledCandidates() {
+		path, err := validateBinary(candidate)
+		if err == nil {
+			return path, nil
+		}
+		missing = append(missing, candidate)
+	}
+	if i.DisableDownload {
+		if len(missing) == 0 {
+			return "", fmt.Errorf(
+				"bundled sing-box %s not found; reinstall the KubeLoop package",
+				Version,
+			)
+		}
+		return "", fmt.Errorf(
+			"bundled sing-box %s not found (tried %s); reinstall the KubeLoop package",
+			Version,
+			strings.Join(missing, ", "),
+		)
+	}
+	return i.downloadToCores(ctx)
+}
+
+func (i *Installer) downloadToCores(ctx context.Context) (string, error) {
 	goos, goarch := i.platform()
 	asset, ok := releaseAssets[goos+"/"+goarch]
 	if i.Asset != nil {
@@ -135,9 +164,11 @@ func (i *Installer) Ensure(ctx context.Context) (string, error) {
 		return "", err
 	}
 	if goos == "windows" {
-		if wintun, hasWintun := files["wintun.dll"]; hasWintun {
-			if err := os.WriteFile(filepath.Join(filepath.Dir(binaryPath), "wintun.dll"), wintun, 0o644); err != nil {
-				return "", fmt.Errorf("install wintun.dll: %w", err)
+		for _, sidecar := range []string{"wintun.dll", "libcronet.dll"} {
+			if payload, ok := files[sidecar]; ok {
+				if err := os.WriteFile(filepath.Join(filepath.Dir(binaryPath), sidecar), payload, 0o644); err != nil {
+					return "", fmt.Errorf("install %s: %w", sidecar, err)
+				}
 			}
 		}
 	}
@@ -196,6 +227,31 @@ func (i *Installer) baseDir() (string, error) {
 	return filepath.Join(home, ".kubeloop"), nil
 }
 
+func (i *Installer) bundledCandidates() []string {
+	var candidates []string
+	if i.BundledPath != "" {
+		candidates = append(candidates, i.BundledPath)
+	}
+	goos, _ := i.platform()
+	name := "sing-box"
+	if goos == "windows" {
+		name = "sing-box.exe"
+	}
+	if exe, err := os.Executable(); err == nil {
+		if resolved, evalErr := filepath.EvalSymlinks(exe); evalErr == nil {
+			exe = resolved
+		}
+		dir := filepath.Dir(exe)
+		candidates = append(candidates,
+			filepath.Join(dir, name),                 // next to helper service / app
+			filepath.Join(dir, "..", name),           // resources/../sing-box
+			filepath.Join(dir, "Resources", name),    // macOS app Resources
+			filepath.Join(dir, "..", "Resources", name),
+		)
+	}
+	return candidates
+}
+
 func validateBinary(path string) (string, error) {
 	info, err := os.Stat(path)
 	if err != nil {
@@ -242,7 +298,7 @@ func extractFromZip(content []byte) (map[string][]byte, error) {
 		}
 		base := filepath.Base(file.Name)
 		switch strings.ToLower(base) {
-		case "sing-box.exe", "wintun.dll":
+		case "sing-box.exe", "wintun.dll", "libcronet.dll", "license":
 		default:
 			continue
 		}

@@ -8,9 +8,11 @@ import (
 	"io"
 	"log"
 	"net"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -98,9 +100,11 @@ func (s *Server) dispatch(request Request) Response {
 	}
 	switch request.Op {
 	case OpPing, OpStatus:
+		_, coreErr := resolveSingBoxPath(s.Auth)
 		return Response{
 			OK: true, Version: Version, Protocol: ProtocolVersion,
-			Installed: true, Running: true, ActiveSessions: s.activeSessionIDs(),
+			Installed: true, Running: true, CoreReady: coreErr == nil,
+			ActiveSessions: s.activeSessionIDs(),
 		}
 	case OpStart:
 		if request.Session == nil {
@@ -210,11 +214,7 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		return fmt.Errorf("write protected DNS metadata: %w", err)
 	}
 
-	installer := &singbox.Installer{
-		BaseDir:         SystemStateDir(),
-		DisableOverride: true,
-	}
-	binaryPath, err := installer.Ensure(context.Background())
+	binaryPath, err := resolveSingBoxPath(s.Auth)
 	if err != nil {
 		cleanupFiles()
 		fail()
@@ -271,19 +271,49 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		s.mu.Unlock()
 		close(current.done)
 	}()
-	select {
-	case result := <-current.exited:
-		detail := strings.TrimSpace(result.log)
-		if detail == "" {
-			detail = "sing-box produced no diagnostic output"
+	controller := net.JoinHostPort("127.0.0.1", strconv.Itoa(spec.ControllerPort))
+	deadline := time.Now().Add(2 * time.Second)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		select {
+		case result := <-current.exited:
+			detail := strings.TrimSpace(result.log)
+			if detail == "" {
+				detail = "sing-box produced no diagnostic output"
+			}
+			if result.err != nil {
+				return fmt.Errorf("sing-box exited during startup: %w: %s", result.err, detail)
+			}
+			return fmt.Errorf("sing-box exited during startup: %s", detail)
+		case <-ticker.C:
+			if controllerReady(controller, spec.ControllerSecret) {
+				return nil
+			}
+			if time.Now().After(deadline) {
+				// Process is still alive; let the desktop-side waitReady continue.
+				return nil
+			}
 		}
-		if result.err != nil {
-			return fmt.Errorf("sing-box exited during startup: %w: %s", result.err, detail)
-		}
-		return fmt.Errorf("sing-box exited during startup: %s", detail)
-	case <-time.After(2 * time.Second):
-		return nil
 	}
+}
+
+func controllerReady(address, secret string) bool {
+	client := &http.Client{Timeout: 200 * time.Millisecond}
+	request, err := http.NewRequest(http.MethodGet, "http://"+address+"/", nil)
+	if err != nil {
+		return false
+	}
+	if secret != "" {
+		request.Header.Set("Authorization", "Bearer "+secret)
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return false
+	}
+	_, _ = io.Copy(io.Discard, io.LimitReader(response.Body, 1<<20))
+	_ = response.Body.Close()
+	return response.StatusCode == http.StatusOK || response.StatusCode == http.StatusNotFound
 }
 
 func tailText(content []byte, limit int) string {

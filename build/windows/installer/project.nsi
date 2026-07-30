@@ -75,15 +75,16 @@ ManifestDPIAware true
 
 Name "${INFO_PRODUCTNAME}"
 OutFile "..\..\bin\${INFO_PROJECTNAME}-${ARCH}-installer.exe" # Name of the installer's file.
+# Flat install dir like Clash Verge: Program Files\KubeLoop\ (not Company\Product).
 !ifdef WAILS_INSTALL_SCOPE
   !if "${WAILS_INSTALL_SCOPE}" == "user"
     InstallDir "$LOCALAPPDATA\Programs\${INFO_PRODUCTNAME}"
   !else
-    InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
+    InstallDir "$PROGRAMFILES64\${INFO_PRODUCTNAME}"
   !endif
 !else
-  InstallDir "$PROGRAMFILES64\${INFO_COMPANYNAME}\${INFO_PRODUCTNAME}"
-!endif # Default installing folder ($PROGRAMFILES is Program Files folder).
+  InstallDir "$PROGRAMFILES64\${INFO_PRODUCTNAME}"
+!endif
 ShowInstDetails show # This will always show the installation details.
 
 Function .onInit
@@ -99,6 +100,19 @@ Section
 
     !insertmacro wails.files
 
+    # Fixed sing-box core (pinned version) next to the app.
+    File "..\..\bin\sing-box.exe"
+    File /nonfatal "..\..\bin\libcronet.dll"
+    File /nonfatal "..\..\bin\wintun.dll"
+    File "..\..\bin\LICENSE.sing-box.txt"
+
+    # Privileged helper service + install/uninstall tools (Clash Verge layout).
+    SetOutPath "$INSTDIR\resources"
+    File "..\..\bin\resources\kubeloop-helper.exe"
+    File "..\..\bin\resources\kubeloop-helper-install.exe"
+    File "..\..\bin\resources\kubeloop-helper-uninstall.exe"
+    SetOutPath $INSTDIR
+
     CreateShortcut "$SMPROGRAMS\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
     CreateShortCut "$DESKTOP\${INFO_PRODUCTNAME}.lnk" "$INSTDIR\${PRODUCT_EXECUTABLE}"
 
@@ -110,6 +124,10 @@ SectionEnd
 
 Section "uninstall"
     !insertmacro wails.setShellContext
+
+    # Stop and remove the privileged helper service before deleting files.
+    IfFileExists "$INSTDIR\resources\kubeloop-helper-uninstall.exe" 0 +2
+      ExecWait '"$INSTDIR\resources\kubeloop-helper-uninstall.exe" --quiet'
 
     RMDir /r "$AppData\${PRODUCT_EXECUTABLE}" # Remove the WebView2 DataPath
 

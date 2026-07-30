@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,19 +14,38 @@ import (
 	"time"
 )
 
+const (
+	helperServiceName   = "kubeloop-helper"
+	helperInstallName   = "kubeloop-helper-install"
+	helperUninstallName = "kubeloop-helper-uninstall"
+)
+
 var (
-	bundledBinaryMu      sync.RWMutex
-	bundledBinary        []byte
+	bundledFilesMu       sync.RWMutex
+	bundledFiles         = map[string][]byte{}
+	bundledHashes        = map[string]string{}
 	materializeBundledMu sync.Mutex
 	ensureInstallMu      sync.Mutex
 )
 
-// SetBundledBinary supplies the platform helper embedded by the desktop
+// SetBundledBinary supplies the platform helper service embedded by the desktop
 // application. The standalone helper binary never calls it.
 func SetBundledBinary(content []byte) {
-	bundledBinaryMu.Lock()
-	defer bundledBinaryMu.Unlock()
-	bundledBinary = bytes.Clone(content)
+	SetBundledFile(helperBinaryName(helperServiceName), content)
+}
+
+// SetBundledFile supplies a named helper-related binary embedded by the desktop app.
+func SetBundledFile(name string, content []byte) {
+	bundledFilesMu.Lock()
+	defer bundledFilesMu.Unlock()
+	if len(content) == 0 {
+		delete(bundledFiles, name)
+		delete(bundledHashes, name)
+		return
+	}
+	bundledFiles[name] = bytes.Clone(content)
+	sum := sha256.Sum256(content)
+	bundledHashes[name] = hex.EncodeToString(sum[:])
 }
 
 // GetStatus probes whether the helper is installed and reachable.
@@ -54,6 +73,7 @@ func GetStatus(ctx context.Context) Status {
 		return status
 	}
 	status.Running = true
+	status.CoreReady = response.CoreReady
 	status.Version = response.Version
 	status.Protocol = response.Protocol
 	return status
@@ -66,7 +86,7 @@ func EnsureInstall(ctx context.Context) error {
 
 	status := GetStatus(ctx)
 	if status.Running && status.Version == Version &&
-		status.Protocol == ProtocolVersion {
+		status.Protocol == ProtocolVersion && status.CoreReady {
 		return nil
 	}
 	source, err := LocateBundledHelper()
@@ -74,6 +94,10 @@ func EnsureInstall(ctx context.Context) error {
 		return err
 	}
 	sourceSHA256, err := bundledHelperSHA256(source)
+	if err != nil {
+		return err
+	}
+	singBoxPath, err := LocateBundledSingBox()
 	if err != nil {
 		return err
 	}
@@ -85,7 +109,7 @@ func EnsureInstall(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	if err := ElevateInstall(ctx, source, sourceSHA256, token, currentUID(), home); err != nil {
+	if err := ElevateInstall(ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath); err != nil {
 		return err
 	}
 	deadline := time.Now().Add(20 * time.Second)
@@ -100,8 +124,12 @@ func EnsureInstall(ctx context.Context) error {
 		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
 		response, err := client.Ping(pingCtx)
 		cancel()
-		if err == nil && response.Protocol == ProtocolVersion {
+		if err == nil && response.Protocol == ProtocolVersion && response.CoreReady {
 			return nil
+		}
+		if err == nil && response.Protocol == ProtocolVersion && !response.CoreReady {
+			lastErr = fmt.Errorf("helper is running but bundled sing-box is not configured")
+			continue
 		}
 		if err != nil {
 			lastErr = err
@@ -112,7 +140,7 @@ func EnsureInstall(ctx context.Context) error {
 				ProtocolVersion,
 			)
 		}
-		time.Sleep(300 * time.Millisecond)
+		time.Sleep(100 * time.Millisecond)
 	}
 	if lastErr != nil {
 		return fmt.Errorf("helper did not become ready after install: %w", lastErr)
@@ -130,10 +158,41 @@ func Uninstall(ctx context.Context) error {
 }
 
 func LocateBundledHelper() (string, error) {
-	if path, ok, err := materializeBundledHelper(); ok || err != nil {
+	return locateBundledTool(helperServiceName)
+}
+
+func LocateBundledInstallTool() (string, error) {
+	if runtime.GOOS != "windows" {
+		return LocateBundledHelper()
+	}
+	return locateBundledTool(helperInstallName)
+}
+
+func LocateBundledUninstallTool() (string, error) {
+	if runtime.GOOS != "windows" {
+		return LocateBundledHelper()
+	}
+	return locateBundledTool(helperUninstallName)
+}
+
+func locateBundledTool(baseName string) (string, error) {
+	name := helperBinaryName(baseName)
+	// Prefer on-disk package resources (Program Files\...\resources) over
+	// materializing the embedded copy — avoids multi-MB read/write on every elevate.
+	if path, err := findBundledToolOnDisk(name); err == nil {
+		return path, nil
+	}
+	if path, ok, err := materializeBundledFile(name); ok || err != nil {
 		return path, err
 	}
+	if path, lookErr := exec.LookPath(name); lookErr == nil {
+		return path, nil
+	}
+	exe, _ := os.Executable()
+	return "", fmt.Errorf("%s binary not found near %s", name, exe)
+}
 
+func findBundledToolOnDisk(name string) (string, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return "", err
@@ -143,23 +202,26 @@ func LocateBundledHelper() (string, error) {
 		return "", err
 	}
 	dir := filepath.Dir(exe)
-	name := "kubeloop-helper"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
-	// Prefer Resources (macOS Contents/Resources, or a Resources/ next to the binary).
-	// Keep Helpers / same-dir fallbacks for older packages and local builds.
 	candidates := []string{
-		filepath.Join(dir, "..", "Resources", name), // macOS: Contents/MacOS/../Resources
+		filepath.Join(dir, "resources", name),
 		filepath.Join(dir, "Resources", name),
+		filepath.Join(dir, "..", "Resources", name),
 		filepath.Join(dir, name),
 		filepath.Join(dir, "Helpers", name),
 		filepath.Join(dir, "..", "Helpers", name),
+		filepath.Join("build", "bin", "resources", name),
 		filepath.Join("build", "bin", "Resources", name),
 		filepath.Join("build", "bin", name),
 	}
+	if installRoot := filepath.Dir(BinaryInstallPath()); installRoot != "" {
+		candidates = append([]string{
+			filepath.Join(installRoot, name),
+			filepath.Join(filepath.Dir(installRoot), "resources", name),
+		}, candidates...)
+	}
 	if cwd, cwdErr := os.Getwd(); cwdErr == nil {
 		candidates = append(candidates,
+			filepath.Join(cwd, "build", "bin", "resources", name),
 			filepath.Join(cwd, "build", "bin", "Resources", name),
 			filepath.Join(cwd, "build", "bin", name),
 			filepath.Join(cwd, name),
@@ -171,19 +233,21 @@ func LocateBundledHelper() (string, error) {
 			return candidate, nil
 		}
 	}
-	if path, lookErr := exec.LookPath(name); lookErr == nil {
-		return path, nil
-	}
-	return "", fmt.Errorf("kubeloop-helper binary not found near %s", exe)
+	return "", fmt.Errorf("%s not found on disk", name)
 }
 
 func materializeBundledHelper() (string, bool, error) {
+	return materializeBundledFile(helperBinaryName(helperServiceName))
+}
+
+func materializeBundledFile(name string) (string, bool, error) {
 	materializeBundledMu.Lock()
 	defer materializeBundledMu.Unlock()
 
-	bundledBinaryMu.RLock()
-	content := bytes.Clone(bundledBinary)
-	bundledBinaryMu.RUnlock()
+	bundledFilesMu.RLock()
+	content := bytes.Clone(bundledFiles[name])
+	wantHash := bundledHashes[name]
+	bundledFilesMu.RUnlock()
 	if len(content) == 0 {
 		return "", false, nil
 	}
@@ -192,7 +256,7 @@ func materializeBundledHelper() (string, bool, error) {
 	if err != nil {
 		return "", true, err
 	}
-	dir = filepath.Join(dir, "helper")
+	dir = filepath.Join(dir, "helper", "resources")
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return "", true, fmt.Errorf("create bundled helper directory: %w", err)
 	}
@@ -200,16 +264,16 @@ func materializeBundledHelper() (string, bool, error) {
 		return "", true, fmt.Errorf("secure bundled helper directory: %w", err)
 	}
 
-	name := "kubeloop-helper"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
-	}
 	path := filepath.Join(dir, name)
-	if current, readErr := os.ReadFile(path); readErr == nil && bytes.Equal(current, content) {
-		if err := os.Chmod(path, 0o700); err != nil && runtime.GOOS != "windows" {
-			return "", true, fmt.Errorf("make bundled helper executable: %w", err)
+	if info, statErr := os.Stat(path); statErr == nil && info.Size() == int64(len(content)) {
+		if wantHash != "" {
+			if actual, hashErr := fileSHA256(path); hashErr == nil && actual == wantHash {
+				if err := os.Chmod(path, 0o700); err != nil && runtime.GOOS != "windows" {
+					return "", true, fmt.Errorf("make bundled helper executable: %w", err)
+				}
+				return path, true, nil
+			}
 		}
-		return path, true, nil
 	}
 
 	temp, err := os.CreateTemp(dir, ".kubeloop-helper-*")
@@ -229,8 +293,6 @@ func materializeBundledHelper() (string, bool, error) {
 	if err := temp.Close(); err != nil {
 		return "", true, fmt.Errorf("close bundled helper: %w", err)
 	}
-	// Removing first also makes replacement work on Windows, where Rename does
-	// not replace an existing destination.
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
 		return "", true, fmt.Errorf("replace bundled helper: %w", err)
 	}
@@ -241,22 +303,19 @@ func materializeBundledHelper() (string, bool, error) {
 }
 
 func bundledHelperSHA256(source string) (string, error) {
-	bundledBinaryMu.RLock()
-	if len(bundledBinary) > 0 {
-		sum := sha256.Sum256(bundledBinary)
-		bundledBinaryMu.RUnlock()
-		return fmt.Sprintf("%x", sum), nil
+	name := helperBinaryName(helperServiceName)
+	bundledFilesMu.RLock()
+	if hash := bundledHashes[name]; hash != "" {
+		bundledFilesMu.RUnlock()
+		return hash, nil
 	}
-	bundledBinaryMu.RUnlock()
+	bundledFilesMu.RUnlock()
+	return fileSHA256(source)
+}
 
-	file, err := os.Open(source)
-	if err != nil {
-		return "", fmt.Errorf("open bundled helper for hashing: %w", err)
+func helperBinaryName(base string) string {
+	if runtime.GOOS == "windows" {
+		return base + ".exe"
 	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("hash bundled helper: %w", err)
-	}
-	return fmt.Sprintf("%x", hash.Sum(nil)), nil
+	return base
 }

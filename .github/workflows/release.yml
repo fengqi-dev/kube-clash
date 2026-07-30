@@ -142,7 +142,17 @@ jobs:
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $arch = (go env GOARCH).Trim()
           $version = ("${{ github.ref_name }}" -replace '^v', '')
-          Compress-Archive -Path "build/bin/KubeLoop.exe" -DestinationPath "dist/kubeloop-$version-windows-$arch.zip"
+          $stage = New-Item -ItemType Directory -Force -Path "dist/stage-windows"
+          Copy-Item "build/bin/KubeLoop.exe" $stage.FullName
+          Copy-Item "build/bin/sing-box.exe" $stage.FullName
+          Copy-Item "build/bin/LICENSE.sing-box.txt" $stage.FullName
+          foreach ($sidecar in @("libcronet.dll", "wintun.dll")) {
+            $path = Join-Path "build/bin" $sidecar
+            if (Test-Path $path) { Copy-Item $path $stage.FullName }
+          }
+          Copy-Item -Recurse "build/bin/resources" $stage.FullName
+          Compress-Archive -Path "$($stage.FullName)\*" -DestinationPath "dist/kubeloop-$version-windows-$arch.zip"
+          Remove-Item -Recurse -Force $stage.FullName
           $installer = Get-ChildItem "build/bin/*-installer.exe" | Select-Object -First 1
           if (-not $installer) {
             throw "NSIS installer not found in build/bin"

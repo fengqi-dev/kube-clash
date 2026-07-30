@@ -2,7 +2,9 @@ package main
 
 import (
 	"embed"
-	"runtime"
+	"io/fs"
+	"path"
+	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 )
@@ -15,12 +17,22 @@ import (
 var embeddedHelperFiles embed.FS
 
 func init() {
-	name := "kubeloop-helper"
-	if runtime.GOOS == "windows" {
-		name += ".exe"
+	entries, err := fs.ReadDir(embeddedHelperFiles, "build/embedded")
+	if err != nil {
+		return
 	}
-	content, err := embeddedHelperFiles.ReadFile("build/embedded/" + name)
-	if err == nil {
-		helper.SetBundledBinary(content)
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if name == "README.md" || strings.HasPrefix(name, ".") {
+			continue
+		}
+		content, readErr := embeddedHelperFiles.ReadFile(path.Join("build/embedded", name))
+		if readErr != nil || len(content) == 0 {
+			continue
+		}
+		helper.SetBundledFile(name, content)
 	}
 }

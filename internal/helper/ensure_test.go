@@ -16,7 +16,7 @@ func TestMaterializeBundledHelper(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 
 	SetBundledBinary([]byte("first helper"))
-	t.Cleanup(func() { SetBundledBinary(nil) })
+	t.Cleanup(func() { SetBundledFile(helperBinaryName(helperServiceName), nil) })
 
 	path, ok, err := materializeBundledHelper()
 	if err != nil {
@@ -30,7 +30,7 @@ func TestMaterializeBundledHelper(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		name += ".exe"
 	}
-	wantPath := filepath.Join(home, ".kubeloop", "helper", name)
+	wantPath := filepath.Join(home, ".kubeloop", "helper", "resources", name)
 	if path != wantPath {
 		t.Fatalf("materialized path = %q, want %q", path, wantPath)
 	}
