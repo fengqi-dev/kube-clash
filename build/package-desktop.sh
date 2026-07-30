@@ -19,7 +19,7 @@ fi
 mkdir -p "${DIST_DIR}"
 
 package_linux() {
-  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-linux-${ARCH}.tar.gz" .
+  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-linux-${ARCH}.tar.gz" .
 
   if [[ ! -x "${BIN_DIR}/KubeLoop" ]]; then
     echo "expected Linux binary at build/bin/KubeLoop" >&2
@@ -61,14 +61,14 @@ package_darwin() {
     mv "${app_src}" "${app_stage}"
   fi
 
-  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-darwin-${ARCH}.tar.gz" KubeLoop.app
+  tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-darwin-${ARCH}.tar.gz" KubeLoop.app
 
   stage="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-dmg.XXXXXX")"
   trap 'rm -rf "${stage}"' RETURN
   cp -R "${app_stage}" "${stage}/KubeLoop.app"
   ln -s /Applications "${stage}/Applications"
 
-  dmg="${DIST_DIR}/kubeloop-darwin-${ARCH}.dmg"
+  dmg="${DIST_DIR}/kubeloop-${version}-darwin-${ARCH}.dmg"
   rm -f "${dmg}"
   hdiutil create \
     -volname "KubeLoop" \
