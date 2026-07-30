@@ -53,15 +53,13 @@ asset_exists() {
   printf '%s' "${json}" | grep -Fq "\"name\": \"${1}\""
 }
 
-pick_asset() {
-  local name
-  for name in "$@"; do
-    if asset_exists "${name}"; then
-      printf '%s' "${name}"
-      return 0
-    fi
-  done
-  return 1
+require_asset() {
+  local name="$1"
+  if ! asset_exists "${name}"; then
+    echo "missing ${name} in ${TAG}" >&2
+    exit 1
+  fi
+  printf '%s' "${name}"
 }
 
 download_asset() {
@@ -75,13 +73,7 @@ download_asset() {
 mkdir -p "${DEST}"
 
 if [[ "${os}" == "darwin" ]]; then
-  asset="$(pick_asset \
-    "kubeloop-${ver}-darwin-${arch}.dmg" \
-    "kubeloop-darwin-${arch}.dmg" || true)"
-  if [[ -z "${asset}" ]]; then
-    echo "no DMG for macOS/${arch} in ${TAG}" >&2
-    exit 1
-  fi
+  asset="$(require_asset "kubeloop-${ver}-darwin-${arch}.dmg")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Saved ${out}"
@@ -110,12 +102,7 @@ detect_linux_package() {
 
 install_deb() {
   local asset out
-  asset="$(pick_asset \
-    "kubeloop-${ver}-linux-${arch}.deb" \
-    "kubeloop_${ver}_${arch}.deb" || true)"
-  if [[ -z "${asset}" ]]; then
-    return 1
-  fi
+  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.deb")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Installing ${out}..."
@@ -129,12 +116,7 @@ install_deb() {
 
 install_rpm() {
   local asset out
-  asset="$(pick_asset \
-    "kubeloop-${ver}-linux-${arch}.rpm" \
-    "kubeloop-${ver}-1.${arch}.rpm" || true)"
-  if [[ -z "${asset}" ]]; then
-    return 1
-  fi
+  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.rpm")"
   out="${DEST}/${asset}"
   download_asset "${asset}" "${out}"
   echo "Installing ${out}..."
@@ -148,13 +130,7 @@ install_rpm() {
 
 install_tarball() {
   local asset tmp
-  asset="$(pick_asset \
-    "kubeloop-${ver}-linux-${arch}.tar.gz" \
-    "kubeloop-linux-${arch}.tar.gz" || true)"
-  if [[ -z "${asset}" ]]; then
-    echo "no matching linux/${arch} tarball in ${TAG}" >&2
-    exit 1
-  fi
+  asset="$(require_asset "kubeloop-${ver}-linux-${arch}.tar.gz")"
   tmp="$(mktemp "${TMPDIR:-/tmp}/kubeloop.XXXXXX")"
   cleanup() { rm -f "${tmp}"; }
   trap cleanup EXIT
@@ -170,21 +146,8 @@ install_tarball() {
   fi
 }
 
-pkg="$(detect_linux_package)"
-case "${pkg}" in
-  deb)
-    if ! install_deb; then
-      echo "no .deb for linux/${arch} in ${TAG}; falling back to tarball" >&2
-      install_tarball
-    fi
-    ;;
-  rpm)
-    if ! install_rpm; then
-      echo "no .rpm for linux/${arch} in ${TAG}; falling back to tarball" >&2
-      install_tarball
-    fi
-    ;;
-  tarball)
-    install_tarball
-    ;;
+case "$(detect_linux_package)" in
+  deb) install_deb ;;
+  rpm) install_rpm ;;
+  tarball) install_tarball ;;
 esac
