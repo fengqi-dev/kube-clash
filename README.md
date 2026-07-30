@@ -58,7 +58,7 @@ cluster. You do not need `kubectl` installed locally.
    - **macOS**: open the `.dmg` and drag `KubeLoop.app` into Applications (or extract the
      `.tar.gz`). If Gatekeeper blocks it, right-click → **Open**, or run
      `xattr -cr KubeLoop.app`.
-   - **Windows**: run the NSIS installer (`kubeloop-windows-*-installer.exe`), or extract the
+   - **Windows**: run the NSIS installer (`kubeloop-*-windows-*-installer.exe`), or extract the
      portable zip. If SmartScreen appears, choose **More info** → **Run anyway**.
    - **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.
 2. Ensure your machine can reach the cluster API with a normal kubeconfig.

@@ -141,12 +141,13 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist | Out-Null
           $arch = (go env GOARCH).Trim()
-          Compress-Archive -Path "build/bin/KubeLoop.exe" -DestinationPath "dist/kubeloop-windows-$arch.zip"
+          $version = ("${{ github.ref_name }}" -replace '^v', '')
+          Compress-Archive -Path "build/bin/KubeLoop.exe" -DestinationPath "dist/kubeloop-$version-windows-$arch.zip"
           $installer = Get-ChildItem "build/bin/*-installer.exe" | Select-Object -First 1
           if (-not $installer) {
             throw "NSIS installer not found in build/bin"
           }
-          Copy-Item $installer.FullName "dist/kubeloop-windows-$arch-installer.exe"
+          Copy-Item $installer.FullName "dist/kubeloop-$version-windows-$arch-installer.exe"
 
       - name: Upload desktop artifact
         uses: actions/upload-artifact@v7
@@ -182,10 +183,11 @@ jobs:
           GOARCH: ${{ matrix.arch }}
         run: |
           mkdir -p dist
+          version="${GITHUB_REF_NAME#v}"
           CGO_ENABLED=0 GOOS=linux go build \
             -trimpath \
             -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
-            -o "dist/kubeloop-gateway-linux-${GOARCH}" \
+            -o "dist/kubeloop-gateway-${version}-linux-${GOARCH}" \
             ./cmd/kubeloop-gateway
 
       - name: Upload Gateway artifact

@@ -53,7 +53,7 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
    （darwin / windows / linux × amd64 / arm64；或按下方说明自行构建）。
    - **macOS**：打开 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
      若被 Gatekeeper 拦截，可右键 → **打开**，或执行 `xattr -cr KubeLoop.app`。
-   - **Windows**：运行 NSIS 安装包（`kubeloop-windows-*-installer.exe`），或解压便携 zip。
+   - **Windows**：运行 NSIS 安装包（`kubeloop-*-windows-*-installer.exe`），或解压便携 zip。
      若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
    - **Linux**：安装 `.deb` / `.rpm`，或解压 `.tar.gz` 后运行 `KubeLoop`。
 2. 确认本机 kubeconfig 能正常访问目标集群 API。
