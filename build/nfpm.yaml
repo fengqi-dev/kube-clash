@@ -30,6 +30,12 @@ contents:
     dst: /usr/bin/kubeloop
     file_info:
       mode: 0755
+  - src: ./build/bin/sing-box
+    dst: /usr/lib/kubeloop/sing-box
+    file_info:
+      mode: 0755
+  - src: ./build/bin/LICENSE.sing-box.txt
+    dst: /usr/share/doc/kubeloop/LICENSE.sing-box.txt
   - src: ./build/linux/kubeloop.desktop
     dst: /usr/share/applications/kubeloop.desktop
   - src: ./build/appicon.png

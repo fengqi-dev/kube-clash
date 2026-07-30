@@ -3,11 +3,8 @@
 package helper
 
 import (
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -63,56 +60,38 @@ func executeElevatedRequest(operation, requestPath string) error {
 }
 
 func elevatedInstall(request elevatedRequest) error {
-	executable, err := os.Executable()
+	source := request.ServiceSource
+	if source == "" {
+		executable, err := os.Executable()
+		if err != nil {
+			return fmt.Errorf("find elevated install tool: %w", err)
+		}
+		executable, err = filepath.EvalSymlinks(executable)
+		if err != nil {
+			return fmt.Errorf("resolve elevated install tool: %w", err)
+		}
+		source = filepath.Join(filepath.Dir(executable), "kubeloop-helper.exe")
+	}
+	source, err := filepath.EvalSymlinks(source)
 	if err != nil {
-		return fmt.Errorf("find elevated helper executable: %w", err)
+		return fmt.Errorf("resolve helper service source: %w", err)
 	}
-	executable, err = filepath.EvalSymlinks(executable)
-	if err != nil {
-		return fmt.Errorf("resolve elevated helper executable: %w", err)
-	}
-	stagingRoot := filepath.Dir(BinaryInstallPath())
-	if err := os.MkdirAll(stagingRoot, 0o755); err != nil {
-		return fmt.Errorf("create helper staging root: %w", err)
-	}
-	workDir, err := os.MkdirTemp(stagingRoot, ".install-")
-	if err != nil {
-		return fmt.Errorf("create helper staging directory: %w", err)
-	}
-	defer os.RemoveAll(workDir)
-	if err := configureElevatedStagingAccess(workDir); err != nil {
-		return err
-	}
-	staged := filepath.Join(workDir, "kubeloop-helper.exe")
-	if err := copyFile(executable, staged, 0o700); err != nil {
-		return fmt.Errorf("stage elevated helper: %w", err)
-	}
-	actual, err := fileSHA256(staged)
-	if err != nil {
-		return fmt.Errorf("hash staged helper: %w", err)
-	}
-	if !strings.EqualFold(actual, request.ExpectedSHA256) {
-		return fmt.Errorf("bundled helper checksum mismatch")
+	if request.ServiceSHA256 != "" {
+		actual, hashErr := fileSHA256(source)
+		if hashErr != nil {
+			return fmt.Errorf("hash helper service source: %w", hashErr)
+		}
+		if !strings.EqualFold(actual, request.ServiceSHA256) {
+			return fmt.Errorf("bundled helper checksum mismatch")
+		}
 	}
 	return InstallFromCLI(
-		staged,
+		source,
 		request.Token,
 		request.UID,
 		request.Version,
 		request.HomeDir,
 		request.OwnerSID,
+		request.SingBoxPath,
 	)
-}
-
-func fileSHA256(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", err
-	}
-	defer file.Close()
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", err
-	}
-	return hex.EncodeToString(hash.Sum(nil)), nil
 }

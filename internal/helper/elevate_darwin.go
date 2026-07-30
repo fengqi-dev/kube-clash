@@ -10,7 +10,7 @@ import (
 	"strings"
 )
 
-func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir string) error {
+func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir, singBoxPath string) error {
 	command := `set -eu
 workdir="$(mktemp -d "${TMPDIR:-/private/tmp}/kubeloop-helper.XXXXXX")"
 trap 'rm -rf "$workdir"' EXIT HUP INT TERM
@@ -26,7 +26,8 @@ fi
 "$staged" install --source "$staged" --token ` + shellQuote(token) +
 		` --uid ` + shellQuote(strconv.Itoa(uid)) +
 		` --version ` + shellQuote(Version) +
-		` --home ` + shellQuote(homeDir)
+		` --home ` + shellQuote(homeDir) +
+		` --sing-box ` + shellQuote(singBoxPath)
 	script := "do shell script " + strconv.Quote(command) +
 		" with administrator privileges"
 	cmd := exec.CommandContext(ctx, "osascript", "-e", script)
