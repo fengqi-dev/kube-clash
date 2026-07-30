@@ -79,7 +79,7 @@ const dictionary = {
       "Extract the portable zip and run KubeLoop. If SmartScreen appears, choose More info → Run anyway.",
     "started.install.linux.shellTitle": "Shell",
     "started.install.linux.shell":
-      "Download and install the latest .deb/.rpm for your distro (falls back to the tarball):",
+      "Download and install the latest .deb/.rpm for your distro:",
     "started.install.linux.pkgTitle": "Package",
     "started.install.linux.pkg":
       "Install kubeloop-VERSION-linux-ARCH.deb or .rpm from GitHub Releases.",
@@ -332,8 +332,7 @@ const dictionary = {
     "started.install.windows.portable":
       "解压便携 zip 后运行 KubeLoop。若出现 SmartScreen，选择「更多信息 → 仍要运行」。",
     "started.install.linux.shellTitle": "Shell",
-    "started.install.linux.shell":
-      "按发行版下载并安装最新 .deb/.rpm（没有软件包时回退到压缩包）：",
+    "started.install.linux.shell": "按发行版下载并安装最新 .deb/.rpm：",
     "started.install.linux.pkgTitle": "软件包",
     "started.install.linux.pkg":
       "从 GitHub Releases 安装 kubeloop-VERSION-linux-ARCH.deb 或 .rpm。",
