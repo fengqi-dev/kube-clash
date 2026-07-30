@@ -103,6 +103,9 @@ func startTrafficDataPlane(
 			_ = command.Process.Kill()
 			<-done
 		}
+		if t.Failed() {
+			t.Logf("sing-box traffic data plane log:\n%s", output.String())
+		}
 	})
 
 	endpoints := trafficEndpoints(reserved.traffic, username, password)
@@ -154,7 +157,16 @@ func featureOnlyConfig(t *testing.T, content []byte) []byte {
 		t.Fatalf("generated config has %d feature inbounds, want %d", len(inbounds), len(allowed))
 	}
 	config["inbounds"] = inbounds
-	config["log"] = map[string]any{"disabled": true}
+	config["log"] = map[string]any{"level": "debug", "timestamp": true}
+	// The production config enables automatic interface detection to keep TUN
+	// traffic from looping. This unprivileged fixture removes the TUN inbound,
+	// so forcing Direct traffic onto the runner's default Docker interface
+	// would make loopback UDP targets unreachable on Linux.
+	route, ok := config["route"].(map[string]any)
+	if !ok {
+		t.Fatal("generated config has no route section")
+	}
+	route["auto_detect_interface"] = false
 	delete(config, "experimental")
 	result, err := json.Marshal(config)
 	if err != nil {

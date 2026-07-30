@@ -112,17 +112,21 @@ func TestPortForwardSessionTCPAndUDP(t *testing.T) {
 				}
 			}()
 
+			deadline := time.Now().Add(30 * time.Second)
 			var got string
-			if test.protocol == "udp" {
-				got, err = dialLocalUDPEcho(info.Address, "ping")
-			} else {
-				got, err = dialLocalEcho(info.Address, "ping")
-			}
-			if err != nil {
-				t.Fatal(err)
-			}
-			if got != test.want {
-				t.Fatalf("response=%q, want %q", got, test.want)
+			for {
+				if test.protocol == "udp" {
+					got, err = dialLocalUDPEcho(info.Address, "ping")
+				} else {
+					got, err = dialLocalEcho(info.Address, "ping")
+				}
+				if err == nil && got == test.want {
+					break
+				}
+				if time.Now().After(deadline) {
+					t.Fatalf("response=%q err=%v, want %q", got, err, test.want)
+				}
+				time.Sleep(250 * time.Millisecond)
 			}
 		})
 	}
