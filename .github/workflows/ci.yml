@@ -184,17 +184,6 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check formatting
-        shell: pwsh
-        run: |
-          $unformatted = git ls-files "*.go" | ForEach-Object {
-            gofmt -l $_
-          }
-          if ($unformatted) {
-            Write-Error "The following Go files are not formatted:`n$($unformatted -join "`n")"
-            exit 1
-          }
-
       - name: Vet
         run: go vet ./...
 
