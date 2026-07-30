@@ -22,8 +22,8 @@ const (
 
 // HostAlias maps a DNS name to an IPv4 address for the local dns-in resolver.
 type HostAlias struct {
-	Domain string
-	IP     string
+	Domain string `json:"domain"`
+	IP     string `json:"ip"`
 }
 
 type Options struct {
@@ -276,6 +276,9 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 		if strings.ContainsAny(domain, " \t/") {
 			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
 		}
+		if !safeDNSName(domain) {
+			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
+		}
 		ip, err := netip.ParseAddr(strings.TrimSpace(item.IP))
 		if err != nil || !ip.Is4() {
 			return nil, fmt.Errorf("invalid host alias IPv4 %q", item.IP)
@@ -288,6 +291,24 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
 	return out, nil
+}
+
+func safeDNSName(value string) bool {
+	if value == "" || len(value) > 253 || strings.HasPrefix(value, ".") ||
+		strings.HasSuffix(value, ".") {
+		return false
+	}
+	for _, label := range strings.Split(value, ".") {
+		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // SearchDomains returns Kubernetes-style DNS search suffixes for short names

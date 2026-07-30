@@ -18,6 +18,7 @@ var (
 	bundledBinaryMu      sync.RWMutex
 	bundledBinary        []byte
 	materializeBundledMu sync.Mutex
+	ensureInstallMu      sync.Mutex
 )
 
 // SetBundledBinary supplies the platform helper embedded by the desktop
@@ -33,10 +34,6 @@ func GetStatus(ctx context.Context) Status {
 	status := Status{
 		Expected: Version,
 		Socket:   SocketPath(),
-	}
-	if Disabled() {
-		status.Error = "disabled by KUBELOOP_HELPER=0"
-		return status
 	}
 	if _, err := os.Stat(BinaryInstallPath()); err == nil {
 		status.Installed = true
@@ -58,16 +55,18 @@ func GetStatus(ctx context.Context) Status {
 	}
 	status.Running = true
 	status.Version = response.Version
+	status.Protocol = response.Protocol
 	return status
 }
 
 // EnsureInstall installs or upgrades the helper when missing/outdated, then waits for ping.
 func EnsureInstall(ctx context.Context) error {
-	if Disabled() {
-		return fmt.Errorf("helper disabled by KUBELOOP_HELPER=0")
-	}
+	ensureInstallMu.Lock()
+	defer ensureInstallMu.Unlock()
+
 	status := GetStatus(ctx)
-	if status.Running && status.Version == Version {
+	if status.Running && status.Version == Version &&
+		status.Protocol == ProtocolVersion {
 		return nil
 	}
 	source, err := LocateBundledHelper()
@@ -98,9 +97,9 @@ func EnsureInstall(ctx context.Context) error {
 		}
 		client := &Client{Token: token, Dial: dialHelper}
 		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, err := client.Ping(pingCtx)
+		response, err := client.Ping(pingCtx)
 		cancel()
-		if err == nil {
+		if err == nil && response.Protocol == ProtocolVersion {
 			return nil
 		}
 		time.Sleep(300 * time.Millisecond)

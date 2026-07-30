@@ -99,8 +99,10 @@ KubeLoop is built so cluster access stays scoped and recoverable:
   remains direct.
 - Exchange / Mirror / Preview changes to Services, Endpoints, and EndpointSlices are always
   restored on stop or disconnect.
-- The privileged helper only accepts local IPC for session start/stop under your
-  `~/.kubeloop` session paths — it does not talk to the Kubernetes API.
+- The privileged helper accepts authenticated local IPC with a field-constrained
+  session description — never caller-supplied commands, executable paths, or config
+  paths. It regenerates config and manages the verified core under protected system
+  storage, and never talks to the Kubernetes API.
 
 ## Platform notes
 
@@ -118,13 +120,12 @@ Requirements: Go 1.26+, Node.js 22+, [Wails](https://wails.io) v2.13.
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
 npm install --prefix frontend
-wails dev
+wails dev # automatically builds and embeds the platform helper
 ```
 
 ```bash
 # VERSION is injected into Go, the Vite frontend, helper, and Gateway image/binary
 VERSION=v0.1.0
-./build/bundle-helper.sh "$VERSION"   # embedded; materialized under ~/.kubeloop/helper at runtime
 VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
 # Gateway image (release CI): docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
 ```
@@ -132,13 +133,8 @@ VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
 Useful overrides while developing:
 
 ```bash
-# Use a local sing-box / Gateway image
-KUBELOOP_SINGBOX_PATH=/path/to/sing-box \
-KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev \
-wails dev
-
-# Skip the installed helper; elevate on each Connect instead
-KUBELOOP_HELPER=0 wails dev
+# Use a local Gateway image
+KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
 ```
 
 ```bash

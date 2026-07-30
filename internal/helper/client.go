@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
 // Client talks to the privileged helper over a local socket/pipe.
@@ -31,14 +33,12 @@ func (c *Client) Status(ctx context.Context) (Response, error) {
 	return c.roundTrip(ctx, Request{Op: OpStatus})
 }
 
-func (c *Client) Start(ctx context.Context, workDir, binaryPath string) (Response, error) {
-	return c.roundTrip(ctx, Request{
-		Op: OpStart, WorkDir: workDir, BinaryPath: binaryPath,
-	})
+func (c *Client) Start(ctx context.Context, session singbox.SessionSpec) (Response, error) {
+	return c.roundTrip(ctx, Request{Op: OpStart, Session: &session})
 }
 
-func (c *Client) Stop(ctx context.Context, workDir string) (Response, error) {
-	return c.roundTrip(ctx, Request{Op: OpStop, WorkDir: workDir})
+func (c *Client) Stop(ctx context.Context, sessionID string) (Response, error) {
+	return c.roundTrip(ctx, Request{Op: OpStop, SessionID: sessionID})
 }
 
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
@@ -55,7 +55,11 @@ func (c *Client) roundTrip(ctx context.Context, request Request) (Response, erro
 		return Response{}, err
 	}
 	defer conn.Close()
-	_ = conn.SetDeadline(time.Now().Add(30 * time.Second))
+	timeout := 30 * time.Second
+	if request.Op == OpStart {
+		timeout = 3 * time.Minute
+	}
+	_ = conn.SetDeadline(time.Now().Add(timeout))
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = conn.SetDeadline(deadline)
 	}

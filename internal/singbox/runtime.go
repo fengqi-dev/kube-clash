@@ -10,8 +10,6 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -24,7 +22,7 @@ import (
 // PrivilegedStartFunc starts sing-box via an external privileged helper.
 // It returns a stop function used during Close.
 type PrivilegedStartFunc func(
-	ctx context.Context, binaryPath, workDir string,
+	ctx context.Context, spec SessionSpec,
 ) (stop func(context.Context) error, err error)
 
 type RunningCore interface {
@@ -37,9 +35,7 @@ type RunningCore interface {
 const DefaultMetricsInterval = time.Second
 
 type Runtime struct {
-	Installer       *Installer
 	HTTPClient      *http.Client
-	StartCommand    func(string, string, io.Writer) (*exec.Cmd, error)
 	PrivilegedStart PrivilegedStartFunc
 }
 
@@ -84,79 +80,43 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
-	config, err := Generate(discovery, Options{
+	spec := SessionSpec{
+		ID:               "session-" + secret[:16],
+		PodCIDRs:         discovery.PodCIDRs,
+		ServiceCIDRs:     discovery.ServiceCIDRs,
+		ServiceIPs:       discovery.ServiceIPs,
+		ClusterDNSServer: discovery.DNSServer,
 		BridgeHost:       host,
 		BridgePort:       bridgePort,
 		ControllerPort:   controllerPort,
 		ControllerSecret: secret,
 		DNSHost:          DefaultDNSListen,
 		DNSPort:          internalDNSPort,
+		PublicDNSPort:    publicDNSPort,
 		TUNAddress:       tunAddress,
 		Namespace:        namespace,
 		Hosts:            normalizedHosts,
-	})
+	}
+	if r.PrivilegedStart == nil {
+		return nil, errors.New("privileged helper is required")
+	}
+	if err := spec.Validate(); err != nil {
+		return nil, err
+	}
+	meta, err := spec.DNS()
 	if err != nil {
 		return nil, err
 	}
-	installer := r.Installer
-	if installer == nil {
-		installer = &Installer{}
-	}
-	binaryPath, err := installer.Ensure(ctx)
-	if err != nil {
-		return nil, err
-	}
-	baseDir, err := installer.baseDir()
-	if err != nil {
-		return nil, err
-	}
-	sessionRoot := filepath.Join(baseDir, "sessions")
-	if err := os.MkdirAll(sessionRoot, 0o700); err != nil {
-		return nil, fmt.Errorf("create sing-box session directory: %w", err)
-	}
-	workDir, err := os.MkdirTemp(sessionRoot, "session-*")
-	if err != nil {
-		return nil, fmt.Errorf("create sing-box working directory: %w", err)
-	}
-	cleanup := func() { _ = os.RemoveAll(workDir) }
-	if err := os.WriteFile(filepath.Join(workDir, "config.json"), config, 0o600); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("write sing-box config: %w", err)
-	}
-	searchDomains := SearchDomains(namespace)
-	resolverDomains := ResolverDomains(namespace, normalizedHosts...)
-	dnsMeta, _ := json.Marshal(map[string]any{
-		"listen":  DefaultDNSListen,
-		"port":    publicDNSPort,
-		"domains": resolverDomains,
-		"search":  searchDomains,
-		"ndots":   5,
-	})
-	if err := os.WriteFile(filepath.Join(workDir, "dns-meta.json"), dnsMeta, 0o600); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("write sing-box dns metadata: %w", err)
-	}
-	if err := writeSearchDomainScripts(workDir, searchDomains); err != nil {
-		cleanup()
-		return nil, fmt.Errorf("write DNS search domain scripts: %w", err)
-	}
-	logPath := filepath.Join(workDir, "sing-box.log")
-	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
-	if err != nil {
-		cleanup()
-		return nil, fmt.Errorf("create sing-box log: %w", err)
-	}
+	searchDomains := meta.Search
+	resolverDomains := meta.Domains
 	dnsProxy, err := startDNSSearchProxy(
 		DefaultDNSListen, publicDNSPort, DefaultDNSListen, internalDNSPort, searchDomains,
 	)
 	if err != nil {
-		logFile.Close()
-		cleanup()
 		return nil, err
 	}
 	process := &Process{
-		done: make(chan struct{}), stopCh: make(chan struct{}), logFile: logFile,
-		workDir: workDir, logPath: logPath,
+		done: make(chan struct{}), stopCh: make(chan struct{}),
 		controllerAddress: net.JoinHostPort("127.0.0.1", strconv.Itoa(controllerPort)),
 		controllerSecret:  secret,
 		dnsPort:           publicDNSPort,
@@ -164,31 +124,12 @@ func (r *Runtime) Start(
 		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
 	}
-	if r.StartCommand == nil && r.PrivilegedStart != nil {
-		stop, startErr := r.PrivilegedStart(ctx, binaryPath, workDir)
-		if startErr != nil {
-			_ = dnsProxy.Close()
-			logFile.Close()
-			cleanup()
-			return nil, startErr
-		}
-		process.useHelper = true
-		process.helperStop = stop
-		_ = logFile.Close()
-		process.logFile = nil
-	} else {
-		cmd, startErr := r.startCommand(binaryPath, workDir, logFile)
-		if startErr != nil {
-			_ = dnsProxy.Close()
-			logFile.Close()
-			cleanup()
-			return nil, startErr
-		}
-		process.cmd = cmd
-		process.privilegedPIDPath = privilegedPIDPath(
-			workDir, r.StartCommand == nil && usesLifecycleWrapper(),
-		)
+	stop, startErr := r.PrivilegedStart(ctx, spec)
+	if startErr != nil {
+		_ = dnsProxy.Close()
+		return nil, startErr
 	}
+	process.helperStop = stop
 	go process.wait()
 	go func() {
 		select {
@@ -198,21 +139,10 @@ func (r *Runtime) Start(
 		}
 	}()
 	if err := r.waitReady(ctx, process); err != nil {
-		logOutput := process.logTail()
 		_ = process.Close()
-		if logOutput != "" {
-			return nil, fmt.Errorf("%w: %s", err, logOutput)
-		}
 		return nil, err
 	}
 	return process, nil
-}
-
-func (r *Runtime) startCommand(binaryPath, workDir string, output io.Writer) (*exec.Cmd, error) {
-	if r.StartCommand != nil {
-		return r.StartCommand(binaryPath, workDir, output)
-	}
-	return defaultStartCommand(binaryPath, workDir, output)
 }
 
 func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
@@ -245,14 +175,8 @@ func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
 }
 
 type Process struct {
-	cmd               *exec.Cmd
 	done              chan struct{}
 	stopCh            chan struct{}
-	logFile           *os.File
-	workDir           string
-	logPath           string
-	privilegedPIDPath string
-	useHelper         bool
 	helperStop        func(context.Context) error
 	controllerAddress string
 	controllerSecret  string
@@ -384,21 +308,10 @@ func (p *Process) request(ctx context.Context, path string) (*http.Response, err
 }
 
 func (p *Process) wait() {
-	if p.useHelper {
-		<-p.stopCh
-		p.errMu.Lock()
-		p.waitErr = nil
-		p.errMu.Unlock()
-		close(p.done)
-		return
-	}
-	err := p.cmd.Wait()
+	<-p.stopCh
 	p.errMu.Lock()
-	p.waitErr = err
+	p.waitErr = nil
 	p.errMu.Unlock()
-	if p.logFile != nil {
-		_ = p.logFile.Close()
-	}
 	close(p.done)
 }
 
@@ -407,39 +320,19 @@ func (p *Process) Close() error {
 		select {
 		case <-p.done:
 		default:
-			if p.useHelper {
-				// helperStop should block until lifecycle finishes DNS restore.
-				// Older helpers returned immediately; waitLifecycleCleanup covers that.
-				ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-				if p.helperStop != nil {
-					_ = p.helperStop(ctx)
-				} else {
-					_ = SignalLifecycleStop(p.workDir)
-				}
-				cancel()
-				waitLifecycleCleanup(p.workDir, 15*time.Second)
-				close(p.stopCh)
-			} else if p.privilegedPIDPath != "" {
-				_ = stopPrivilegedProcess(p.privilegedPIDPath)
-				waitLifecycleCleanup(p.workDir, 15*time.Second)
-			} else if p.cmd != nil && p.cmd.Process != nil {
-				if err := p.cmd.Process.Signal(os.Interrupt); err != nil {
-					_ = p.cmd.Process.Kill()
-				}
+			// helperStop blocks until the helper has restored DNS and routes.
+			ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+			if p.helperStop != nil {
+				_ = p.helperStop(ctx)
 			}
+			cancel()
+			close(p.stopCh)
 			select {
 			case <-p.done:
 			case <-time.After(20 * time.Second):
-				if p.cmd != nil && p.cmd.Process != nil {
-					_ = p.cmd.Process.Kill()
-				}
-				if p.useHelper {
-					select {
-					case <-p.done:
-					case <-time.After(2 * time.Second):
-					}
-				} else {
-					<-p.done
+				select {
+				case <-p.done:
+				case <-time.After(2 * time.Second):
 				}
 			}
 		}
@@ -447,27 +340,12 @@ func (p *Process) Close() error {
 			_ = p.dnsProxy.Close()
 			p.dnsProxy = nil
 		}
-		// Remove session files only after lifecycle DNS restore has finished.
-		// Deleting workDir too early removes the stop signal and skips cleanup.
-		_ = os.RemoveAll(p.workDir)
 	})
 	err := p.Err()
 	if err != nil && !strings.Contains(strings.ToLower(err.Error()), "signal") {
 		return err
 	}
 	return nil
-}
-
-func (p *Process) logTail() string {
-	content, err := os.ReadFile(p.logPath)
-	if err != nil {
-		return ""
-	}
-	text := string(content)
-	if len(text) > 2000 {
-		return text[len(text)-2000:]
-	}
-	return text
 }
 
 func availablePort() (int, error) {
