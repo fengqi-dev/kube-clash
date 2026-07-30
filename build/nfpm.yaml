@@ -1,0 +1,38 @@
+# nfpm config for KubeLoop Linux packages (deb / rpm).
+# VERSION and GOARCH are expanded from the environment.
+name: kubeloop
+arch: ${GOARCH}
+platform: linux
+version: ${VERSION}
+release: "1"
+section: utils
+priority: optional
+maintainer: KubeLoop <noreply@users.noreply.github.com>
+description: |
+  Local development network for Kubernetes.
+  Connect your laptop to a cluster with TUN routing, DNS, and port tools.
+vendor: KubeLoop
+homepage: https://github.com/fengqi-dev/kube-loop
+license: Apache-2.0
+
+depends:
+  - libgtk-3-0
+  - libwebkit2gtk-4.1-0
+
+overrides:
+  rpm:
+    depends:
+      - gtk3
+      - webkit2gtk4.1
+
+contents:
+  - src: ./build/bin/KubeLoop
+    dst: /usr/bin/kubeloop
+    file_info:
+      mode: 0755
+  - src: ./build/linux/kubeloop.desktop
+    dst: /usr/share/applications/kubeloop.desktop
+  - src: ./build/appicon.png
+    dst: /usr/share/pixmaps/kubeloop.png
+  - src: ./build/appicon.svg
+    dst: /usr/share/icons/hicolor/scalable/apps/kubeloop.svg

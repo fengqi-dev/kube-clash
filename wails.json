@@ -11,5 +11,13 @@
   },
   "author": {
     "name": "KubeLoop"
-  }
+  },
+  "info": {
+    "companyName": "KubeLoop",
+    "productName": "KubeLoop",
+    "productVersion": "0.1.0",
+    "copyright": "Copyright © KubeLoop",
+    "comments": "Local development network for Kubernetes"
+  },
+  "nsisType": "multiple"
 }

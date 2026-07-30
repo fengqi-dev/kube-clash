@@ -53,13 +53,14 @@ cluster. You do not need `kubectl` installed locally.
 
 ## Get started
 
-1. Download a platform archive from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+1. Download a platform package from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
    (darwin/windows/linux × amd64/arm64; or build from source — see below).
-   - **macOS**: extract, then open `KubeLoop.app`. If Gatekeeper blocks it, right-click
-     → **Open**, or run `xattr -cr KubeLoop.app`.
-   - **Windows**: extract the zip. If SmartScreen appears, choose **More info** →
-     **Run anyway**.
-   - **Linux**: extract and run the binary.
+   - **macOS**: open the `.dmg` and drag `KubeLoop.app` into Applications (or extract the
+     `.tar.gz`). If Gatekeeper blocks it, right-click → **Open**, or run
+     `xattr -cr KubeLoop.app`.
+   - **Windows**: run the NSIS installer (`kubeloop-windows-*-installer.exe`), or extract the
+     portable zip. If SmartScreen appears, choose **More info** → **Run anyway**.
+   - **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.
 2. Ensure your machine can reach the cluster API with a normal kubeconfig.
 3. Open KubeLoop, choose a **Context**, click **Connect**.
 4. On first use, approve the **virtual network service** (privileged helper)
@@ -127,6 +128,12 @@ wails dev # automatically builds and embeds the platform helper
 # VERSION is injected into Go, the Vite frontend, helper, and Gateway image/binary
 VERSION=v0.1.0
 VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
+# Platform packages (after wails build):
+#   macOS DMG / tar.gz:  VERSION=$VERSION ./build/package-desktop.sh
+#   Linux deb/rpm/tar:   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+#                        # Debian/Ubuntu also needs: apt install rpm
+#                        VERSION=$VERSION ./build/package-desktop.sh
+#   Windows installer:   VITE_APP_VERSION="$VERSION" wails build -nsis -ldflags "-X main.version=${VERSION}"
 # Gateway image (release CI): docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
 ```
 

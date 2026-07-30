@@ -49,12 +49,13 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 
 ## 快速开始
 
-1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载对应平台压缩包
+1. 从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases) 下载对应平台包
    （darwin / windows / linux × amd64 / arm64；或按下方说明自行构建）。
-   - **macOS**：解压后打开 `KubeLoop.app`。若被 Gatekeeper 拦截，可右键 → **打开**，
-     或执行 `xattr -cr KubeLoop.app`。
-   - **Windows**：解压 zip。若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
-   - **Linux**：解压后直接运行。
+   - **macOS**：打开 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
+     若被 Gatekeeper 拦截，可右键 → **打开**，或执行 `xattr -cr KubeLoop.app`。
+   - **Windows**：运行 NSIS 安装包（`kubeloop-windows-*-installer.exe`），或解压便携 zip。
+     若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
+   - **Linux**：安装 `.deb` / `.rpm`，或解压 `.tar.gz` 后运行 `KubeLoop`。
 2. 确认本机 kubeconfig 能正常访问目标集群 API。
 3. 打开 KubeLoop，选择 **Context**，点击 **连接**。
 4. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
@@ -97,6 +98,12 @@ wails dev # 自动构建并内嵌当前平台的 Helper
 # VERSION 会同时注入 Go、前端、Helper，以及 Gateway 镜像/二进制
 VERSION=v0.1.0
 VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
+# 平台安装包（在 wails build 之后）：
+#   macOS DMG / tar.gz:  VERSION=$VERSION ./build/package-desktop.sh
+#   Linux deb/rpm/tar:   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
+#                        # Debian/Ubuntu 还需: apt install rpm
+#                        VERSION=$VERSION ./build/package-desktop.sh
+#   Windows 安装包:      VITE_APP_VERSION="$VERSION" wails build -nsis -ldflags "-X main.version=${VERSION}"
 # Gateway 镜像（发版 CI）：docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
 ```
 
