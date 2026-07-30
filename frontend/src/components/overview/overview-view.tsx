@@ -5,6 +5,8 @@ import {
   Copy,
   CopyPlus,
   Eye,
+  Loader2,
+  RotateCcw,
   Server,
   ShieldCheck,
   type LucideIcon,
@@ -17,8 +19,18 @@ import { TrafficStats } from "@/components/overview/traffic-stats";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { useI18n } from "@/i18n";
+import type { AppView } from "@/hooks/use-session";
 import { phaseKeys } from "@/lib/phase";
+import { cn } from "@/lib/utils";
 import type { Discovery, SessionState } from "@/types";
 
 export function OverviewView({
@@ -31,6 +43,7 @@ export function OverviewView({
   ready,
   onToggle,
   onManageClusters,
+  onNavigate,
 }: {
   contextName: string;
   clusterName: string;
@@ -41,6 +54,7 @@ export function OverviewView({
   ready: boolean;
   onToggle(): void;
   onManageClusters(): void;
+  onNavigate(view: AppView): void;
 }) {
   const { t } = useI18n();
   const [podPortForwards, setPodPortForwards] = useState(0);
@@ -48,6 +62,9 @@ export function OverviewView({
   const [exchanges, setExchanges] = useState(0);
   const [mirrors, setMirrors] = useState(0);
   const [previews, setPreviews] = useState(0);
+  const [metricsTick, setMetricsTick] = useState(0);
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetting, setResetting] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -57,13 +74,25 @@ export function OverviewView({
         backend.listIntercepts(),
         backend.listMirrors(),
         backend.listPreviews(),
+        backend.sessionIntentCounts(),
       ])
-        .then(([forwards, intercepts, mirrorItems, previewItems]) => {
+        .then(([forwards, intercepts, mirrorItems, previewItems, intents]) => {
           if (!active) return;
-          setPodPortForwards(forwards.filter((item) => item.kind === "pod").length);
-          setNetworkPortForwards(forwards.filter((item) => item.kind === "service").length);
-          setExchanges(intercepts.length);
-          setMirrors(mirrorItems.length);
+          // Prefer live counts; fall back to persisted intents when the cluster is down.
+          setPodPortForwards(
+            Math.max(
+              forwards.filter((item) => item.kind === "pod").length,
+              intents.podPortForwards ?? 0,
+            ),
+          );
+          setNetworkPortForwards(
+            Math.max(
+              forwards.filter((item) => item.kind === "service").length,
+              intents.networkPortForwards ?? 0,
+            ),
+          );
+          setExchanges(Math.max(intercepts.length, intents.exchanges ?? 0));
+          setMirrors(Math.max(mirrorItems.length, intents.mirrors ?? 0));
           setPreviews(previewItems.length);
         })
         .catch(() => undefined);
@@ -72,7 +101,27 @@ export function OverviewView({
     return () => {
       active = false;
     };
-  }, [session.inventoryRevision, ready]);
+  }, [session.inventoryRevision, ready, metricsTick]);
+
+  async function confirmReset() {
+    setResetting(true);
+    try {
+      await backend.resetSessions();
+      setPodPortForwards(0);
+      setNetworkPortForwards(0);
+      setExchanges(0);
+      setMirrors(0);
+      setMetricsTick((value) => value + 1);
+      setResetOpen(false);
+      toast.success(t("overview.resetSessionsDone"));
+    } catch (error) {
+      toast.error(t("overview.resetSessionsFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setResetting(false);
+    }
+  }
 
   const issues = session.capabilities?.issues ?? [];
   const gatewayManifest = session.gatewayManifest ?? "";
@@ -140,8 +189,43 @@ export function OverviewView({
               exchanges={exchanges}
               mirrors={mirrors}
               previews={previews}
+              onNavigate={onNavigate}
+              onReset={() => setResetOpen(true)}
+              resetting={resetting}
             />
           </div>
+
+          <Dialog open={resetOpen} onOpenChange={(open) => !resetting && setResetOpen(open)}>
+            <DialogContent showCloseButton={!resetting}>
+              <DialogHeader>
+                <DialogTitle>{t("overview.resetSessionsTitle")}</DialogTitle>
+                <DialogDescription>{t("overview.resetSessionsDesc")}</DialogDescription>
+              </DialogHeader>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  disabled={resetting}
+                  onClick={() => setResetOpen(false)}
+                >
+                  {t("actions.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={resetting}
+                  onClick={() => void confirmReset()}
+                >
+                  {resetting ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <RotateCcw data-icon="inline-start" />
+                  )}
+                  {t("overview.resetSessionsConfirm")}
+                </Button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
 
           {error ? (
             <Alert variant="destructive" className="mt-4 w-full text-left">
@@ -374,46 +458,103 @@ function SessionMetrics({
   exchanges,
   mirrors,
   previews,
+  onNavigate,
+  onReset,
+  resetting,
 }: {
   podPortForwards: number;
   networkPortForwards: number;
   exchanges: number;
   mirrors: number;
   previews: number;
+  onNavigate(view: AppView): void;
+  onReset(): void;
+  resetting: boolean;
 }) {
   const { t } = useI18n();
+  const resettable = podPortForwards + networkPortForwards + exchanges + mirrors;
   const groups: {
     title: string;
-    rows: { icon: LucideIcon; label: string; value: number }[];
+    rows: { icon: LucideIcon; label: string; value: number; view: AppView }[];
   }[] = [
     {
       title: t("overview.podGroup"),
       rows: [
-        { icon: Cable, label: t("network.tabPortForward"), value: podPortForwards },
+        {
+          icon: Cable,
+          label: t("network.tabPortForward"),
+          value: podPortForwards,
+          view: "workload",
+        },
       ],
     },
     {
       title: t("overview.networkGroup"),
       rows: [
-        { icon: Cable, label: t("network.tabPortForward"), value: networkPortForwards },
-        { icon: ArrowRightLeft, label: t("network.tabExchange"), value: exchanges },
-        { icon: CopyPlus, label: t("network.tabMirror"), value: mirrors },
-        { icon: Eye, label: t("network.tabPreview"), value: previews },
+        {
+          icon: Cable,
+          label: t("network.tabPortForward"),
+          value: networkPortForwards,
+          view: "network",
+        },
+        {
+          icon: ArrowRightLeft,
+          label: t("network.tabExchange"),
+          value: exchanges,
+          view: "network",
+        },
+        {
+          icon: CopyPlus,
+          label: t("network.tabMirror"),
+          value: mirrors,
+          view: "network",
+        },
+        {
+          icon: Eye,
+          label: t("network.tabPreview"),
+          value: previews,
+          view: "network",
+        },
       ],
     },
   ];
 
   return (
-    <SidePanel title={t("overview.sessionsPanel")}>
+    <SidePanel
+      title={t("overview.sessionsPanel")}
+      footer={
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          className="w-full"
+          disabled={resettable === 0 || resetting}
+          onClick={onReset}
+        >
+          {resetting ? (
+            <Loader2 data-icon="inline-start" className="animate-spin" />
+          ) : (
+            <RotateCcw data-icon="inline-start" />
+          )}
+          {t("overview.resetSessions")}
+        </Button>
+      }
+    >
       <div className="flex min-h-0 flex-1 flex-col justify-between">
         {groups.map((group) => (
           <div key={group.title} className="min-w-0">
             <div className="mb-1.5 text-[11px] font-medium text-foreground/85">{group.title}</div>
             <div className="space-y-1.5 pl-0.5">
               {group.rows.map((row) => (
-                <div
+                <button
                   key={`${group.title}-${row.label}`}
-                  className="flex items-center gap-2"
+                  type="button"
+                  onClick={() => onNavigate(row.view)}
+                  className={cn(
+                    "flex w-full items-center gap-2 rounded-md px-1 py-0.5 text-left",
+                    "transition-colors hover:bg-accent/60 focus-visible:outline-none",
+                    "focus-visible:ring-2 focus-visible:ring-ring/50",
+                  )}
                 >
                   <div className="grid size-6 shrink-0 place-items-center rounded-md border bg-background text-muted-foreground">
                     <row.icon size={13} strokeWidth={1.7} />
@@ -422,7 +563,7 @@ function SessionMetrics({
                   <span className="ml-auto font-mono text-[13px] font-semibold tabular-nums">
                     {row.value}
                   </span>
-                </div>
+                </button>
               ))}
             </div>
           </div>

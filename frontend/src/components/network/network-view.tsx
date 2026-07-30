@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Circle, Network } from "lucide-react";
+import { Network } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import {
@@ -29,7 +29,6 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
-import { cn } from "@/lib/utils";
 import type { ServiceInfo, SessionState } from "@/types";
 
 type ServiceBinding = "exchange" | "mirror" | "preview" | "portForward" | "idle";
@@ -210,9 +209,6 @@ export function NetworkView({
                     {t("network.colPorts")}
                   </TableHead>
                   <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
-                    {t("network.colStatus")}
-                  </TableHead>
-                  <TableHead className="h-9 text-[11px] font-medium text-muted-foreground">
                     {t("network.actions")}
                   </TableHead>
                 </TableRow>
@@ -233,11 +229,6 @@ export function NetworkView({
                       </div>
                     </TableCell>
                     <TableCell>
-                      <ServiceStatus
-                        binding={bindings[`${item.namespace}/${item.name}`] ?? "idle"}
-                      />
-                    </TableCell>
-                    <TableCell>
                       <div className="flex items-center gap-1">
                         <ActionIconButton
                           label={t("network.tabPortForward")}
@@ -249,26 +240,38 @@ export function NetworkView({
                           }}
                         />
                         <ActionIconButton
-                          label={
-                            canExchange
-                              ? t("network.tabExchange")
-                              : t("network.exchangeDenied")
-                          }
+                          label={exchangeActionLabel(
+                            t,
+                            canExchange,
+                            bindings[`${item.namespace}/${item.name}`] ?? "idle",
+                          )}
                           icon={exchangeIcon}
-                          disabled={!ready || !canExchange}
+                          disabled={
+                            !ready ||
+                            !canExchange ||
+                            isServiceExclusiveBound(
+                              bindings[`${item.namespace}/${item.name}`] ?? "idle",
+                            )
+                          }
                           onClick={() => {
                             setSelected(item);
                             setExOpen(true);
                           }}
                         />
                         <ActionIconButton
-                          label={
-                            canExchange
-                              ? t("network.tabMirror")
-                              : t("network.mirrorDenied")
-                          }
+                          label={mirrorActionLabel(
+                            t,
+                            canExchange,
+                            bindings[`${item.namespace}/${item.name}`] ?? "idle",
+                          )}
                           icon={mirrorIcon}
-                          disabled={!ready || !canExchange}
+                          disabled={
+                            !ready ||
+                            !canExchange ||
+                            isServiceExclusiveBound(
+                              bindings[`${item.namespace}/${item.name}`] ?? "idle",
+                            )
+                          }
                           onClick={() => {
                             setSelected(item);
                             setMirrorOpen(true);
@@ -321,31 +324,31 @@ export function NetworkView({
   );
 }
 
-function ServiceStatus({ binding }: { binding: ServiceBinding }) {
-  const { t } = useI18n();
-  const label =
-    binding === "exchange"
-      ? t("network.tabExchange")
-      : binding === "mirror"
-        ? t("network.tabMirror")
-        : binding === "preview"
-          ? t("network.tabPreview")
-          : binding === "portForward"
-            ? t("network.tabPortForward")
-            : t("network.idle");
-  const ok = binding !== "idle";
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1.5 text-[12px]",
-        ok ? "text-success" : "text-muted-foreground",
-      )}
-    >
-      <Circle
-        size={8}
-        className={ok ? "fill-success text-success" : "fill-muted-foreground/50 text-muted-foreground/50"}
-      />
-      {label}
-    </span>
-  );
+function isServiceExclusiveBound(binding: ServiceBinding) {
+  return binding === "exchange" || binding === "mirror" || binding === "preview";
 }
+
+function exchangeActionLabel(
+  t: ReturnType<typeof useI18n>["t"],
+  canExchange: boolean,
+  binding: ServiceBinding,
+) {
+  if (!canExchange) return t("network.exchangeDenied");
+  if (binding === "mirror") return t("network.exchangeBlockedByMirror");
+  if (binding === "exchange") return t("network.exchangeAlreadyActive");
+  if (binding === "preview") return t("network.exchangeBlockedByPreview");
+  return t("network.tabExchange");
+}
+
+function mirrorActionLabel(
+  t: ReturnType<typeof useI18n>["t"],
+  canExchange: boolean,
+  binding: ServiceBinding,
+) {
+  if (!canExchange) return t("network.mirrorDenied");
+  if (binding === "exchange") return t("network.mirrorBlockedByExchange");
+  if (binding === "mirror") return t("network.mirrorAlreadyActive");
+  if (binding === "preview") return t("network.mirrorBlockedByPreview");
+  return t("network.tabMirror");
+}
+

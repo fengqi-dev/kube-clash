@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml)
 [![Release](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
@@ -130,7 +130,7 @@ go test ./...
 
 ## 许可证
 
-KubeLoop 源代码使用 [Apache License 2.0](LICENSE)。
+KubeLoop 源代码使用 [MIT License](LICENSE)。
 
 sing-box 是独立托管的 GPLv3 程序。分发包含 sing-box 的安装包时须自行履行其许可证义务，
 详见[第三方软件声明](THIRD_PARTY_NOTICES.md)。

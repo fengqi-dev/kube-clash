@@ -18,3 +18,12 @@ func TestMapClashMetricsExtractsInboundTag(t *testing.T) {
 		t.Fatalf("outbound = %q", connection.Outbound)
 	}
 }
+
+func TestMapClashMetricsUsesProcessPath(t *testing.T) {
+	raw := clashConnections{Connections: []clashConnection{{ID: "connection-1"}}}
+	raw.Connections[0].Metadata.ProcessPath = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome (alice)"
+	metrics := mapClashMetrics(raw)
+	if got := metrics.Connections[0].Process; got != "Google Chrome" {
+		t.Fatalf("process = %q", got)
+	}
+}

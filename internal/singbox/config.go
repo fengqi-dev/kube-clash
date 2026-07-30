@@ -263,6 +263,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"rules":                   routeRules,
 			"final":                   DirectOutbound,
 			"auto_detect_interface":   true,
+			"find_process":            true,
 			"default_domain_resolver": "local",
 		},
 		"experimental": map[string]any{

@@ -155,9 +155,16 @@ export function PortForwardPanel({
         localPort: parsedLocal,
       });
       await refresh();
-      toast.success(t("portfwd.started"), {
-        description: `${info.address} → ${kind}/${targetName}:${selectedPort.port}`,
-      });
+      try {
+        await navigator.clipboard.writeText(info.address);
+        toast.success(t("portfwd.started"), {
+          description: `${info.address} → ${kind}/${targetName}:${selectedPort.port} · ${t("portfwd.copied")}`,
+        });
+      } catch {
+        toast.success(t("portfwd.started"), {
+          description: `${info.address} → ${kind}/${targetName}:${selectedPort.port}`,
+        });
+      }
     } catch (error) {
       toast.error(t("portfwd.startFailed"), {
         description: error instanceof Error ? error.message : String(error),

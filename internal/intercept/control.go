@@ -3,14 +3,20 @@ package intercept
 import (
 	"bufio"
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
+
+// errControlClosed is returned when the Gateway control channel has dropped
+// (port-forward died, Gateway pod restarted, etc.).
+var errControlClosed = errors.New("gateway control channel closed; disconnect and reconnect")
 
 type controlClient struct {
 	address string
@@ -18,8 +24,10 @@ type controlClient struct {
 
 	writeMu sync.Mutex
 	replyCh chan tunnel.ControlMessage
+	closed  atomic.Bool
 
 	onReady func(interceptID string, network byte, streamID uint64)
+	onClose func()
 }
 
 func dialControl(ctx context.Context, gatewayAddress string) (*controlClient, error) {
@@ -46,10 +54,16 @@ func dialControl(ctx context.Context, gatewayAddress string) (*controlClient, er
 }
 
 func (c *controlClient) readLoop() {
+	defer func() {
+		c.closed.Store(true)
+		close(c.replyCh)
+		if c.onClose != nil {
+			c.onClose()
+		}
+	}()
 	for {
 		message, err := tunnel.ReadControlMessage(c.conn)
 		if err != nil {
-			close(c.replyCh)
 			return
 		}
 		switch message.Type {
@@ -85,13 +99,16 @@ func (c *controlClient) unregister(interceptID string) error {
 func (c *controlClient) roundTrip(message tunnel.ControlMessage) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()
+	if c.closed.Load() {
+		return errControlClosed
+	}
 	if err := tunnel.WriteControlMessage(c.conn, message); err != nil {
 		return err
 	}
 	select {
 	case reply, ok := <-c.replyCh:
 		if !ok {
-			return io.EOF
+			return errControlClosed
 		}
 		if reply.Type == tunnel.CtrlError {
 			return fmt.Errorf("%s", reply.Error)

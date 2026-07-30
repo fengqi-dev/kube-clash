@@ -79,9 +79,11 @@ type Manager struct {
 	gatewayIP      string
 	gatewayAddress string
 	control        *controlClient
+	controlLost    chan struct{}
 	nextPort       uint32
 	byID           map[string]*runtimeIntercept
 	byKey          map[string]string // namespace/service -> id
+	hostRoutes     map[hostRouteKey]*hostRoute
 	traffic        TrafficDialers
 }
 
@@ -94,20 +96,36 @@ func (m *Manager) SetTrafficDialers(dialers TrafficDialers) {
 	m.mu.Unlock()
 }
 
+type hostRouteKey struct {
+	host string
+	port uint16
+}
+
+// hostRoute serves host TUN traffic to an intercepted Service locally, so the
+// desktop does not depend on kube-proxy hairpin through the Gateway.
+type hostRoute struct {
+	mode        string
+	preview     bool
+	local       PortMapping
+	primaryAddr string
+}
+
 type runtimeIntercept struct {
 	info         Info
 	snapshot     cluster.ServiceInterceptSnapshot
 	preview      *cluster.PreviewServiceSnapshot
 	portKeys     map[string]PortMapping // subID -> local mapping
 	primaryAddrs map[string]string      // subID -> pod host:port (mirror)
+	hostKeys     []hostRouteKey
 }
 
 func NewManager(api ClusterAPI) *Manager {
 	return &Manager{
-		cluster:  api,
-		nextPort: 20000,
-		byID:     make(map[string]*runtimeIntercept),
-		byKey:    make(map[string]string),
+		cluster:    api,
+		nextPort:   20000,
+		byID:       make(map[string]*runtimeIntercept),
+		byKey:      make(map[string]string),
+		hostRoutes: make(map[hostRouteKey]*hostRoute),
 	}
 }
 
@@ -123,14 +141,25 @@ func (m *Manager) Start(
 	if err != nil {
 		return err
 	}
+	lost := make(chan struct{})
 	control.onReady = m.handleReady
+	control.onClose = sync.OnceFunc(func() { close(lost) })
 	m.active = true
 	m.ctx = ctx
 	m.contextName = contextName
 	m.gatewayIP = gatewayIP
 	m.gatewayAddress = gatewayAddress
 	m.control = control
+	m.controlLost = lost
 	return nil
+}
+
+// ControlLost is closed when the Gateway control channel drops unexpectedly
+// or after StopAll closes it. Session uses this to leave the connected state.
+func (m *Manager) ControlLost() <-chan struct{} {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.controlLost
 }
 
 func (m *Manager) StopAll(ctx context.Context) error {
@@ -227,9 +256,10 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		return Info{}, fmt.Errorf("session is not connected")
 	}
 	key := mapping.Namespace + "/" + mapping.Service
-	if _, exists := m.byKey[key]; exists {
+	if existingID, exists := m.byKey[key]; exists {
+		existing := m.byID[existingID]
 		m.mu.Unlock()
-		return Info{}, fmt.Errorf("service %s is already intercepted", key)
+		return Info{}, conflictError(key, mode, existing)
 	}
 	contextName := m.contextName
 	gatewayIP := m.gatewayIP
@@ -295,13 +325,15 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		ID:        interceptID,
 		Namespace: mapping.Namespace,
 		Service:   mapping.Service,
+		ClusterIP: service.Spec.ClusterIP,
 		Mode:      mode,
 		Ports:     ports,
 		Locals:    locals,
 	}
+	hostKeys := m.installHostRoutes(service, ports, portKeys, primaryAddrs, mode, false, interceptID)
 	m.mu.Lock()
 	m.byID[interceptID] = &runtimeIntercept{
-		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs,
+		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
 	}
 	m.byKey[key] = interceptID
 	m.mu.Unlock()
@@ -377,9 +409,10 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 		Ports:     ports,
 		Locals:    locals,
 	}
+	hostKeys := m.installHostRoutes(service, ports, portKeys, nil, ModeExchange, true, previewID)
 	m.mu.Lock()
 	m.byID[previewID] = &runtimeIntercept{
-		info: info, preview: &snapshot, portKeys: portKeys,
+		info: info, preview: &snapshot, portKeys: portKeys, hostKeys: hostKeys,
 	}
 	m.byKey[key] = previewID
 	m.mu.Unlock()
@@ -395,6 +428,9 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	}
 	delete(m.byID, id)
 	delete(m.byKey, runtime.info.Namespace+"/"+runtime.info.Service)
+	for _, key := range runtime.hostKeys {
+		delete(m.hostRoutes, key)
+	}
 	control := m.control
 	contextName := m.contextName
 	portKeys := runtime.portKeys
@@ -411,6 +447,60 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 		return m.cluster.DeletePreviewService(ctx, contextName, *preview)
 	}
 	return m.cluster.RestoreServiceIntercept(ctx, contextName, snapshot)
+}
+
+// HostTCP returns a serve callback when host:port is an active intercept /
+// preview target. Used by the local SOCKS bridge for TUN traffic.
+func (m *Manager) HostTCP(host string, port uint16) (func(net.Conn), bool) {
+	m.mu.Lock()
+	route := m.hostRoutes[hostRouteKey{host: strings.ToLower(strings.TrimSpace(host)), port: port}]
+	if route == nil {
+		m.mu.Unlock()
+		return nil, false
+	}
+	copyRoute := *route
+	ctx := m.ctx
+	gatewayAddress := m.gatewayAddress
+	dialers := m.traffic
+	m.mu.Unlock()
+
+	return func(client net.Conn) {
+		m.serveHostTCP(ctx, gatewayAddress, client, copyRoute, dialers)
+	}, true
+}
+
+func (m *Manager) serveHostTCP(
+	ctx context.Context,
+	gatewayAddress string,
+	client net.Conn,
+	route hostRoute,
+	dialers TrafficDialers,
+) {
+	defer client.Close()
+	host := route.local.LocalHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	localTarget := net.JoinHostPort(host, fmt.Sprintf("%d", route.local.LocalPort))
+
+	if route.mode == ModeMirror {
+		m.serveMirrorTCP(
+			ctx, gatewayAddress, client, route.primaryAddr, host, route.local.LocalPort,
+			dialers.MirrorPrimary, dialers.MirrorShadow,
+		)
+		return
+	}
+
+	localDialer := dialers.Exchange
+	if route.preview {
+		localDialer = dialers.Preview
+	}
+	localConn, err := dialTraffic(ctx, localDialer, "tcp", localTarget)
+	if err != nil {
+		return
+	}
+	defer localConn.Close()
+	relayTCP(client, localConn)
 }
 
 func (m *Manager) allocateListenPort() int32 {
@@ -769,6 +859,103 @@ func protocolToNetwork(protocol corev1.Protocol) byte {
 		return tunnel.NetworkUDP
 	}
 	return tunnel.NetworkTCP
+}
+
+func conflictError(key, wantMode string, existing *runtimeIntercept) error {
+	if existing == nil {
+		return fmt.Errorf("service %s is already in use", key)
+	}
+	if existing.info.Preview {
+		return fmt.Errorf("service %s is already used by preview", key)
+	}
+	have := existing.info.Mode
+	if have == "" {
+		have = ModeExchange
+	}
+	if (wantMode == ModeExchange || wantMode == ModeMirror) &&
+		(have == ModeExchange || have == ModeMirror) &&
+		wantMode != have {
+		return fmt.Errorf("exchange and mirror are mutually exclusive; stop %s on %s first", have, key)
+	}
+	return fmt.Errorf("service %s is already in %s", key, have)
+}
+
+func (m *Manager) installHostRoutes(
+	service *corev1.Service,
+	ports []cluster.InterceptPort,
+	portKeys map[string]PortMapping,
+	primaryAddrs map[string]string,
+	mode string,
+	preview bool,
+	interceptID string,
+) []hostRouteKey {
+	if service == nil {
+		return nil
+	}
+	hosts := serviceRewriteHosts(service)
+	if len(hosts) == 0 {
+		return nil
+	}
+	if mode == "" {
+		mode = ModeExchange
+	}
+	keys := make([]hostRouteKey, 0, len(hosts)*len(ports))
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.hostRoutes == nil {
+		m.hostRoutes = make(map[hostRouteKey]*hostRoute)
+	}
+	for _, port := range ports {
+		if port.Protocol == corev1.ProtocolUDP {
+			continue
+		}
+		network := protocolToNetwork(port.Protocol)
+		subID := fmt.Sprintf("%s:%s:%d", interceptID, networkName(network), port.ServicePort)
+		local := localFor(port, nil)
+		if mapped, ok := portKeys[subID]; ok {
+			local = mapped
+		}
+		primary := ""
+		if primaryAddrs != nil {
+			primary = primaryAddrs[subID]
+		}
+		for _, host := range hosts {
+			key := hostRouteKey{host: host, port: uint16(port.ServicePort)}
+			m.hostRoutes[key] = &hostRoute{
+				mode: mode, preview: preview, local: local, primaryAddr: primary,
+			}
+			keys = append(keys, key)
+		}
+	}
+	return keys
+}
+
+func serviceRewriteHosts(service *corev1.Service) []string {
+	if service == nil {
+		return nil
+	}
+	hosts := make([]string, 0, 4)
+	seen := map[string]struct{}{}
+	add := func(host string) {
+		host = strings.ToLower(strings.TrimSpace(host))
+		if host == "" || host == corev1.ClusterIPNone {
+			return
+		}
+		if _, ok := seen[host]; ok {
+			return
+		}
+		seen[host] = struct{}{}
+		hosts = append(hosts, host)
+	}
+	add(service.Spec.ClusterIP)
+	name := service.Name
+	ns := service.Namespace
+	if name != "" && ns != "" {
+		add(name + "." + ns + ".svc.cluster.local")
+		add(name + "." + ns + ".svc")
+		add(name + "." + ns)
+	}
+	return hosts
 }
 
 func (m Mapping) resolveLocals(service *corev1.Service) ([]PortMapping, error) {

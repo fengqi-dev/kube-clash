@@ -77,6 +77,7 @@ function App() {
               ready={ready}
               onToggle={() => void toggleConnection()}
               onManageClusters={() => setView("clusters")}
+              onNavigate={setView}
             />
           )}
           {view === "clusters" && (

@@ -90,6 +90,14 @@ export function RemoveKubeconfig(arg1) {
   return window['go']['main']['App']['RemoveKubeconfig'](arg1);
 }
 
+export function ResetSessions() {
+  return window['go']['main']['App']['ResetSessions']();
+}
+
+export function SessionIntentCounts() {
+  return window['go']['main']['App']['SessionIntentCounts']();
+}
+
 export function SetHostAliases(arg1, arg2) {
   return window['go']['main']['App']['SetHostAliases'](arg1, arg2);
 }

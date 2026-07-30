@@ -319,7 +319,7 @@ func mapClashMetrics(raw clashConnections) Metrics {
 		}
 		process := item.Metadata.Process
 		if process == "" {
-			process = filepath.Base(item.Metadata.ProcessPath)
+			process = processName(item.Metadata.ProcessPath)
 		}
 		outbound := DirectOutbound
 		if len(item.Chains) > 0 {
@@ -356,6 +356,19 @@ func inboundTag(value string) string {
 		return tag
 	}
 	return value
+}
+
+// processName turns Clash API processPath into a short executable label.
+// Paths may look like "/usr/bin/curl (alice)".
+func processName(processPath string) string {
+	processPath = strings.TrimSpace(processPath)
+	if processPath == "" {
+		return ""
+	}
+	if before, _, ok := strings.Cut(processPath, " ("); ok {
+		processPath = before
+	}
+	return filepath.Base(processPath)
 }
 
 func joinHostPort(host, port string) string {

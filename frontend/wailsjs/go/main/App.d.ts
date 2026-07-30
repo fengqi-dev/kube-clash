@@ -52,6 +52,10 @@ export function RememberSelection(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveKubeconfig(arg1:string):Promise<cluster.ClusterInventory>;
 
+export function ResetSessions():Promise<void>;
+
+export function SessionIntentCounts():Promise<store.SessionIntentCounts>;
+
 export function SetHostAliases(arg1:string,arg2:Array<store.HostAliasSpec>):Promise<void>;
 
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
