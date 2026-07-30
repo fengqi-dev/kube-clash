@@ -31,6 +31,10 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          # Release events resolve to the tag ref; github-pages environment
+          # protection only allows the default branch, so deploy site from there.
+          ref: ${{ github.event_name == 'release' && github.event.repository.default_branch || github.ref }}
 
       - name: Configure Pages
         uses: actions/configure-pages@v6
