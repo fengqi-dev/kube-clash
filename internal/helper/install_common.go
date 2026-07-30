@@ -60,7 +60,7 @@ func copyFile(src, dst string, mode os.FileMode) error {
 	return os.Chmod(dst, mode)
 }
 
-func InstallFromCLI(source, token string, uid int, version, homeDir string) error {
+func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID string) error {
 	if source == "" {
 		return fmt.Errorf("--source is required")
 	}
@@ -80,7 +80,7 @@ func InstallFromCLI(source, token string, uid int, version, homeDir string) erro
 		return fmt.Errorf("install helper binary: %w", err)
 	}
 	if err := WriteSystemAuth(AuthFile{
-		Token: token, UID: uid, Version: version, HomeDir: homeDir,
+		Token: token, UID: uid, Version: version, HomeDir: homeDir, OwnerSID: ownerSID,
 	}); err != nil {
 		return err
 	}

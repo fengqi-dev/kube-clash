@@ -6,7 +6,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 )
 
@@ -15,7 +14,7 @@ func dialHelper(ctx context.Context) (net.Conn, error) {
 	return dialer.DialContext(ctx, "unix", SocketPath())
 }
 
-func listenHelper() (net.Listener, error) {
+func listenHelper(ownerSID string) (net.Listener, error) {
 	path := SocketPath()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return nil, err
@@ -25,13 +24,10 @@ func listenHelper() (net.Listener, error) {
 	if err != nil {
 		return nil, fmt.Errorf("listen helper socket: %w", err)
 	}
-	mode := os.FileMode(0o666)
-	if runtime.GOOS == "windows" {
-		mode = 0o600
-	}
-	if err := os.Chmod(path, mode); err != nil && runtime.GOOS != "windows" {
+	if err := configureHelperSocketAccess(path, ownerSID); err != nil {
 		_ = listener.Close()
-		return nil, err
+		_ = os.Remove(path)
+		return nil, fmt.Errorf("configure helper socket access: %w", err)
 	}
 	return listener, nil
 }

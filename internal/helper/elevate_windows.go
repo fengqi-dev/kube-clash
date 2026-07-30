@@ -4,97 +4,211 @@ package helper
 
 import (
 	"context"
-	"encoding/base64"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"os"
-	"os/exec"
+	"path/filepath"
 	"strings"
 	"syscall"
-	"unicode/utf16"
+	"time"
+
+	"golang.org/x/sys/windows"
 )
 
-func ElevateInstall(ctx context.Context, source, expectedSHA256, token string, uid int, homeDir string) error {
-	installScript := fmt.Sprintf(`
-$ErrorActionPreference = 'Stop'
-$programFiles = [Environment]::GetFolderPath([Environment+SpecialFolder]::ProgramFiles)
-$stagingRoot = Join-Path $programFiles 'KubeLoop'
-New-Item -ItemType Directory -Path $stagingRoot -Force | Out-Null
-$workdir = Join-Path $stagingRoot ('.install-' + [Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Path $workdir | Out-Null
-try {
-    $acl = [System.Security.AccessControl.DirectorySecurity]::new()
-    $acl.SetAccessRuleProtection($true, $false)
-    $inherit = [System.Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'
-    $propagate = [System.Security.AccessControl.PropagationFlags]::None
-    $allow = [System.Security.AccessControl.AccessControlType]::Allow
-    foreach ($sidValue in @('S-1-5-32-544', 'S-1-5-18')) {
-        $sid = [System.Security.Principal.SecurityIdentifier]::new($sidValue)
-        $rule = [System.Security.AccessControl.FileSystemAccessRule]::new(
-            $sid, 'FullControl', $inherit, $propagate, $allow)
-        $acl.AddAccessRule($rule)
-    }
-    Set-Acl -LiteralPath $workdir -AclObject $acl
-    $staged = Join-Path $workdir 'kubeloop-helper.exe'
-    Copy-Item -LiteralPath %s -Destination $staged
-    $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $staged).Hash
-    if ($actual -ine %s) { throw 'bundled helper checksum mismatch' }
-    & $staged install --source $staged --token %s --uid %d --version %s --home %s
-    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-} finally {
-    Remove-Item -LiteralPath $workdir -Recurse -Force -ErrorAction SilentlyContinue
+const elevatedResultPollInterval = 100 * time.Millisecond
+
+type elevatedRequest struct {
+	ExpectedSHA256 string `json:"expectedSha256,omitempty"`
+	Token          string `json:"token,omitempty"`
+	UID            int    `json:"uid,omitempty"`
+	Version        string `json:"version,omitempty"`
+	HomeDir        string `json:"homeDir,omitempty"`
+	OwnerSID       string `json:"ownerSid,omitempty"`
 }
-`, powershellQuote(source), powershellQuote(expectedSHA256), powershellQuote(token),
-		uid, powershellQuote(Version), powershellQuote(homeDir))
-	return runElevatedPowerShell(ctx, installScript)
+
+type elevatedResult struct {
+	Error string `json:"error,omitempty"`
+}
+
+func ElevateInstall(
+	ctx context.Context,
+	source, expectedSHA256, token string,
+	uid int,
+	homeDir string,
+) error {
+	ownerSID, err := currentUserSID()
+	if err != nil {
+		return fmt.Errorf("find current Windows user SID: %w", err)
+	}
+	return runElevatedHelper(ctx, source, "install", elevatedRequest{
+		ExpectedSHA256: expectedSHA256,
+		Token:          token,
+		UID:            uid,
+		Version:        Version,
+		HomeDir:        homeDir,
+		OwnerSID:       ownerSID,
+	})
 }
 
 func ElevateUninstall(ctx context.Context, source string) error {
-	script := fmt.Sprintf(`
-$ErrorActionPreference = 'Stop'
-& %s uninstall
-if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-Remove-Item -LiteralPath %s -Force -ErrorAction SilentlyContinue
-`, powershellQuote(source), powershellQuote(source))
-	return runElevatedPowerShell(ctx, script)
-}
-
-func runElevatedPowerShell(ctx context.Context, script string) error {
-	outputFile, err := os.CreateTemp("", "kubeloop-elevated-*.log")
+	expectedSHA256, err := bundledHelperSHA256(source)
 	if err != nil {
-		return fmt.Errorf("create elevated helper log: %w", err)
+		return err
 	}
-	outputPath := outputFile.Name()
-	if err := outputFile.Close(); err != nil {
-		_ = os.Remove(outputPath)
-		return fmt.Errorf("close elevated helper log: %w", err)
-	}
-	defer os.Remove(outputPath)
+	return runElevatedHelper(ctx, source, "uninstall", elevatedRequest{
+		ExpectedSHA256: expectedSHA256,
+	})
+}
 
-	payload := elevatedPowerShellPayload(script, outputPath)
-	command := elevatedPowerShellLauncher(encodePowerShellCommand(payload))
-	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command)
-	cmd.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
-	launcherOutput, err := cmd.CombinedOutput()
+func runElevatedHelper(
+	ctx context.Context,
+	source, operation string,
+	request elevatedRequest,
+) error {
+	lockedSource, err := lockAndVerifyElevatedSource(source, request.ExpectedSHA256)
 	if err != nil {
-		elevatedOutput, _ := os.ReadFile(outputPath)
-		detail := strings.TrimSpace(strings.Join([]string{
-			string(launcherOutput), string(elevatedOutput),
-		}, "\n"))
-		return fmt.Errorf("elevated helper command: %w: %s", err, detail)
+		return err
 	}
-	return nil
+	defer lockedSource.Close()
+	ownerSID, err := currentUserSID()
+	if err != nil {
+		return fmt.Errorf("find current Windows user SID: %w", err)
+	}
+	requestPath, err := createElevatedExchangeFile("kubeloop-elevated-request-*.json", ownerSID)
+	if err != nil {
+		return fmt.Errorf("create elevated request: %w", err)
+	}
+	defer os.Remove(requestPath)
+	resultPath, err := createElevatedExchangeFile("kubeloop-elevated-result-*.json", ownerSID)
+	if err != nil {
+		return fmt.Errorf("create elevated result: %w", err)
+	}
+	defer os.Remove(resultPath)
+
+	raw, err := json.Marshal(request)
+	if err != nil {
+		return fmt.Errorf("encode elevated request: %w", err)
+	}
+	if err := os.WriteFile(requestPath, raw, 0o600); err != nil {
+		return fmt.Errorf("write elevated request: %w", err)
+	}
+	if err := os.WriteFile(resultPath, nil, 0o600); err != nil {
+		return fmt.Errorf("clear elevated result: %w", err)
+	}
+
+	args := strings.Join([]string{
+		syscall.EscapeArg("elevated"),
+		syscall.EscapeArg("--operation"),
+		syscall.EscapeArg(operation),
+		syscall.EscapeArg("--request"),
+		syscall.EscapeArg(requestPath),
+		syscall.EscapeArg("--result"),
+		syscall.EscapeArg(resultPath),
+	}, " ")
+	verbPtr, _ := windows.UTF16PtrFromString("runas")
+	sourcePtr, err := windows.UTF16PtrFromString(source)
+	if err != nil {
+		return fmt.Errorf("encode elevated helper path: %w", err)
+	}
+	argsPtr, err := windows.UTF16PtrFromString(args)
+	if err != nil {
+		return fmt.Errorf("encode elevated helper arguments: %w", err)
+	}
+	cwdPtr, err := windows.UTF16PtrFromString(filepath.Dir(source))
+	if err != nil {
+		return fmt.Errorf("encode elevated helper directory: %w", err)
+	}
+	if err := windows.ShellExecute(
+		0, verbPtr, sourcePtr, argsPtr, cwdPtr, windows.SW_HIDE,
+	); err != nil {
+		if errors.Is(err, windows.ERROR_CANCELLED) {
+			return fmt.Errorf("Windows elevation was cancelled")
+		}
+		return fmt.Errorf("launch elevated helper: %w", err)
+	}
+	return waitElevatedResult(ctx, resultPath)
 }
 
-func powershellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "''") + "'"
+func lockAndVerifyElevatedSource(source, expectedSHA256 string) (*os.File, error) {
+	if expectedSHA256 == "" {
+		return nil, fmt.Errorf("expected helper SHA-256 is required")
+	}
+	sourcePtr, err := windows.UTF16PtrFromString(source)
+	if err != nil {
+		return nil, fmt.Errorf("encode elevated helper path: %w", err)
+	}
+	handle, err := windows.CreateFile(
+		sourcePtr,
+		windows.GENERIC_READ,
+		windows.FILE_SHARE_READ,
+		nil,
+		windows.OPEN_EXISTING,
+		windows.FILE_ATTRIBUTE_NORMAL,
+		0,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("lock elevated helper source: %w", err)
+	}
+	file := os.NewFile(uintptr(handle), source)
+	if file == nil {
+		_ = windows.CloseHandle(handle)
+		return nil, fmt.Errorf("open locked elevated helper source")
+	}
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		_ = file.Close()
+		return nil, fmt.Errorf("hash locked elevated helper source: %w", err)
+	}
+	if !strings.EqualFold(hex.EncodeToString(hash.Sum(nil)), expectedSHA256) {
+		_ = file.Close()
+		return nil, fmt.Errorf("bundled helper checksum mismatch")
+	}
+	return file, nil
 }
 
-func encodePowerShellCommand(command string) string {
-	codeUnits := utf16.Encode([]rune(command))
-	bytes := make([]byte, len(codeUnits)*2)
-	for i, unit := range codeUnits {
-		bytes[i*2] = byte(unit)
-		bytes[i*2+1] = byte(unit >> 8)
+func createElevatedExchangeFile(pattern, ownerSID string) (string, error) {
+	file, err := os.CreateTemp("", pattern)
+	if err != nil {
+		return "", err
 	}
-	return base64.StdEncoding.EncodeToString(bytes)
+	path := file.Name()
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	if err := configureElevatedExchangeAccess(path, ownerSID); err != nil {
+		_ = os.Remove(path)
+		return "", err
+	}
+	return path, nil
+}
+
+func waitElevatedResult(ctx context.Context, path string) error {
+	ticker := time.NewTicker(elevatedResultPollInterval)
+	defer ticker.Stop()
+	for {
+		raw, err := os.ReadFile(path)
+		if err == nil && len(raw) != 0 {
+			var result elevatedResult
+			if decodeErr := json.Unmarshal(raw, &result); decodeErr != nil {
+				return fmt.Errorf("decode elevated helper result: %w", decodeErr)
+			}
+			if result.Error != "" {
+				return fmt.Errorf("elevated helper command: %s", result.Error)
+			}
+			return nil
+		}
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("read elevated helper result: %w", err)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-ticker.C:
+		}
+	}
 }

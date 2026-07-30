@@ -89,6 +89,7 @@ func EnsureInstall(ctx context.Context) error {
 		return err
 	}
 	deadline := time.Now().Add(20 * time.Second)
+	var lastErr error
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
@@ -102,16 +103,30 @@ func EnsureInstall(ctx context.Context) error {
 		if err == nil && response.Protocol == ProtocolVersion {
 			return nil
 		}
+		if err != nil {
+			lastErr = err
+		} else {
+			lastErr = fmt.Errorf(
+				"helper protocol %d does not match expected protocol %d",
+				response.Protocol,
+				ProtocolVersion,
+			)
+		}
 		time.Sleep(300 * time.Millisecond)
+	}
+	if lastErr != nil {
+		return fmt.Errorf("helper did not become ready after install: %w", lastErr)
 	}
 	return fmt.Errorf("helper did not become ready after install")
 }
 
 // Uninstall removes the helper service (requires elevation).
 func Uninstall(ctx context.Context) error {
-	// The installed binary lives in an administrator-owned location. Never run
-	// the materialized, user-writable copy with elevated privileges.
-	return ElevateUninstall(ctx, BinaryInstallPath())
+	source, err := LocateBundledHelper()
+	if err != nil {
+		return err
+	}
+	return ElevateUninstall(ctx, source)
 }
 
 func LocateBundledHelper() (string, error) {
