@@ -96,16 +96,16 @@ func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (C
 	})
 
 	if !caps.GatewayPortForward {
-		caps.Issues = append(caps.Issues, "缺少 kubeloop-system 的 pods/portforward 权限（无法连接）")
+		caps.Issues = append(caps.Issues, "Missing pods/portforward permission in kubeloop-system (cannot connect)")
 	}
 	if !caps.GatewayInstall {
-		caps.Issues = append(caps.Issues, "无 Gateway 安装权限；将尝试使用管理员预装的 Gateway")
+		caps.Issues = append(caps.Issues, "No Gateway install permission; will try an admin-preinstalled Gateway")
 	}
 	if !caps.InventoryCluster && len(caps.ScopeNamespaces) == 0 {
-		caps.Issues = append(caps.Issues, "无法在任何 Namespace 中 list Pod/Service")
+		caps.Issues = append(caps.Issues, "Cannot list Pods/Services in any namespace")
 	}
 	if !caps.ClusterNodes {
-		caps.Issues = append(caps.Issues, "无法 list Nodes；Pod CIDR 可能需要在 Overview 手动填写")
+		caps.Issues = append(caps.Issues, "Cannot list Nodes; Pod CIDR may need to be entered manually on Overview")
 	}
 	return caps, nil
 }

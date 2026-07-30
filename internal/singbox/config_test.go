@@ -32,6 +32,7 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		`"tag": "kubernetes"`,
 		`"type": "socks"`,
 		`"final": "direct"`,
+		`"find_process": true`,
 		`"external_controller"`,
 	}
 	for _, item := range []string{`"10.96.0.1/32"`, `"10.105.153.132/32"`} {

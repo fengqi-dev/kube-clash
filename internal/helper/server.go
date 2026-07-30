@@ -100,7 +100,7 @@ func (s *Server) dispatch(request Request) Response {
 	case OpPing, OpStatus:
 		return Response{
 			OK: true, Version: Version, Protocol: ProtocolVersion,
-			Installed: true, Running: true,
+			Installed: true, Running: true, ActiveSessions: s.activeSessionIDs(),
 		}
 	case OpStart:
 		if request.Session == nil {
@@ -118,9 +118,22 @@ func (s *Server) dispatch(request Request) Response {
 			return Response{OK: false, Error: err.Error()}
 		}
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
+	case OpStopAll:
+		s.stopAllSessions()
+		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
 	}
+}
+
+func (s *Server) activeSessionIDs() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	ids := make([]string, 0, len(s.sessions))
+	for id := range s.sessions {
+		ids = append(ids, id)
+	}
+	return ids
 }
 
 func (s *Server) startSession(spec singbox.SessionSpec) error {
@@ -149,6 +162,15 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		s.mu.Unlock()
 		return nil
 	}
+	stale := len(s.sessions) != 0
+	s.mu.Unlock()
+	// Only one privileged TUN is supported. Replace leftovers left behind by
+	// crash/reload so reconnect does not fail until a manual helper stop.
+	if stale {
+		s.Log.Printf("replacing leftover privileged TUN session before starting %s", spec.ID)
+		s.stopAllSessions()
+	}
+	s.mu.Lock()
 	if len(s.sessions) != 0 {
 		s.mu.Unlock()
 		return fmt.Errorf("another privileged TUN session is already active")

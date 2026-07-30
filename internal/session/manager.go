@@ -175,12 +175,14 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	manager := &Manager{
 		provider:      provider,
 		core:          newSingboxRuntime(),
-		bridgeFactory: socksbridge.Listen,
+		bridgeFactory: func(ctx context.Context, gatewayAddress string) (net.Listener, error) {
+			return socksbridge.Listen(ctx, gatewayAddress)
+		},
 		gatewayImage:  ResolveGatewayImage(""),
 		intercept:     intercept.NewManager(provider),
 		portfwd:       portfwd.NewManager(provider),
 		state: State{
-			Phase: PhaseIdle, Message: "未连接", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
+			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
 		},
 	}
 	for _, option := range options {
@@ -277,7 +279,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	prev := m.State()
 	state := State{
 		Phase: PhaseChecking, Context: request.Context, Namespace: request.Namespace,
-		Message: "正在检查 Kubernetes 访问权限", CoreVersion: singbox.Version,
+		Message: "Checking Kubernetes access", CoreVersion: singbox.Version,
 		// Keep the last probed version so the Overview subtitle does not flash
 		// back to the cluster name while ServerVersion is re-fetched.
 		KubernetesVersion: prev.KubernetesVersion,
@@ -287,7 +289,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 
 	caps, err := m.provider.ProbeCapabilities(ctx, request.Context)
 	if err != nil {
-		m.fail(ctx, state, "无法检查集群权限", err)
+		m.fail(ctx, state, "Could not check cluster permissions", err)
 		return
 	}
 	state.Capabilities = &caps
@@ -306,31 +308,31 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	if !caps.GatewayPortForward {
 		state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
-		m.fail(ctx, state, "当前账号无法对 Gateway 建立 port-forward", errors.New("missing pods/portforward in kubeloop-system"))
+		m.fail(ctx, state, "Current account cannot port-forward to the Gateway", errors.New("missing pods/portforward in kubeloop-system"))
 		return
 	}
 
 	state.Phase = PhaseInstalling
-	state.Message = "正在安装或检查集群 Gateway"
+	state.Message = "Installing or checking the cluster Gateway"
 	m.publish(state)
 	var gateway cluster.GatewayInfo
 	if caps.GatewayInstall {
 		gateway, err = m.provider.EnsureGateway(ctx, request.Context, m.gatewayImage)
 		if err != nil {
-			m.fail(ctx, state, "无法安装集群 Gateway", err)
+			m.fail(ctx, state, "Could not install the cluster Gateway", err)
 			return
 		}
 	} else {
 		gateway, err = m.provider.GetGateway(ctx, request.Context)
 		if err != nil {
 			state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
-			m.fail(ctx, state, "未找到预装 Gateway，请管理员安装或授予安装权限", err)
+			m.fail(ctx, state, "No preinstalled Gateway found; ask an admin to install it or grant install permission", err)
 			return
 		}
 	}
 
 	state.Phase = PhaseDiscovering
-	state.Message = "正在发现 Pod、Service 和集群 DNS"
+	state.Message = "Discovering Pods, Services, and cluster DNS"
 	m.publish(state)
 	scopeNS := caps.ScopeNamespaces
 	if caps.InventoryCluster {
@@ -338,7 +340,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	discovery, err := m.provider.Discover(ctx, request.Context, scopeNS)
 	if err != nil {
-		m.fail(ctx, state, "无法读取集群网络信息", err)
+		m.fail(ctx, state, "Could not read cluster network information", err)
 		return
 	}
 	if m.store != nil {
@@ -355,13 +357,13 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		ctx, request.Context, gateway.Name, cluster.GatewayPort,
 	)
 	if err != nil {
-		m.fail(ctx, state, "无法建立 Gateway 安全通道", err)
+		m.fail(ctx, state, "Could not establish a secure Gateway channel", err)
 		return
 	}
 	resources = append(resources, forwarder)
 
 	if err := m.intercept.Start(ctx, request.Context, gateway.IP, forwarder.Address()); err != nil {
-		m.fail(ctx, state, "无法启动 Service Intercept 控制通道", err)
+		m.fail(ctx, state, "Could not start the Service Intercept control channel", err)
 		return
 	}
 	var interceptCloseOnce sync.Once
@@ -379,24 +381,30 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	resources = append(resources, closerFunc(stopBridge))
 	bridge, err := m.bridgeFactory(bridgeContext, forwarder.Address())
 	if err != nil {
-		m.fail(ctx, state, "无法启动本地 SOCKS Bridge", err)
+		m.fail(ctx, state, "Could not start the local SOCKS Bridge", err)
 		return
 	}
 	resources = append(resources, bridge)
+	if hostBridge, ok := bridge.(*socksbridge.Bridge); ok {
+		hostBridge.SetHostTCPHandler(m.intercept.HostTCP)
+		resources = append(resources, closerFunc(func() {
+			hostBridge.SetHostTCPHandler(nil)
+		}))
+	}
 
 	state.Phase = PhaseStarting
-	state.Message = "正在安装并启动 sing-box TUN"
+	state.Message = "Installing and starting sing-box TUN"
 	m.publish(state)
 	hosts := m.hostAliasesFor(request.Context)
 	core, err := m.core.Start(ctx, discovery, bridge.Addr().String(), request.Namespace, hosts)
 	if err != nil {
-		m.fail(ctx, state, "无法启动 sing-box TUN", err)
+		m.fail(ctx, state, "Could not start sing-box TUN", err)
 		return
 	}
 	resources = append(resources, core)
 	trafficEndpoints := core.TrafficEndpoints()
 	if err := trafficEndpoints.Validate(); err != nil {
-		m.fail(ctx, state, "sing-box 业务入站不可用", err)
+		m.fail(ctx, state, "sing-box feature inbounds are unavailable", err)
 		return
 	}
 	m.intercept.SetTrafficDialers(intercept.TrafficDialers{
@@ -418,7 +426,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 
 	connectedAt := time.Now()
 	state.Phase = PhaseConnected
-	state.Message = "已连接，可访问 Pod、Service 和集群 DNS"
+	state.Message = "Connected; Pods, Services, and cluster DNS are reachable"
 	state.ConnectedAt = &connectedAt
 	state.Metrics = &singbox.Metrics{}
 	state.Capabilities = &caps
@@ -436,20 +444,21 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.applyInventory(snap)
 	})
 	if err != nil {
-		m.fail(ctx, state, "无法监听集群资源变化", err)
+		m.fail(ctx, state, "Could not watch cluster resource changes", err)
 		return
 	}
 	resources = append(resources, inventory)
 
 	ticker := time.NewTicker(singbox.DefaultMetricsInterval)
 	defer ticker.Stop()
+	controlLost := m.intercept.ControlLost()
 	for {
 		select {
 		case <-ctx.Done():
 			m.clearRecentConnections()
 			m.publish(State{
 				Phase:             PhaseIdle,
-				Message:           "未连接",
+				Message:           "Disconnected",
 				CoreVersion:       singbox.Version,
 				KubernetesVersion: state.KubernetesVersion,
 				Context:           state.Context,
@@ -464,7 +473,13 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 				if err == nil {
 					err = errors.New("sing-box stopped unexpectedly")
 				}
-				m.fail(ctx, state, "sing-box TUN 意外退出", err)
+				m.fail(ctx, state, "sing-box TUN exited unexpectedly", err)
+			}
+			return
+		case <-controlLost:
+			m.clearRecentConnections()
+			if ctx.Err() == nil {
+				m.fail(ctx, state, "Gateway control channel closed; reconnect required", errors.New("gateway control channel closed"))
 			}
 			return
 		case <-ticker.C:
@@ -670,7 +685,7 @@ func (m *Manager) disconnect(clearConnected bool) error {
 	if cancel == nil {
 		m.publish(State{
 			Phase:             PhaseIdle,
-			Message:           "未连接",
+			Message:           "Disconnected",
 			CoreVersion:       singbox.Version,
 			KubernetesVersion: state.KubernetesVersion,
 			Context:           state.Context,
@@ -790,6 +805,40 @@ func (m *Manager) ListPortForwards() []portfwd.Info {
 
 func (m *Manager) StopAllPortForwards() {
 	m.portfwd.StopAll()
+}
+
+// ResetSessions stops every port-forward, exchange, and mirror, then clears their
+// persisted intents from state.json. This still clears disk state when the
+// cluster is unavailable and live stop fails. Previews are left alone.
+func (m *Manager) ResetSessions(ctx context.Context) error {
+	for _, item := range m.portfwd.List() {
+		if err := m.StopPortForward(item.ID); err != nil {
+			m.AppendLog("WARN", fmt.Sprintf("reset stop port-forward %s: %v", item.ID, err))
+		}
+	}
+	for _, item := range m.intercept.List() {
+		if err := m.StopIntercept(ctx, item.ID); err != nil {
+			m.AppendLog("WARN", fmt.Sprintf("reset stop exchange %s: %v", item.ID, err))
+		}
+	}
+	for _, item := range m.intercept.ListMirrors() {
+		if err := m.StopIntercept(ctx, item.ID); err != nil {
+			m.AppendLog("WARN", fmt.Sprintf("reset stop mirror %s: %v", item.ID, err))
+		}
+	}
+	if err := m.clearPersistedSessions(); err != nil {
+		return err
+	}
+	m.AppendLog("INFO", "reset sessions: cleared port-forwards, exchanges, and mirrors")
+	return nil
+}
+
+// SessionIntentCounts returns persisted restore intents from state.json.
+func (m *Manager) SessionIntentCounts() store.SessionIntentCounts {
+	if m.store == nil {
+		return store.SessionIntentCounts{}
+	}
+	return m.store.SessionIntentCounts()
 }
 
 func (m *Manager) fail(ctx context.Context, state State, message string, err error) {

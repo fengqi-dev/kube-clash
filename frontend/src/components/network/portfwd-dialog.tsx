@@ -101,9 +101,16 @@ export function PortForwardDialog({
         remotePort: selectedPort.port,
         localPort: parsedLocal,
       });
-      toast.success(t("portfwd.started"), {
-        description: `${info.address} → ${kind}/${target.name}:${selectedPort.port}`,
-      });
+      try {
+        await navigator.clipboard.writeText(info.address);
+        toast.success(t("portfwd.started"), {
+          description: `${info.address} → ${kind}/${target.name}:${selectedPort.port} · ${t("portfwd.copied")}`,
+        });
+      } catch {
+        toast.success(t("portfwd.started"), {
+          description: `${info.address} → ${kind}/${target.name}:${selectedPort.port}`,
+        });
+      }
       onStarted();
       onOpenChange(false);
     } catch (error) {

@@ -13,7 +13,7 @@ description: |
   Connect your laptop to a cluster with TUN routing, DNS, and port tools.
 vendor: KubeLoop
 homepage: https://github.com/fengqi-dev/kube-loop
-license: Apache-2.0
+license: MIT
 
 depends:
   - libgtk-3-0

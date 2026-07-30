@@ -10,6 +10,11 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import {
   executableName,
@@ -121,8 +126,8 @@ export function ConnectionsView({
                 connections.map((connection) => (
                   <TableRow key={connection.id}>
                     <TableCell className="max-w-[140px] truncate font-medium">
-                      {connection.process ||
-                        executableName(connection.process) ||
+                      {executableName(connection.process) ||
+                        connection.process ||
                         "—"}
                     </TableCell>
                     <TableCell className="text-muted-foreground">
@@ -153,7 +158,21 @@ export function ConnectionsView({
                       {connection.outbound || "—"}
                     </TableCell>
                     <TableCell className="max-w-[180px] truncate text-[11px] text-muted-foreground">
-                      {connection.rule || "—"}
+                      {connection.rule ? (
+                        <Tooltip>
+                          <TooltipTrigger asChild>
+                            <span className="block truncate">{connection.rule}</span>
+                          </TooltipTrigger>
+                          <TooltipContent
+                            side="top"
+                            className="max-w-[min(28rem,calc(100vw-2rem))] break-all font-mono text-[11px]"
+                          >
+                            {connection.rule}
+                          </TooltipContent>
+                        </Tooltip>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                     <TableCell className="font-mono text-[11px] text-muted-foreground">
                       {formatDuration(connection.startedAt, now)}

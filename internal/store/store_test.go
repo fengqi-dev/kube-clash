@@ -48,6 +48,47 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	}
 }
 
+func TestClearSessionIntents(t *testing.T) {
+	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = s.SetPortForwards("minikube", []PortForwardSpec{{
+		Namespace: "default", Kind: "pod", Name: "web", RemotePort: 80, LocalPort: 8080,
+	}})
+	_ = s.SetExchanges("minikube", []ExchangeSpec{{
+		Namespace: "default", Service: "api",
+		Ports: []PortMapping{{ServicePort: 80, Protocol: "TCP", LocalHost: "127.0.0.1", LocalPort: 3000}},
+	}})
+	_ = s.SetMirrors("minikube", []MirrorSpec{{
+		Namespace: "default", Service: "web",
+		Ports: []PortMapping{{ServicePort: 80, Protocol: "TCP", LocalHost: "127.0.0.1", LocalPort: 3001}},
+	}})
+	_ = s.SetPreviews("minikube", []PreviewSpec{{
+		Namespace: "default", Name: "local-api",
+		Ports: []PortMapping{{ServicePort: 80, Protocol: "TCP", LocalHost: "127.0.0.1", LocalPort: 3002}},
+	}})
+	_ = s.SetHostAliases("minikube", []HostAliasSpec{{Domain: "app.dev", IP: "10.96.0.50"}})
+
+	counts := s.SessionIntentCounts()
+	if counts.PodPortForwards != 1 || counts.Exchanges != 1 || counts.Mirrors != 1 {
+		t.Fatalf("counts=%#v", counts)
+	}
+	if err := s.ClearSessionIntents(); err != nil {
+		t.Fatal(err)
+	}
+	cluster := s.Cluster("minikube")
+	if len(cluster.PortForwards) != 0 || len(cluster.Exchanges) != 0 || len(cluster.Mirrors) != 0 {
+		t.Fatalf("session intents not cleared: %#v", cluster)
+	}
+	if len(cluster.Previews) != 1 || len(cluster.HostAliases) != 1 {
+		t.Fatalf("previews/host aliases should remain: %#v", cluster)
+	}
+	if got := s.SessionIntentCounts(); got != (SessionIntentCounts{}) {
+		t.Fatalf("expected zero counts, got %#v", got)
+	}
+}
+
 func TestHostAliasesClear(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

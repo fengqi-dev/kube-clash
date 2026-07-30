@@ -263,6 +263,58 @@ func (s *Store) SetPortForwards(contextName string, items []PortForwardSpec) err
 	return s.saveLocked()
 }
 
+// ClearSessionIntents removes persisted port-forwards, exchanges, and mirrors
+// for every context. Previews, host aliases, and network settings are kept.
+func (s *Store) ClearSessionIntents() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	changed := false
+	for _, cluster := range s.state.Clusters {
+		if cluster == nil {
+			continue
+		}
+		if len(cluster.PortForwards) > 0 || len(cluster.Exchanges) > 0 || len(cluster.Mirrors) > 0 {
+			changed = true
+		}
+		cluster.PortForwards = nil
+		cluster.Exchanges = nil
+		cluster.Mirrors = nil
+	}
+	if !changed {
+		return nil
+	}
+	return s.saveLocked()
+}
+
+// SessionIntentCounts summarizes persisted restore intents across all contexts.
+type SessionIntentCounts struct {
+	PodPortForwards     int `json:"podPortForwards"`
+	NetworkPortForwards int `json:"networkPortForwards"`
+	Exchanges           int `json:"exchanges"`
+	Mirrors             int `json:"mirrors"`
+}
+
+func (s *Store) SessionIntentCounts() SessionIntentCounts {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var counts SessionIntentCounts
+	for _, cluster := range s.state.Clusters {
+		if cluster == nil {
+			continue
+		}
+		for _, item := range cluster.PortForwards {
+			if item.Kind == "pod" {
+				counts.PodPortForwards++
+			} else {
+				counts.NetworkPortForwards++
+			}
+		}
+		counts.Exchanges += len(cluster.Exchanges)
+		counts.Mirrors += len(cluster.Mirrors)
+	}
+	return counts
+}
+
 func (s *Store) SetExchanges(contextName string, items []ExchangeSpec) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -442,6 +494,7 @@ func cloneCluster(item ClusterState) ClusterState {
 		Connected:    item.Connected,
 		PortForwards: clonePortForwards(item.PortForwards),
 		Exchanges:    cloneExchanges(item.Exchanges),
+		Mirrors:      cloneMirrors(item.Mirrors),
 		Previews:     clonePreviews(item.Previews),
 		HostAliases:  cloneHostAliases(item.HostAliases),
 	}

@@ -41,6 +41,10 @@ func (c *Client) Stop(ctx context.Context, sessionID string) (Response, error) {
 	return c.roundTrip(ctx, Request{Op: OpStop, SessionID: sessionID})
 }
 
+func (c *Client) StopAll(ctx context.Context) (Response, error) {
+	return c.roundTrip(ctx, Request{Op: OpStopAll})
+}
+
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
 	if c.Token == "" {
 		return Response{}, fmt.Errorf("helper token is required")

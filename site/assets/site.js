@@ -19,7 +19,7 @@ const dictionary = {
     "cta.designHref":
       "https://github.com/fengqi-dev/kube-loop/blob/main/docs/design.md",
     "cta.getStarted": "Get started",
-    "footer.copy": "© KubeLoop contributors. Apache License 2.0.",
+    "footer.copy": "© KubeLoop contributors. MIT License.",
 
     "overview.title": "Welcome to KubeLoop",
     "overview.desc":
@@ -173,7 +173,7 @@ const dictionary = {
     "cta.designHref":
       "https://github.com/fengqi-dev/kube-loop/blob/main/docs/design.zh-CN.md",
     "cta.getStarted": "快速开始",
-    "footer.copy": "© KubeLoop 贡献者。Apache License 2.0。",
+    "footer.copy": "© KubeLoop 贡献者。MIT License。",
 
     "overview.title": "欢迎使用 KubeLoop",
     "overview.desc":

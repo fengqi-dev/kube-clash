@@ -764,6 +764,24 @@ export namespace store {
 	        this.ip = source["ip"];
 	    }
 	}
+	export class SessionIntentCounts {
+	    podPortForwards: number;
+	    networkPortForwards: number;
+	    exchanges: number;
+	    mirrors: number;
+	
+	    static createFrom(source: any = {}) {
+	        return new SessionIntentCounts(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.podPortForwards = source["podPortForwards"];
+	        this.networkPortForwards = source["networkPortForwards"];
+	        this.exchanges = source["exchanges"];
+	        this.mirrors = source["mirrors"];
+	    }
+	}
 
 }
 

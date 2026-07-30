@@ -283,7 +283,7 @@ func TestManagerPublishesGatewayError(t *testing.T) {
 		t.Fatal(err)
 	}
 	state := receiveState(t, failed)
-	if state.Error != "forbidden" || state.Message != "无法安装集群 Gateway" {
+	if state.Error != "forbidden" || state.Message != "Could not install the cluster Gateway" {
 		t.Fatalf("unexpected error state: %#v", state)
 	}
 }

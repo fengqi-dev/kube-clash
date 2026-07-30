@@ -30,6 +30,13 @@ func (m *Manager) PreferredSelection() (contextName, namespace string) {
 	return ui.LastContext, ui.LastNamespace
 }
 
+func (m *Manager) clearPersistedSessions() error {
+	if m.store == nil {
+		return nil
+	}
+	return m.store.ClearSessionIntents()
+}
+
 func (m *Manager) persistPortForwards() {
 	if m.store == nil {
 		return

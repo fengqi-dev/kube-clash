@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml)
 [![Release](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
@@ -160,7 +160,7 @@ Tag `v*` to cut a release (desktop packages, Gateway binaries + GHCR image).
 
 ## License
 
-KubeLoop is licensed under the [Apache License 2.0](LICENSE).
+KubeLoop is licensed under the [MIT License](LICENSE).
 
 sing-box is a separately licensed (GPLv3) managed dependency. Distributions that
 bundle it must meet its license obligations — see

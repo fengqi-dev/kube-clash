@@ -3,12 +3,13 @@ package helper
 import "github.com/fengqi-dev/kube-loop/internal/singbox"
 
 const (
-	ProtocolVersion = 2
+	ProtocolVersion = 3
 
-	OpPing   = "ping"
-	OpStart  = "start"
-	OpStop   = "stop"
-	OpStatus = "status"
+	OpPing    = "ping"
+	OpStart   = "start"
+	OpStop    = "stop"
+	OpStopAll = "stop-all"
+	OpStatus  = "status"
 )
 
 // Request is a single JSON-line RPC request.
@@ -21,13 +22,14 @@ type Request struct {
 
 // Response is a single JSON-line RPC response.
 type Response struct {
-	OK        bool   `json:"ok"`
-	Error     string `json:"error,omitempty"`
-	Version   string `json:"version,omitempty"`
-	Protocol  int    `json:"protocol,omitempty"`
-	Installed bool   `json:"installed,omitempty"`
-	Running   bool   `json:"running,omitempty"`
-	PID       int    `json:"pid,omitempty"`
+	OK             bool     `json:"ok"`
+	Error          string   `json:"error,omitempty"`
+	Version        string   `json:"version,omitempty"`
+	Protocol       int      `json:"protocol,omitempty"`
+	Installed      bool     `json:"installed,omitempty"`
+	Running        bool     `json:"running,omitempty"`
+	PID            int      `json:"pid,omitempty"`
+	ActiveSessions []string `json:"activeSessions,omitempty"`
 }
 
 // AuthFile is persisted under the system state directory.

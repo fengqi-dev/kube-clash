@@ -25,9 +25,24 @@ const (
 	addressIPv6   = 4
 )
 
+// HostTCPHandler claims intercepted Service destinations on the host TUN path.
+// When ok is true, the bridge writes the SOCKS success reply then calls serve.
+type HostTCPHandler func(host string, port uint16) (serve func(net.Conn), ok bool)
+
 type Server struct {
 	GatewayAddress string
 	DialTimeout    time.Duration
+	HostTCP        HostTCPHandler
+}
+
+// Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
+type Bridge struct {
+	net.Listener
+	server *Server
+}
+
+func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
+	b.server.HostTCP = handler
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -65,6 +80,15 @@ func (s *Server) handle(control net.Conn) {
 }
 
 func (s *Server) handleTCP(client net.Conn, host string, port uint16) {
+	if s.HostTCP != nil {
+		if serve, ok := s.HostTCP(host, port); ok && serve != nil {
+			if err := writeReply(client, 0, client.LocalAddr()); err != nil {
+				return
+			}
+			serve(client)
+			return
+		}
+	}
 	gateway, err := s.openGateway(tunnel.CommandTCP, host, port)
 	if err != nil {
 		_ = writeReply(client, 5, nil)
@@ -392,7 +416,7 @@ func (r *sliceReader) Read(destination []byte) (int, error) {
 	return read, nil
 }
 
-func Listen(ctx context.Context, gatewayAddress string) (net.Listener, error) {
+func Listen(ctx context.Context, gatewayAddress string) (*Bridge, error) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		return nil, err
@@ -403,5 +427,5 @@ func Listen(ctx context.Context, gatewayAddress string) (net.Listener, error) {
 		listener.Close()
 	}()
 	go func() { _ = server.Serve(listener) }()
-	return listener, nil
+	return &Bridge{Listener: listener, server: server}, nil
 }

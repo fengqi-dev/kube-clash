@@ -244,3 +244,10 @@ export interface PortForwardInfo {
   localPort: number;
   address: string;
 }
+
+export interface SessionIntentCounts {
+  podPortForwards: number;
+  networkPortForwards: number;
+  exchanges: number;
+  mirrors: number;
+}

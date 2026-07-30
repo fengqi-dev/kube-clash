@@ -360,6 +360,18 @@ func (a *App) ListPortForwards() []portfwd.Info {
 	return a.manager.ListPortForwards()
 }
 
+func (a *App) ResetSessions() error {
+	ctx := a.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return a.manager.ResetSessions(ctx)
+}
+
+func (a *App) SessionIntentCounts() store.SessionIntentCounts {
+	return a.manager.SessionIntentCounts()
+}
+
 func (a *App) CheckForUpdates() update.Info {
 	ctx := a.ctx
 	if ctx == nil {

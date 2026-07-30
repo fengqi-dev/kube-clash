@@ -2,10 +2,12 @@ package intercept
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -433,5 +435,221 @@ func TestStartStopPreviewCreatesAndDeletes(t *testing.T) {
 	}
 	if !api.deleted {
 		t.Fatal("delete not called")
+	}
+}
+
+func TestExchangeAndMirrorAreMutuallyExclusive(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	local, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.96.1.10",
+				Selector:  map[string]string{"app": "api"},
+				Ports: []corev1.ServicePort{{
+					Name: "http", Port: 80, Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+		endpointsSubsets: []corev1.EndpointSubset{{
+			Addresses: []corev1.EndpointAddress{{IP: "10.244.0.10"}},
+			Ports:     []corev1.EndpointPort{{Name: "http", Port: 80, Protocol: corev1.ProtocolTCP}},
+		}},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.8", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	mapping := Mapping{
+		Namespace: "default",
+		Service:   "api",
+		Ports: []PortMapping{{
+			ServicePort: 80, Protocol: "TCP",
+			LocalHost: "127.0.0.1", LocalPort: local.Addr().(*net.TCPAddr).Port,
+		}},
+	}
+	if _, err := manager.StartIntercept(ctx, mapping); err != nil {
+		t.Fatal(err)
+	}
+	_, err = manager.StartMirror(ctx, mapping)
+	if err == nil {
+		t.Fatal("expected mirror to be rejected while exchange is active")
+	}
+	if !strings.Contains(err.Error(), "mutually exclusive") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestServiceRewriteHostsIncludesClusterIPAndDNS(t *testing.T) {
+	hosts := serviceRewriteHosts(&corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{Name: "static-web", Namespace: "default"},
+		Spec:       corev1.ServiceSpec{ClusterIP: "10.105.153.132"},
+	})
+	joined := strings.Join(hosts, ",")
+	for _, want := range []string{
+		"10.105.153.132",
+		"static-web.default.svc.cluster.local",
+		"static-web.default.svc",
+		"static-web.default",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("hosts %v missing %q", hosts, want)
+		}
+	}
+}
+
+func TestHostTCPServesExchangeWithoutGatewayHairpin(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	local, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	go func() {
+		conn, err := local.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		buf := make([]byte, 64)
+		n, _ := conn.Read(buf)
+		_, _ = fmt.Fprintf(conn, "local:%s", buf[:n])
+	}()
+
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "static-web", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.105.153.132",
+				Selector:  map[string]string{"role": "myrole"},
+				Ports: []corev1.ServicePort{{
+					Name: "web", Port: 80, Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.199", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	info, err := manager.StartIntercept(ctx, Mapping{
+		Namespace: "default",
+		Service:   "static-web",
+		Ports: []PortMapping{{
+			ServicePort: 80, Protocol: "TCP",
+			LocalHost: "127.0.0.1", LocalPort: local.Addr().(*net.TCPAddr).Port,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	serve, ok := manager.HostTCP("10.105.153.132", 80)
+	if !ok || serve == nil {
+		t.Fatal("expected host TCP route for ClusterIP")
+	}
+	serveDNS, ok := manager.HostTCP("static-web.default.svc.cluster.local", 80)
+	if !ok || serveDNS == nil {
+		t.Fatal("expected host TCP route for DNS name")
+	}
+
+	left, right := net.Pipe()
+	defer left.Close()
+	go serve(right)
+	if _, err := left.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	_ = left.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 64)
+	n, err := left.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buf[:n]); got != "local:ping" {
+		t.Fatalf("got %q", got)
+	}
+	if err := manager.Stop(ctx, info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manager.HostTCP("10.105.153.132", 80); ok {
+		t.Fatal("host route should be cleared after stop")
+	}
+}
+
+func TestStartMirrorFailsWhenControlChannelDrops(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "static-web", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.96.1.10",
+				Selector:  map[string]string{"role": "myrole"},
+				Ports: []corev1.ServicePort{{
+					Name: "http", Port: 80, Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.8", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	// Closing the listener only stops Accept; drop the live control conn.
+	_ = manager.control.close()
+	select {
+	case <-manager.ControlLost():
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for control lost")
+	}
+	_ = listener.Close()
+
+	_, err = manager.StartMirror(ctx, Mapping{
+		Namespace: "default",
+		Service:   "static-web",
+		Ports: []PortMapping{{
+			ServicePort: 80, Protocol: "TCP",
+			LocalHost: "127.0.0.1", LocalPort: 18080,
+		}},
+	})
+	if err == nil {
+		t.Fatal("expected mirror start to fail after control drop")
+	}
+	if !errors.Is(err, errControlClosed) && !strings.Contains(err.Error(), "gateway control channel closed") {
+		t.Fatalf("got %v, want control closed", err)
 	}
 }
