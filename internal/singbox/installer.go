@@ -243,9 +243,9 @@ func (i *Installer) bundledCandidates() []string {
 		}
 		dir := filepath.Dir(exe)
 		candidates = append(candidates,
-			filepath.Join(dir, name),                 // next to helper service / app
-			filepath.Join(dir, "..", name),           // resources/../sing-box
-			filepath.Join(dir, "Resources", name),    // macOS app Resources
+			filepath.Join(dir, name),              // next to helper service / app
+			filepath.Join(dir, "..", name),        // resources/../sing-box
+			filepath.Join(dir, "Resources", name), // macOS app Resources
 			filepath.Join(dir, "..", "Resources", name),
 		)
 	}
