@@ -134,7 +134,10 @@ func mirrorTCP(client, primary net.Conn, local net.Conn) {
 	go func() {
 		dst := io.Writer(primary)
 		if shadow != nil {
-			dst = io.MultiWriter(primary, shadow)
+			// Tee to shadow before primary. MultiWriter stops at the first
+			// error and otherwise writes in order; writing primary first let a
+			// fast response close the session before the request was queued.
+			dst = io.MultiWriter(shadow, primary)
 		}
 		_, _ = io.Copy(dst, client)
 		closeWrite(primary)
@@ -182,11 +185,13 @@ func mirrorUDP(client, primary net.Conn, primaryFramed bool, local net.Conn) {
 				return
 			}
 			buffer = payload[:0]
-			if err := writeMirrorUDP(primary, primaryFramed, payload); err != nil {
-				return
-			}
+			// Tee before primary write so a fast response path cannot close the
+			// shadow mid-datagram.
 			if shadow != nil {
 				_, _ = shadow.Write(payload)
+			}
+			if err := writeMirrorUDP(primary, primaryFramed, payload); err != nil {
+				return
 			}
 		}
 	}()
