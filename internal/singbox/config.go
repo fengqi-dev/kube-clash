@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -210,19 +211,26 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		})
 	}
 
+	tunInbound := map[string]any{
+		// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
+		// (or platform split DNS) + dns-in instead of TUN DNS hijack.
+		"type":          "tun",
+		"tag":           "tun-in",
+		"address":       []string{options.TUNAddress},
+		"mtu":           9000,
+		"auto_route":    true,
+		"strict_route":  true,
+		"stack":         "mixed",
+		"route_address": routes,
+	}
+	// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube
+	// bridge conflicts that otherwise break kubectl port-forward to Gateway.
+	// See https://sing-box.sagernet.org/configuration/inbound/tun/
+	if runtime.GOOS == "linux" {
+		tunInbound["auto_redirect"] = true
+	}
 	inbounds := []map[string]any{
-		{
-			// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
-			// (or platform split DNS) + dns-in instead of TUN DNS hijack.
-			"type":          "tun",
-			"tag":           "tun-in",
-			"address":       []string{options.TUNAddress},
-			"mtu":           9000,
-			"auto_route":    true,
-			"strict_route":  true,
-			"stack":         "mixed",
-			"route_address": routes,
-		},
+		tunInbound,
 		{
 			"type":        "direct",
 			"tag":         "dns-in",

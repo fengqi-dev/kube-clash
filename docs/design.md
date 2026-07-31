@@ -324,12 +324,11 @@ Benefits of the sing-box network stack:
 The client uses split DNS and only takes over:
 
 - Configured cluster domains (always includes `cluster.local`, plus optional custom domains);
-- Matching `svc.<domain>` / `<ns>.svc.<domain>` suffixes;
-- Reverse zones derived from Pod/Service CIDRs (`*.in-addr.arpa` / `*.ip6.arpa`) for PTR.
+- Matching `svc.<domain>` / `<ns>.svc.<domain>` suffixes.
 
 Queries are forwarded through the existing tunnel to the kube-system CoreDNS Service. All other names keep using the user’s original DNS. The local DNS search proxy listens on UDP and TCP; sing-box DNS uses `prefer_ipv4` so AAAA answers are allowed when dual-stack routes exist.
 
-Short names such as `my-service` are namespace-sensitive. Search suffixes come from the configurable DNS search Namespace:
+Short names such as `my-service` are namespace-sensitive. Search suffixes use the connect Namespace (UI connects with `default`):
 
 ```text
 <namespace>.svc.<cluster-domain>
@@ -337,7 +336,7 @@ svc.<cluster-domain>
 <cluster-domain>
 ```
 
-The UI must clearly show the current DNS search Namespace and cluster domains.
+The UI must clearly show the configured cluster domains.
 
 #### Coexistence with other TUN / system-DNS clients
 

@@ -320,13 +320,12 @@ RestoreSystemNetwork()
 客户端使用 split DNS，只接管：
 
 - 已配置的集群域名（始终包含 `cluster.local`，可附加自定义域）；
-- 对应的 `svc.<domain>` / `<ns>.svc.<domain>` 后缀；
-- 由 Pod/Service CIDR 推导的反向区（`*.in-addr.arpa` / `*.ip6.arpa`）以支持 PTR。
+- 对应的 `svc.<domain>` / `<ns>.svc.<domain>` 后缀。
 
 查询通过现有隧道转发到 kube-system 中的 CoreDNS Service。其他域名继续使用用户原来的
 DNS。本地 DNS search proxy 同时监听 UDP 与 TCP；sing-box DNS 使用 `prefer_ipv4`，在双栈路由可用时允许 AAAA。
 
-短名称如 `my-service` 存在 Namespace 语义。搜索域由可配置的 DNS 搜索 Namespace 生成：
+短名称如 `my-service` 存在 Namespace 语义。搜索域使用连接时的 Namespace（UI 以 `default` 连接）：
 
 ```text
 <namespace>.svc.<cluster-domain>
@@ -334,7 +333,7 @@ svc.<cluster-domain>
 <cluster-domain>
 ```
 
-UI 需要明确展示当前 DNS 搜索 Namespace 与集群域名。
+UI 需要明确展示已配置的集群域名。
 
 #### 与其他 TUN / 系统 DNS 客户端共存
 
