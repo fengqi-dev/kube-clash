@@ -295,6 +295,7 @@ export namespace helper {
 	export class Status {
 	    installed: boolean;
 	    running: boolean;
+	    coreReady: boolean;
 	    version?: string;
 	    protocol?: number;
 	    expected: string;
@@ -309,6 +310,7 @@ export namespace helper {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.installed = source["installed"];
 	        this.running = source["running"];
+	        this.coreReady = source["coreReady"];
 	        this.version = source["version"];
 	        this.protocol = source["protocol"];
 	        this.expected = source["expected"];

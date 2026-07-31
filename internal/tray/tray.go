@@ -22,6 +22,7 @@ type Controller struct {
 	strings  locale.Strings
 	quitting atomic.Bool
 	ready    atomic.Bool
+	active   atomic.Bool // tray event loop / status item is in use
 
 	mu             sync.Mutex
 	statusItem     *systray.MenuItem
@@ -32,13 +33,15 @@ type Controller struct {
 	recentRoot     *systray.MenuItem
 	recentItems    []*systray.MenuItem
 	recentEmpty    *systray.MenuItem
+
 }
 
-// Start launches the tray in a background goroutine.
-// Call this before wails.Run so the tray message loop is independent of WebView.
+// Start prepares the tray. On Windows/Linux the tray message loop runs in a
+// background goroutine; on macOS the status item is currently disabled (Wails
+// AppKit conflict) so the window closes normally.
 func Start(host Host) *Controller {
 	c := &Controller{host: host, strings: locale.T()}
-	go systray.Run(c.onReady, c.onExit)
+	c.startPlatform()
 	return c
 }
 
@@ -48,12 +51,13 @@ func (c *Controller) Stop() {
 		return
 	}
 	c.quitting.Store(true)
-	systray.Quit()
+	c.stopPlatform()
 }
 
-// BeforeClose hides the window instead of quitting, unless Quit was confirmed.
+// BeforeClose hides the window instead of quitting when the tray is active,
+// unless Quit was confirmed. Without an active tray, the window closes normally.
 func (c *Controller) BeforeClose(ctx context.Context) (prevent bool) {
-	if c != nil && c.quitting.Load() {
+	if c == nil || c.quitting.Load() || !c.active.Load() {
 		return false
 	}
 	runtime.WindowHide(ctx)

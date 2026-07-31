@@ -77,6 +77,10 @@ package_darwin() {
     cp "${BIN_DIR}/LICENSE.sing-box.txt" "${resources}/LICENSE.sing-box.txt"
   fi
 
+  # Wails already ad-hoc signed the .app; copying into Resources breaks the seal
+  # and Gatekeeper refuses to open the DMG/cask install ("damaged" / won't launch).
+  codesign --force --deep -s - "${app_stage}"
+
   tar -C "${BIN_DIR}" -czf "${DIST_DIR}/kubeloop-${version}-darwin-${ARCH}.tar.gz" KubeLoop.app
 
   stage="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-dmg.XXXXXX")"

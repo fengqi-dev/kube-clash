@@ -3,7 +3,6 @@ import {
   Boxes,
   Gauge,
   Network,
-  Orbit,
   PanelLeftClose,
   PanelLeftOpen,
   ScrollText,
@@ -13,6 +12,7 @@ import {
   Waypoints,
   type LucideIcon,
 } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo-mark";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -162,9 +162,7 @@ export function AppSidebar({
           collapsed ? "flex-col gap-2" : "h-11 gap-2.5 px-2",
         )}
       >
-        <div className="grid size-8 shrink-0 place-items-center rounded-md bg-primary text-primary-foreground">
-          <Orbit size={18} strokeWidth={1.9} />
-        </div>
+        <LogoMark className="size-9 shrink-0" />
         {!collapsed ? (
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold tracking-tight">KubeLoop</div>
