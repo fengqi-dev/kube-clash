@@ -37,7 +37,7 @@ func applyPlatformDNS(_ string, dns singbox.DNSMeta) error {
 		}
 	}
 	content := fmt.Sprintf(
-		"%s\n[Resolve]\nDNS=%s:%d\nDomains=%s\n",
+		"%s\n[Resolve]\nDNS=%s:%d\nDomains=%s\nDNSSEC=no\nDNSOverTLS=no\n",
 		linuxDNSMarker, dns.Listen, dns.Port, strings.Join(domains, " "),
 	)
 	if err := os.MkdirAll(filepath.Dir(resolvedDropIn), 0o755); err != nil {
@@ -73,9 +73,9 @@ func restorePlatformDNS(_ string, _ singbox.DNSMeta) error {
 }
 
 func reloadResolved() {
-	if err := exec.Command("resolvectl", "flush-caches").Run(); err != nil {
-		_ = exec.Command("systemctl", "reload-or-restart", "systemd-resolved").Run()
-	}
+	// Drop-in changes require a reload; flush-caches alone does not re-read conf.d.
+	_ = exec.Command("systemctl", "reload-or-restart", "systemd-resolved").Run()
+	_ = exec.Command("resolvectl", "flush-caches").Run()
 }
 
 func cleanupPlatformRoutes(routes []string) {

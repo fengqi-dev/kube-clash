@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -277,6 +278,15 @@ type hostRoute struct {
 }
 
 func lookupHostRoute(host string) (hostRoute, error) {
+	switch runtime.GOOS {
+	case "linux":
+		return lookupHostRouteLinux(host)
+	default:
+		return lookupHostRouteDarwin(host)
+	}
+}
+
+func lookupHostRouteDarwin(host string) (hostRoute, error) {
 	cmd := exec.Command("route", "-n", "get", host)
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -298,7 +308,34 @@ func lookupHostRoute(host string) (hostRoute, error) {
 	return route, nil
 }
 
-// requireRoutedViaKubeLoop requires host traffic to use the same TUN gateway as a
+func lookupHostRouteLinux(host string) (hostRoute, error) {
+	cmd := exec.Command("ip", "-o", "route", "get", host)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return hostRoute{}, fmt.Errorf("ip route get %s: %w (%s)", host, err, strings.TrimSpace(string(output)))
+	}
+	// Example: "10.96.0.1 via 198.19.0.1 dev tun0 src 198.19.0.2 uid 1001"
+	fields := strings.Fields(string(output))
+	var route hostRoute
+	for i := 0; i < len(fields)-1; i++ {
+		switch fields[i] {
+		case "via":
+			route.Gateway = fields[i+1]
+		case "dev":
+			route.Interface = fields[i+1]
+		}
+	}
+	if route.Interface == "" {
+		return hostRoute{}, fmt.Errorf("no device in ip route get %s:\n%s", host, output)
+	}
+	return route, nil
+}
+
+func isKubeLoopTUN(iface string) bool {
+	return strings.HasPrefix(iface, "utun") || strings.HasPrefix(iface, "tun")
+}
+
+// RequireRoutedViaKubeLoop requires host traffic to use the same TUN gateway as a
 // known-good ClusterIP path. Skips when another TUN client (e.g. Clash 198.18/16)
 // owns the destination CIDR — direct Pod IP cannot be validated in that environment.
 func RequireRoutedViaKubeLoop(t *testing.T, host, referenceHost string) {
@@ -309,7 +346,7 @@ func RequireRoutedViaKubeLoop(t *testing.T, host, referenceHost string) {
 	var want hostRoute
 	for time.Now().Before(deadline) {
 		ref, err := lookupHostRoute(referenceHost)
-		if err != nil || !strings.HasPrefix(ref.Interface, "utun") {
+		if err != nil || !isKubeLoopTUN(ref.Interface) {
 			lastErr = err
 			time.Sleep(300 * time.Millisecond)
 			continue
