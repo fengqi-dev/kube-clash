@@ -53,23 +53,42 @@ cluster. You do not need `kubectl` installed locally.
 
 ## Get started
 
-1. Install a platform package (or build from source — see below).
-   - **macOS (Homebrew)**:
-     ```bash
-     brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
-     brew install --cask kubeloop
-     ```
-   - **macOS (manual)**: download the `.dmg` from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-     and drag `KubeLoop.app` into Applications (or extract the `.tar.gz`). If Gatekeeper
-     blocks it, right-click → **Open**, or run `xattr -cr KubeLoop.app`.
-   - **Windows**: run the NSIS installer (`kubeloop-*-windows-*-installer.exe`), or extract the
-     portable zip into a folder (flat layout like `Program Files\KubeLoop\` with
-     `sing-box.exe` and `resources\` helper tools). If SmartScreen appears, choose
-     **More info** → **Run anyway**.
-   - **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.
-2. Ensure your machine can reach the cluster API with a normal kubeconfig.
-3. Open KubeLoop, choose a **Context**, click **Connect**.
-4. On first use, approve the **virtual network service** (privileged helper)
+### Install KubeLoop
+
+**macOS / Linux** (downloads the latest release package for your CPU):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
+```
+
+**Windows** (PowerShell; runs the latest NSIS installer when available):
+
+```powershell
+irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
+```
+
+Other options:
+
+- **macOS (Homebrew)**:
+  ```bash
+  brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+  brew install --cask kubeloop
+  ```
+- **macOS (manual)**: download the `.dmg` from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+  and drag `KubeLoop.app` into Applications (or extract the `.tar.gz`). If Gatekeeper
+  blocks it, right-click → **Open**, or run `xattr -cr KubeLoop.app`.
+- **Windows**: run the NSIS installer (`kubeloop-*-windows-*-installer.exe`), or extract the
+  portable zip into a folder (flat layout like `Program Files\KubeLoop\` with
+  `sing-box.exe` and `resources\` helper tools). If SmartScreen appears, choose
+  **More info** → **Run anyway**.
+- **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.
+- Or build from source — see below.
+
+Then:
+
+1. Ensure your machine can reach the cluster API with a normal kubeconfig.
+2. Open KubeLoop, choose a **Context**, click **Connect**.
+3. On first use, approve the **virtual network service** (privileged helper)
    once. Later connects should not ask again. You can install or remove it under
    **Settings**.
 

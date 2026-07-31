@@ -49,21 +49,40 @@ TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机
 
 ## 快速开始
 
-1. 安装对应平台包（或按下方说明自行构建）。
-   - **macOS（Homebrew）**：
-     ```bash
-     brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
-     brew install --cask kubeloop
-     ```
-   - **macOS（手动）**：从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-     下载 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
-     若被 Gatekeeper 拦截，可右键 → **打开**，或执行 `xattr -cr KubeLoop.app`。
-   - **Windows**：运行 NSIS 安装包（`kubeloop-*-windows-*-installer.exe`），或解压便携 zip。
-     若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
-   - **Linux**：安装 `.deb` / `.rpm`，或解压 `.tar.gz` 后运行 `KubeLoop`。
-2. 确认本机 kubeconfig 能正常访问目标集群 API。
-3. 打开 KubeLoop，选择 **Context**，点击 **连接**。
-4. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
+### 安装 KubeLoop
+
+**macOS / Linux**（按 CPU 架构下载最新 Release 包）：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
+```
+
+**Windows**（PowerShell；优先运行最新 NSIS 安装包）：
+
+```powershell
+irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
+```
+
+其他方式：
+
+- **macOS（Homebrew）**：
+  ```bash
+  brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+  brew install --cask kubeloop
+  ```
+- **macOS（手动）**：从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
+  下载 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
+  若被 Gatekeeper 拦截，可右键 → **打开**，或执行 `xattr -cr KubeLoop.app`。
+- **Windows**：运行 NSIS 安装包（`kubeloop-*-windows-*-installer.exe`），或解压便携 zip。
+  若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
+- **Linux**：安装 `.deb` / `.rpm`，或解压 `.tar.gz` 后运行 `KubeLoop`。
+- 或按下方说明自行构建。
+
+然后：
+
+1. 确认本机 kubeconfig 能正常访问目标集群 API。
+2. 打开 KubeLoop，选择 **Context**，点击 **连接**。
+3. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
    可在 **设置** 中安装或卸载该服务。
 
 连接成功后，可在概览查看流量与状态，在网络页使用发现。端口转发、流量交换、流量镜像与预览各自
