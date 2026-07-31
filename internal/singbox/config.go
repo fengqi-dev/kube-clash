@@ -70,6 +70,7 @@ type Options struct {
 	DNSPort          int
 	TUNAddress       string
 	Namespace        string
+	ClusterDomains   []string
 	Hosts            []HostAlias
 	TrafficPorts     TrafficInboundPorts
 	TrafficUsername  string
@@ -118,8 +119,21 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		return nil, err
 	}
 
+	clusterDomains, err := cluster.NormalizeClusterDomains(options.ClusterDomains)
+	if err != nil {
+		return nil, err
+	}
+	if len(discovery.ClusterDomains) > 0 {
+		merged, mergeErr := cluster.NormalizeClusterDomains(append(append([]string{}, clusterDomains...), discovery.ClusterDomains...))
+		if mergeErr != nil {
+			return nil, mergeErr
+		}
+		clusterDomains = merged
+	}
+	reverseZones := ReverseZones(discovery.PodCIDRs, discovery.ServiceCIDRs, discovery.ServiceIPs)
+
 	dnsServers := make([]map[string]any, 0, 3)
-	dnsRules := make([]map[string]any, 0, 2)
+	dnsRules := make([]map[string]any, 0, 4)
 	if len(hosts) > 0 {
 		predefined := make(map[string]any, len(hosts))
 		domains := make([]string, 0, len(hosts))
@@ -148,8 +162,10 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"server": dnsIP.String(),
 			"detour": KubernetesOutbound,
 		})
+		dnsSuffixes := append([]string{}, clusterDomains...)
+		dnsSuffixes = append(dnsSuffixes, reverseZones...)
 		dnsRules = append(dnsRules, map[string]any{
-			"domain_suffix": []string{"cluster.local"},
+			"domain_suffix": dnsSuffixes,
 			"server":        "cluster",
 		})
 	}
@@ -188,7 +204,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{
-			"domain_suffix": []string{"cluster.local"}, "outbound": KubernetesOutbound,
+			"domain_suffix": clusterDomains, "outbound": KubernetesOutbound,
 		},
 	)
 	for _, route := range routes {
@@ -245,7 +261,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"servers":  dnsServers,
 			"rules":    dnsRules,
 			"final":    "local",
-			"strategy": "ipv4_only",
+			"strategy": "prefer_ipv4",
 		},
 		"inbounds": inbounds,
 		"outbounds": []map[string]any{
@@ -328,27 +344,39 @@ func errLabel(label string) string { return label }
 // ResolverDomains returns split-DNS match domains routed to the local dns-in.
 // "svc" is included so macOS /etc/resolver/svc catches short names like
 // static-web.default.svc (search domains alone query the primary resolver).
-func ResolverDomains(namespace string, hosts ...HostAlias) []string {
-	domains := []string{"cluster.local", "svc.cluster.local", "svc"}
-	if namespace != "" {
-		domains = append(domains, namespace+".svc.cluster.local")
+func ResolverDomains(namespace string, clusterDomains []string, hosts []HostAlias, extra ...string) []string {
+	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	if err != nil || len(domains) == 0 {
+		domains = []string{cluster.DefaultClusterDomain}
 	}
-	seen := make(map[string]struct{}, len(domains)+len(hosts))
-	for _, domain := range domains {
-		seen[domain] = struct{}{}
-	}
-	for _, item := range hosts {
-		domain := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(item.Domain)), ".")
+	out := make([]string, 0, len(domains)*3+len(hosts)+len(extra)+1)
+	seen := make(map[string]struct{}, len(domains)*3+len(hosts)+len(extra)+1)
+	add := func(domain string) {
+		domain = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 		if domain == "" {
-			continue
+			return
 		}
 		if _, exists := seen[domain]; exists {
-			continue
+			return
 		}
 		seen[domain] = struct{}{}
-		domains = append(domains, domain)
+		out = append(out, domain)
 	}
-	return domains
+	for _, domain := range domains {
+		add(domain)
+		add("svc." + domain)
+		if namespace != "" {
+			add(namespace + ".svc." + domain)
+		}
+	}
+	add("svc")
+	for _, item := range hosts {
+		add(item.Domain)
+	}
+	for _, domain := range extra {
+		add(domain)
+	}
+	return out
 }
 
 // NormalizeHostAliases validates and canonicalizes host aliases.
@@ -404,13 +432,27 @@ func safeDNSName(value string) bool {
 
 // SearchDomains returns Kubernetes-style DNS search suffixes for short names
 // such as mysql, mysql.default, and mysql.default.svc.
-func SearchDomains(namespace string) []string {
+func SearchDomains(namespace string, clusterDomains ...string) []string {
 	if namespace == "" {
 		namespace = "default"
 	}
-	return []string{
-		namespace + ".svc.cluster.local",
-		"svc.cluster.local",
-		"cluster.local",
+	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	if err != nil || len(domains) == 0 {
+		domains = []string{cluster.DefaultClusterDomain}
 	}
+	out := make([]string, 0, len(domains)*3)
+	seen := make(map[string]struct{}, len(domains)*3)
+	add := func(domain string) {
+		if _, ok := seen[domain]; ok {
+			return
+		}
+		seen[domain] = struct{}{}
+		out = append(out, domain)
+	}
+	for _, domain := range domains {
+		add(namespace + ".svc." + domain)
+		add("svc." + domain)
+		add(domain)
+	}
+	return out
 }

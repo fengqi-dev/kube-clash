@@ -319,22 +319,26 @@ RestoreSystemNetwork()
 
 客户端使用 split DNS，只接管：
 
-- `cluster.local`；
-- `svc.cluster.local`；
-- 用户显式配置的集群域。
+- 已配置的集群域名（始终包含 `cluster.local`，可附加自定义域）；
+- 对应的 `svc.<domain>` / `<ns>.svc.<domain>` 后缀；
+- 由 Pod/Service CIDR 推导的反向区（`*.in-addr.arpa` / `*.ip6.arpa`）以支持 PTR。
 
 查询通过现有隧道转发到 kube-system 中的 CoreDNS Service。其他域名继续使用用户原来的
-DNS，不受 KubeLoop 影响。
+DNS。本地 DNS search proxy 同时监听 UDP 与 TCP；sing-box DNS 使用 `prefer_ipv4`，在双栈路由可用时允许 AAAA。
 
-短名称如 `my-service` 存在 Namespace 语义，首版采用当前 Namespace 生成搜索域：
+短名称如 `my-service` 存在 Namespace 语义。搜索域由可配置的 DNS 搜索 Namespace 生成：
 
 ```text
-<namespace>.svc.cluster.local
-svc.cluster.local
-cluster.local
+<namespace>.svc.<cluster-domain>
+svc.<cluster-domain>
+<cluster-domain>
 ```
 
-UI 需要明确展示当前 DNS Namespace。
+UI 需要明确展示当前 DNS 搜索 Namespace 与集群域名。
+
+#### 与其他 TUN / 系统 DNS 客户端共存
+
+KubeLoop **不会**劫持系统默认解析器，只安装选择性 split DNS。Clash Verge 等会接管 TUN 或强制系统 DNS 的客户端，可能导致集群域名到不了 KubeLoop。连接后会通过 split-DNS 端口探测 `kubernetes.default.svc.<cluster-domain>`，失败时给出告警。建议：避免同时开两套 TUN；必须并存时关闭对方的 TUN/系统 DNS，或最后再连接 KubeLoop。
 
 ## 6. 集群网络发现
 

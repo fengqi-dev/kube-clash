@@ -36,6 +36,12 @@ kubectl --context="${CONTEXT}" -n kubeloop-system delete pod \
 echo "==> Waiting for Gateway Deployment to be ready"
 kubectl --context="${CONTEXT}" -n kubeloop-system rollout status \
   deploy/kubeloop-gateway --timeout=180s
+# rollout status can return before the new Pod accepts port-forward.
+kubectl --context="${CONTEXT}" -n kubeloop-system wait \
+  --for=condition=Ready pod \
+  -l app.kubernetes.io/name=kubeloop-gateway \
+  --timeout=120s
+sleep 2
 
 echo "==> Running e2e against context ${CONTEXT}"
 KUBELOOP_E2E=1 \

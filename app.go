@@ -314,6 +314,10 @@ func (a *App) SetManualNetwork(contextName string, network cluster.ManualNetwork
 	return a.manager.SetManualNetwork(contextName, network)
 }
 
+func (a *App) SetDNSNamespace(contextName, namespace string) error {
+	return a.manager.SetDNSNamespace(contextName, namespace)
+}
+
 func (a *App) GetHostAliases(contextName string) []store.HostAliasSpec {
 	return a.manager.HostAliases(contextName)
 }

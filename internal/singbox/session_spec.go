@@ -22,6 +22,7 @@ type SessionSpec struct {
 	ServiceCIDRs     []string            `json:"serviceCIDRs,omitempty"`
 	ServiceIPs       []string            `json:"serviceIPs,omitempty"`
 	ClusterDNSServer string              `json:"clusterDNSServer,omitempty"`
+	ClusterDomains   []string            `json:"clusterDomains,omitempty"`
 	BridgeHost       string              `json:"bridgeHost"`
 	BridgePort       int                 `json:"bridgePort"`
 	ControllerPort   int                 `json:"controllerPort"`
@@ -31,6 +32,7 @@ type SessionSpec struct {
 	PublicDNSPort    int                 `json:"publicDNSPort"`
 	TUNAddress       string              `json:"tunAddress"`
 	Namespace        string              `json:"namespace,omitempty"`
+	DNSNamespace     string              `json:"dnsNamespace,omitempty"`
 	Hosts            []HostAlias         `json:"hosts,omitempty"`
 	TrafficPorts     TrafficInboundPorts `json:"trafficPorts"`
 	TrafficUsername  string              `json:"trafficUsername"`
@@ -105,10 +107,16 @@ func (s SessionSpec) Validate() error {
 	if s.Namespace != "" && !safeDNSName(strings.ToLower(s.Namespace)) {
 		return errors.New("invalid namespace")
 	}
+	if s.DNSNamespace != "" && !safeDNSName(strings.ToLower(s.DNSNamespace)) {
+		return errors.New("invalid DNS namespace")
+	}
 	if s.ClusterDNSServer != "" {
 		if _, err := netip.ParseAddr(s.ClusterDNSServer); err != nil {
 			return fmt.Errorf("invalid cluster DNS address: %w", err)
 		}
+	}
+	if _, err := cluster.NormalizeClusterDomains(s.ClusterDomains); err != nil {
+		return err
 	}
 	if _, err := NormalizeHostAliases(s.Hosts); err != nil {
 		return err
@@ -129,6 +137,7 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		return nil, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
+	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
 	return Generate(s.discovery(), Options{
 		BridgeHost:       s.BridgeHost,
 		BridgePort:       s.BridgePort,
@@ -137,7 +146,8 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		DNSHost:          s.DNSHost,
 		DNSPort:          s.DNSPort,
 		TUNAddress:       s.TUNAddress,
-		Namespace:        s.Namespace,
+		Namespace:        s.dnsNamespace(),
+		ClusterDomains:   domains,
 		Hosts:            hosts,
 		TrafficPorts:     s.TrafficPorts,
 		TrafficUsername:  s.TrafficUsername,
@@ -157,21 +167,36 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 		return DNSMeta{}, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
+	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
+	ns := s.dnsNamespace()
+	reverse := ReverseZones(s.PodCIDRs, s.ServiceCIDRs, s.ServiceIPs)
 	return DNSMeta{
 		Listen:  s.DNSHost,
 		Port:    s.PublicDNSPort,
-		Domains: ResolverDomains(s.Namespace, hosts...),
-		Search:  SearchDomains(s.Namespace),
+		Domains: ResolverDomains(ns, domains, hosts, reverse...),
+		Search:  SearchDomains(ns, domains...),
 		Ndots:   5,
 	}, nil
 }
 
+func (s SessionSpec) dnsNamespace() string {
+	if s.DNSNamespace != "" {
+		return s.DNSNamespace
+	}
+	if s.Namespace != "" {
+		return s.Namespace
+	}
+	return "default"
+}
+
 func (s SessionSpec) discovery() cluster.Discovery {
+	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
 	return cluster.Discovery{
-		PodCIDRs:     s.PodCIDRs,
-		ServiceCIDRs: s.ServiceCIDRs,
-		ServiceIPs:   s.ServiceIPs,
-		DNSServer:    s.ClusterDNSServer,
+		PodCIDRs:       s.PodCIDRs,
+		ServiceCIDRs:   s.ServiceCIDRs,
+		ServiceIPs:     s.ServiceIPs,
+		DNSServer:      s.ClusterDNSServer,
+		ClusterDomains: domains,
 	}
 }
 

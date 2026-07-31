@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/miekg/dns"
 )
 
@@ -18,45 +19,72 @@ import (
 // /etc/resolver/cluster.local. Matching *.svc via /etc/resolver/svc and
 // expanding here makes names like static-web.default.svc work.
 type dnsSearchProxy struct {
-	public   *dns.Server
-	upstream string
-	search   []string
-	client   *dns.Client
+	publicUDP *dns.Server
+	publicTCP *dns.Server
+	upstream  string
+	search    []string
+	domains   []string
+	clientUDP *dns.Client
+	clientTCP *dns.Client
 
 	mu     sync.Mutex
 	closed bool
 }
 
-func startDNSSearchProxy(publicHost string, publicPort int, upstreamHost string, upstreamPort int, search []string) (*dnsSearchProxy, error) {
+func startDNSSearchProxy(
+	publicHost string, publicPort int, upstreamHost string, upstreamPort int,
+	search []string, clusterDomains ...string,
+) (*dnsSearchProxy, error) {
 	if publicHost == "" {
 		publicHost = DefaultDNSListen
 	}
 	if upstreamHost == "" {
 		upstreamHost = DefaultDNSListen
 	}
+	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	if err != nil {
+		domains = []string{cluster.DefaultClusterDomain}
+	}
 	proxy := &dnsSearchProxy{
-		upstream: net.JoinHostPort(upstreamHost, fmt.Sprintf("%d", upstreamPort)),
-		search:   append([]string(nil), search...),
-		client:   &dns.Client{Net: "udp", Timeout: 3 * time.Second, UDPSize: 1232},
+		upstream:  net.JoinHostPort(upstreamHost, fmt.Sprintf("%d", upstreamPort)),
+		search:    append([]string(nil), search...),
+		domains:   domains,
+		clientUDP: &dns.Client{Net: "udp", Timeout: 3 * time.Second, UDPSize: 1232},
+		clientTCP: &dns.Client{Net: "tcp", Timeout: 5 * time.Second},
 	}
 	addr := net.JoinHostPort(publicHost, fmt.Sprintf("%d", publicPort))
-	proxy.public = &dns.Server{
-		Addr:    addr,
-		Net:     "udp",
-		Handler: dns.HandlerFunc(proxy.serveDNS),
-	}
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- proxy.public.ListenAndServe()
-	}()
+	handler := dns.HandlerFunc(proxy.serveDNS)
+	proxy.publicUDP = &dns.Server{Addr: addr, Net: "udp", Handler: handler, UDPSize: 1232}
+	proxy.publicTCP = &dns.Server{Addr: addr, Net: "tcp", Handler: handler}
+
+	errCh := make(chan error, 2)
+	go func() { errCh <- proxy.publicUDP.ListenAndServe() }()
+	go func() { errCh <- proxy.publicTCP.ListenAndServe() }()
 	select {
 	case err := <-errCh:
 		if err != nil {
+			_ = proxy.Close()
 			return nil, fmt.Errorf("listen DNS search proxy on %s: %w", addr, err)
 		}
 	case <-time.After(150 * time.Millisecond):
 	}
 	return proxy, nil
+}
+
+func (p *dnsSearchProxy) SetSearch(search []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.search = append([]string(nil), search...)
+}
+
+func (p *dnsSearchProxy) SetClusterDomains(domains []string) {
+	normalized, err := cluster.NormalizeClusterDomains(domains)
+	if err != nil {
+		normalized = []string{cluster.DefaultClusterDomain}
+	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.domains = normalized
 }
 
 func (p *dnsSearchProxy) Close() error {
@@ -66,10 +94,18 @@ func (p *dnsSearchProxy) Close() error {
 		return nil
 	}
 	p.closed = true
-	if p.public == nil {
-		return nil
+	var first error
+	if p.publicUDP != nil {
+		if err := p.publicUDP.Shutdown(); err != nil && first == nil {
+			first = err
+		}
 	}
-	return p.public.Shutdown()
+	if p.publicTCP != nil {
+		if err := p.publicTCP.Shutdown(); err != nil && first == nil {
+			first = err
+		}
+	}
+	return first
 }
 
 func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
@@ -77,14 +113,23 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 		_ = w.WriteMsg(new(dns.Msg).SetRcode(req, dns.RcodeFormatError))
 		return
 	}
+	p.mu.Lock()
+	search := append([]string(nil), p.search...)
+	domains := append([]string(nil), p.domains...)
+	p.mu.Unlock()
+
 	original := req.Question[0].Name
-	candidates := dnsSearchCandidates(original, p.search)
+	candidates := dnsSearchCandidates(original, search, domains...)
+	network := "udp"
+	if _, ok := w.RemoteAddr().(*net.TCPAddr); ok {
+		network = "tcp"
+	}
 	var last *dns.Msg
 	for _, candidate := range candidates {
 		forward := req.Copy()
 		forward.Id = dns.Id()
 		forward.Question[0].Name = candidate
-		resp, _, err := p.client.Exchange(forward, p.upstream)
+		resp, err := p.exchange(network, forward)
 		if err != nil || resp == nil {
 			continue
 		}
@@ -115,13 +160,34 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 	_ = w.WriteMsg(nx)
 }
 
-func dnsSearchCandidates(qname string, search []string) []string {
+func (p *dnsSearchProxy) exchange(network string, req *dns.Msg) (*dns.Msg, error) {
+	client := p.clientUDP
+	if network == "tcp" {
+		client = p.clientTCP
+	}
+	resp, _, err := client.Exchange(req, p.upstream)
+	if err == nil && resp != nil && resp.Truncated && network == "udp" {
+		resp, _, err = p.clientTCP.Exchange(req, p.upstream)
+	}
+	return resp, err
+}
+
+func dnsSearchCandidates(qname string, search []string, clusterDomains ...string) []string {
 	name := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(qname)), ".")
 	if name == "" {
 		return nil
 	}
 	original := name + "."
-	if strings.HasSuffix(name, ".cluster.local") {
+	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	if err != nil || len(domains) == 0 {
+		domains = []string{cluster.DefaultClusterDomain}
+	}
+	for _, domain := range domains {
+		if name == domain || strings.HasSuffix(name, "."+domain) {
+			return []string{original}
+		}
+	}
+	if strings.HasSuffix(name, ".in-addr.arpa") || strings.HasSuffix(name, ".ip6.arpa") {
 		return []string{original}
 	}
 	out := []string{original}

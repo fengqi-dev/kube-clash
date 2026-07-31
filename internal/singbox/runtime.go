@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/miekg/dns"
 )
 
 // PrivilegedStartFunc starts sing-box via an external privileged helper.
@@ -24,6 +25,11 @@ import (
 type PrivilegedStartFunc func(
 	ctx context.Context, spec SessionSpec,
 ) (stop func(context.Context) error, err error)
+
+// PrivilegedUpdateDNSFunc re-applies split DNS without restarting sing-box.
+type PrivilegedUpdateDNSFunc func(
+	ctx context.Context, sessionID string, dns DNSMeta,
+) error
 
 type RunningCore interface {
 	io.Closer
@@ -33,6 +39,11 @@ type RunningCore interface {
 	TrafficEndpoints() TrafficEndpoints
 	// Config returns the generated sing-box config JSON for the active core.
 	Config() []byte
+	// UpdateDNSNamespace refreshes search domains / split-DNS matcher files.
+	UpdateDNSNamespace(ctx context.Context, namespace string) error
+	// ProbeClusterDNS resolves kubernetes.default.svc.<domain> via the local split DNS.
+	ProbeClusterDNS(ctx context.Context) error
+	DNSPort() int
 }
 
 type TrafficEndpoint struct {
@@ -83,8 +94,9 @@ func (e TrafficEndpoints) Validate() error {
 const DefaultMetricsInterval = time.Second
 
 type Runtime struct {
-	HTTPClient      *http.Client
-	PrivilegedStart PrivilegedStartFunc
+	HTTPClient          *http.Client
+	PrivilegedStart     PrivilegedStartFunc
+	PrivilegedUpdateDNS PrivilegedUpdateDNSFunc
 }
 
 func (r *Runtime) Start(
@@ -142,12 +154,18 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
+	clusterDomains, _ := cluster.NormalizeClusterDomains(discovery.ClusterDomains)
+	dnsNamespace := namespace
+	if dnsNamespace == "" {
+		dnsNamespace = "default"
+	}
 	spec := SessionSpec{
 		ID:               "session-" + secret[:16],
 		PodCIDRs:         discovery.PodCIDRs,
 		ServiceCIDRs:     discovery.ServiceCIDRs,
 		ServiceIPs:       discovery.ServiceIPs,
 		ClusterDNSServer: discovery.DNSServer,
+		ClusterDomains:   clusterDomains,
 		BridgeHost:       host,
 		BridgePort:       bridgePort,
 		ControllerPort:   controllerPort,
@@ -157,6 +175,7 @@ func (r *Runtime) Start(
 		PublicDNSPort:    publicDNSPort,
 		TUNAddress:       tunAddress,
 		Namespace:        namespace,
+		DNSNamespace:     dnsNamespace,
 		Hosts:            normalizedHosts,
 		TrafficPorts:     trafficPorts,
 		TrafficUsername:  trafficUsername,
@@ -179,7 +198,8 @@ func (r *Runtime) Start(
 	searchDomains := meta.Search
 	resolverDomains := meta.Domains
 	dnsProxy, err := startDNSSearchProxy(
-		DefaultDNSListen, publicDNSPort, DefaultDNSListen, internalDNSPort, searchDomains,
+		DefaultDNSListen, publicDNSPort, DefaultDNSListen, internalDNSPort,
+		searchDomains, clusterDomains...,
 	)
 	if err != nil {
 		return nil, err
@@ -194,6 +214,8 @@ func (r *Runtime) Start(
 		httpClient:        r.HTTPClient,
 		trafficEndpoints:  trafficEndpoints(trafficPorts, trafficUsername, trafficPassword),
 		config:            config,
+		spec:              spec,
+		updateDNS:         r.PrivilegedUpdateDNS,
 	}
 	stop, startErr := r.PrivilegedStart(ctx, spec)
 	if startErr != nil {
@@ -260,6 +282,9 @@ type Process struct {
 	waitErr           error
 	trafficEndpoints  TrafficEndpoints
 	config            []byte
+	spec              SessionSpec
+	updateDNS         PrivilegedUpdateDNSFunc
+	specMu            sync.Mutex
 }
 
 func (p *Process) Done() <-chan struct{} { return p.done }
@@ -272,6 +297,8 @@ func (p *Process) Err() error {
 
 func (p *Process) TrafficEndpoints() TrafficEndpoints { return p.trafficEndpoints }
 
+func (p *Process) DNSPort() int { return p.dnsPort }
+
 func (p *Process) Config() []byte {
 	if len(p.config) == 0 {
 		return nil
@@ -279,6 +306,47 @@ func (p *Process) Config() []byte {
 	out := make([]byte, len(p.config))
 	copy(out, p.config)
 	return out
+}
+
+func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) error {
+	namespace = strings.TrimSpace(namespace)
+	if namespace == "" {
+		namespace = "default"
+	}
+	if !safeDNSName(strings.ToLower(namespace)) {
+		return errors.New("invalid DNS namespace")
+	}
+	p.specMu.Lock()
+	p.spec.DNSNamespace = namespace
+	p.spec.Namespace = namespace
+	dns, err := p.spec.DNS()
+	domains := append([]string{}, p.spec.ClusterDomains...)
+	sessionID := p.spec.ID
+	p.specMu.Unlock()
+	if err != nil {
+		return err
+	}
+	if p.dnsProxy != nil {
+		p.dnsProxy.SetSearch(dns.Search)
+		p.dnsProxy.SetClusterDomains(domains)
+	}
+	p.resolverDomains = dns.Domains
+	if p.updateDNS == nil {
+		return errors.New("privileged DNS update is unavailable; reconnect to apply")
+	}
+	return p.updateDNS(ctx, sessionID, dns)
+}
+
+func (p *Process) ProbeClusterDNS(ctx context.Context) error {
+	p.specMu.Lock()
+	domains := append([]string{}, p.spec.ClusterDomains...)
+	port := p.dnsPort
+	p.specMu.Unlock()
+	if len(domains) == 0 {
+		domains = []string{cluster.DefaultClusterDomain}
+	}
+	name := "kubernetes.default.svc." + domains[0] + "."
+	return probeLocalDNS(ctx, DefaultDNSListen, port, name)
 }
 
 func (p *Process) Snapshot(ctx context.Context) (Metrics, error) {
@@ -452,6 +520,43 @@ func (p *Process) Close() error {
 		return err
 	}
 	return nil
+}
+
+func probeLocalDNS(ctx context.Context, host string, port int, qname string) error {
+	if host == "" {
+		host = DefaultDNSListen
+	}
+	if port < 1 {
+		return errors.New("DNS port is unavailable")
+	}
+	msg := new(dns.Msg)
+	msg.SetQuestion(dns.Fqdn(qname), dns.TypeA)
+	client := &dns.Client{Net: "udp", Timeout: 3 * time.Second}
+	addr := net.JoinHostPort(host, strconv.Itoa(port))
+	type result struct {
+		resp *dns.Msg
+		err  error
+	}
+	ch := make(chan result, 1)
+	go func() {
+		resp, _, err := client.Exchange(msg, addr)
+		ch <- result{resp: resp, err: err}
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case out := <-ch:
+		if out.err != nil {
+			return out.err
+		}
+		if out.resp == nil {
+			return errors.New("empty DNS response")
+		}
+		if out.resp.Rcode != dns.RcodeSuccess || len(out.resp.Answer) == 0 {
+			return fmt.Errorf("DNS lookup %s failed (rcode=%d)", qname, out.resp.Rcode)
+		}
+		return nil
+	}
 }
 
 func availablePort() (int, error) {

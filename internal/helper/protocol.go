@@ -3,13 +3,14 @@ package helper
 import "github.com/fengqi-dev/kube-loop/internal/singbox"
 
 const (
-	ProtocolVersion = 3
+	ProtocolVersion = 4
 
-	OpPing    = "ping"
-	OpStart   = "start"
-	OpStop    = "stop"
-	OpStopAll = "stop-all"
-	OpStatus  = "status"
+	OpPing      = "ping"
+	OpStart     = "start"
+	OpStop      = "stop"
+	OpStopAll   = "stop-all"
+	OpStatus    = "status"
+	OpUpdateDNS = "update-dns"
 )
 
 // Request is a single JSON-line RPC request.
@@ -18,6 +19,7 @@ type Request struct {
 	Token     string               `json:"token,omitempty"`
 	Session   *singbox.SessionSpec `json:"session,omitempty"`
 	SessionID string               `json:"sessionId,omitempty"`
+	DNS       *singbox.DNSMeta     `json:"dns,omitempty"`
 }
 
 // Response is a single JSON-line RPC response.

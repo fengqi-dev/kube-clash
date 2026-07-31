@@ -323,21 +323,25 @@ Benefits of the sing-box network stack:
 
 The client uses split DNS and only takes over:
 
-- `cluster.local`;
-- `svc.cluster.local`;
-- User-configured cluster domains.
+- Configured cluster domains (always includes `cluster.local`, plus optional custom domains);
+- Matching `svc.<domain>` / `<ns>.svc.<domain>` suffixes;
+- Reverse zones derived from Pod/Service CIDRs (`*.in-addr.arpa` / `*.ip6.arpa`) for PTR.
 
-Queries are forwarded through the existing tunnel to the kube-system CoreDNS Service. All other names keep using the user’s original DNS.
+Queries are forwarded through the existing tunnel to the kube-system CoreDNS Service. All other names keep using the user’s original DNS. The local DNS search proxy listens on UDP and TCP; sing-box DNS uses `prefer_ipv4` so AAAA answers are allowed when dual-stack routes exist.
 
-Short names such as `my-service` are namespace-sensitive. MVP builds a search list from the current Namespace:
+Short names such as `my-service` are namespace-sensitive. Search suffixes come from the configurable DNS search Namespace:
 
 ```text
-<namespace>.svc.cluster.local
-svc.cluster.local
-cluster.local
+<namespace>.svc.<cluster-domain>
+svc.<cluster-domain>
+<cluster-domain>
 ```
 
-The UI must clearly show the current DNS Namespace.
+The UI must clearly show the current DNS search Namespace and cluster domains.
+
+#### Coexistence with other TUN / system-DNS clients
+
+KubeLoop does **not** hijack the system default resolver. It installs selective split DNS only. Clients such as Clash Verge that take over TUN and/or force system DNS can prevent cluster names from reaching KubeLoop. After connect, KubeLoop probes `kubernetes.default.svc.<cluster-domain>` via its split-DNS port and surfaces a warning when the probe fails. Practical guidance: avoid running two TUN stacks at once, or disable the other client’s TUN/system DNS while KubeLoop is connected (connect KubeLoop last when both must run).
 
 ## 6. Cluster network discovery
 

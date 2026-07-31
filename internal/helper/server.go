@@ -125,6 +125,17 @@ func (s *Server) dispatch(request Request) Response {
 	case OpStopAll:
 		s.stopAllSessions()
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
+	case OpUpdateDNS:
+		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		if request.DNS == nil {
+			return Response{OK: false, Error: "dns is required"}
+		}
+		if err := s.updateSessionDNS(request.SessionID, *request.DNS); err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
 	}
@@ -321,6 +332,37 @@ func tailText(content []byte, limit int) string {
 		return string(content)
 	}
 	return string(content[len(content)-limit:])
+}
+
+func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
+	if dns.Listen == "" || dns.Port < 1 || dns.Port > 65535 {
+		return fmt.Errorf("invalid DNS listen address")
+	}
+	if len(dns.Domains) == 0 {
+		return fmt.Errorf("DNS domains are required")
+	}
+	s.mu.Lock()
+	current := s.sessions[sessionID]
+	s.mu.Unlock()
+	if current == nil {
+		return fmt.Errorf("session %s is not active", sessionID)
+	}
+	if current.workDir == "" {
+		return fmt.Errorf("session work directory is unavailable")
+	}
+	_ = restorePlatformDNS(current.workDir, current.dns)
+	if err := applyPlatformDNS(current.workDir, dns); err != nil {
+		_ = applyPlatformDNS(current.workDir, current.dns)
+		return fmt.Errorf("install split DNS: %w", err)
+	}
+	meta, _ := json.Marshal(dns)
+	_ = os.WriteFile(filepath.Join(current.workDir, "dns-meta.json"), meta, 0o600)
+	s.mu.Lock()
+	if active := s.sessions[sessionID]; active != nil {
+		active.dns = dns
+	}
+	s.mu.Unlock()
+	return nil
 }
 
 func (s *Server) stopSession(sessionID string) error {

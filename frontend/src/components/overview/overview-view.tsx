@@ -158,6 +158,7 @@ export function OverviewView({
               contextName={contextName}
               discovery={session.discovery}
               ready={ready}
+              dnsNamespace={session.dnsNamespace}
             />
 
             <div className="flex flex-col items-center justify-center self-center px-2 text-center">
@@ -232,6 +233,11 @@ export function OverviewView({
               <AlertDescription className="break-words">{error}</AlertDescription>
             </Alert>
           ) : null}
+          {session.dnsWarning ? (
+            <Alert className="mt-4 w-full text-left">
+              <AlertDescription className="break-words">{session.dnsWarning}</AlertDescription>
+            </Alert>
+          ) : null}
 
           {issues.length > 0 || gatewayManifest ? (
             <Alert className="mt-4 w-full text-left">
@@ -302,15 +308,19 @@ function DiscoverySummary({
   contextName,
   discovery,
   ready,
+  dnsNamespace,
 }: {
   contextName: string;
   discovery?: Discovery;
   ready: boolean;
+  dnsNamespace?: string;
 }) {
   const { t } = useI18n();
   const [podCIDRs, setPodCIDRs] = useState("");
   const [serviceCIDRs, setServiceCIDRs] = useState("");
   const [dnsServer, setDnsServer] = useState("");
+  const [clusterDomains, setClusterDomains] = useState("cluster.local");
+  const [dnsNs, setDnsNs] = useState("default");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -318,6 +328,8 @@ function DiscoverySummary({
       setPodCIDRs("");
       setServiceCIDRs("");
       setDnsServer("");
+      setClusterDomains("cluster.local");
+      setDnsNs("default");
       return;
     }
     let active = true;
@@ -335,28 +347,58 @@ function DiscoverySummary({
           )?.join(", ") ?? "",
         );
         setDnsServer(manual.dnsServer || discovery?.dnsServer || "");
+        setClusterDomains(
+          (manual.clusterDomains?.length
+            ? manual.clusterDomains
+            : discovery?.clusterDomains?.length
+              ? discovery.clusterDomains
+              : ["cluster.local"]
+          ).join(", "),
+        );
+        setDnsNs(manual.dnsNamespace || dnsNamespace || "default");
       })
       .catch(() => {
         if (!active) return;
         setPodCIDRs(discovery?.podCIDRs?.join(", ") ?? "");
         setServiceCIDRs(discovery?.serviceCIDRs?.join(", ") ?? "");
         setDnsServer(discovery?.dnsServer || "");
+        setClusterDomains((discovery?.clusterDomains ?? ["cluster.local"]).join(", "));
+        setDnsNs(dnsNamespace || "default");
       });
     return () => {
       active = false;
     };
-  }, [contextName, discovery?.dnsServer, discovery?.podCIDRs, discovery?.serviceCIDRs]);
+  }, [
+    contextName,
+    discovery?.dnsServer,
+    discovery?.podCIDRs,
+    discovery?.serviceCIDRs,
+    discovery?.clusterDomains,
+    dnsNamespace,
+  ]);
 
   async function save() {
     if (!contextName) return;
     setSaving(true);
     try {
+      const domains = splitCIDRs(clusterDomains);
       await backend.setManualNetwork(contextName, {
         podCIDRs: splitCIDRs(podCIDRs),
         serviceCIDRs: splitCIDRs(serviceCIDRs),
         dnsServer: dnsServer.trim(),
+        clusterDomains: domains,
+        dnsNamespace: dnsNs.trim() || "default",
       });
-      toast.success(ready ? t("overview.networkSavedReconnect") : t("overview.networkSaved"));
+      if (ready) {
+        try {
+          await backend.setDNSNamespace(contextName, dnsNs.trim() || "default");
+          toast.success(t("overview.networkSavedLiveDNS"));
+        } catch {
+          toast.success(t("overview.networkSavedReconnect"));
+        }
+      } else {
+        toast.success(t("overview.networkSaved"));
+      }
     } catch (error) {
       toast.error(t("overview.networkSaveFailed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -383,10 +425,20 @@ function DiscoverySummary({
       }
     >
       <dl className="space-y-2">
-        <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] items-baseline gap-x-2 text-[12px]">
-          <dt className="text-muted-foreground">{t("overview.clusterDomain")}</dt>
-          <dd className="truncate font-mono text-[11px] text-foreground/90">cluster.local</dd>
-        </div>
+        <NetworkField
+          label={t("overview.clusterDomain")}
+          value={clusterDomains}
+          placeholder="cluster.local, corp.local"
+          onChange={setClusterDomains}
+          disabled={!contextName}
+        />
+        <NetworkField
+          label={t("overview.dnsNamespace")}
+          value={dnsNs}
+          placeholder="default"
+          onChange={setDnsNs}
+          disabled={!contextName}
+        />
         <NetworkField
           label={t("overview.podNetwork")}
           value={podCIDRs}

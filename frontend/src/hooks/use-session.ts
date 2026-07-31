@@ -140,14 +140,25 @@ export function useSession() {
     }
   }
 
+  async function resolveDNSNamespace(targetContext: string) {
+    try {
+      const manual = await backend.getManualNetwork(targetContext);
+      const fromManual = manual.dnsNamespace?.trim();
+      if (fromManual) return fromManual;
+    } catch {
+      /* fall through */
+    }
+    return namespace || "default";
+  }
+
   async function toggleConnection() {
     setUIError("");
     try {
       if (busy || ready) {
         await backend.disconnect();
       } else {
-        // Namespace is only used by Network tools; tunnel DNS covers *.cluster.local.
-        await backend.connect(contextName, "default");
+        // Connect namespace seeds DNS short-name search (overridable via Overview).
+        await backend.connect(contextName, await resolveDNSNamespace(contextName));
       }
     } catch (error) {
       setUIError((error as Error).message);
@@ -171,7 +182,7 @@ export function useSession() {
       if (next !== contextName) {
         await changeContext(next);
       }
-      await backend.connect(next, "default");
+      await backend.connect(next, await resolveDNSNamespace(next));
     } catch (error) {
       setUIError((error as Error).message);
     }

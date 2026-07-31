@@ -105,6 +105,9 @@ func (r *recordingProcess) TrafficEndpoints() singbox.TrafficEndpoints {
 	}
 }
 func (r *recordingProcess) Config() []byte { return []byte(`{"log":{"level":"info"}}`) }
+func (r *recordingProcess) UpdateDNSNamespace(context.Context, string) error { return nil }
+func (r *recordingProcess) ProbeClusterDNS(context.Context) error            { return nil }
+func (r *recordingProcess) DNSPort() int                                     { return 1053 }
 func (r *recordingProcess) Close() error {
 	select {
 	case <-r.done:

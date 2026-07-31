@@ -16,13 +16,14 @@ import (
 )
 
 type Discovery struct {
-	PodCIDRs     []string `json:"podCIDRs"`
-	ServiceCIDRs []string `json:"serviceCIDRs"`
-	ServiceIPs   []string `json:"serviceIPs"`
-	DNSServer    string   `json:"dnsServer"`
-	Pods         int      `json:"pods"`
-	Services     int      `json:"services"`
-	Deployments  int      `json:"deployments"`
+	PodCIDRs       []string `json:"podCIDRs"`
+	ServiceCIDRs   []string `json:"serviceCIDRs"`
+	ServiceIPs     []string `json:"serviceIPs"`
+	DNSServer      string   `json:"dnsServer"`
+	ClusterDomains []string `json:"clusterDomains,omitempty"`
+	Pods           int      `json:"pods"`
+	Services       int      `json:"services"`
+	Deployments    int      `json:"deployments"`
 }
 
 // ServicePortInfo describes one Service port for the intercept UI.
