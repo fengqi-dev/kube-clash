@@ -15,6 +15,9 @@ import (
 
 const windowsSearchBackup = "search-domains.bak.json"
 
+func applyLinkDNS(string, singbox.DNSMeta) error { return nil }
+func restoreLinkDNS(string) error                { return nil }
+
 func applyPlatformDNS(workDir string, dns singbox.DNSMeta) error {
 	var b strings.Builder
 	b.WriteString("$ErrorActionPreference='Stop'; ")

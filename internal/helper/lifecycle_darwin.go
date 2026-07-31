@@ -23,6 +23,9 @@ const (
 
 type searchBackup map[string][]string
 
+func applyLinkDNS(string, singbox.DNSMeta) error { return nil }
+func restoreLinkDNS(string) error                { return nil }
+
 func applyPlatformDNS(workDir string, dns singbox.DNSMeta) error {
 	if err := sweepResolvers(); err != nil {
 		return err

@@ -5,6 +5,8 @@ package helper
 import (
 	"context"
 	"fmt"
+	"net"
+	"net/netip"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -89,6 +91,107 @@ func reloadResolved() {
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer flushCancel()
 	_ = exec.CommandContext(flushCtx, "resolvectl", "flush-caches").Run()
+}
+
+// applyLinkDNS configures systemd-resolved on the TUN interface. Per-link search
+// domains are more reliable for single-label names than global drop-in Domains=
+// alone on GitHub Actions runners.
+func applyLinkDNS(tunAddress string, dns singbox.DNSMeta) error {
+	iface, err := ifaceNameForTUN(tunAddress)
+	if err != nil {
+		return err
+	}
+	server := fmt.Sprintf("%s:%d", dns.Listen, dns.Port)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := exec.CommandContext(ctx, "resolvectl", "dns", iface, server).Run(); err != nil {
+		return fmt.Errorf("resolvectl dns %s: %w", iface, err)
+	}
+
+	seen := make(map[string]struct{})
+	domains := make([]string, 0, len(dns.Search)+len(dns.Domains))
+	add := func(domain string) {
+		domain = strings.TrimSpace(domain)
+		if domain == "" {
+			return
+		}
+		if _, ok := seen[domain]; ok {
+			return
+		}
+		seen[domain] = struct{}{}
+		domains = append(domains, domain)
+	}
+	for _, domain := range dns.Search {
+		add(domain)
+	}
+	for _, domain := range dns.Domains {
+		routeOnly := "~" + strings.TrimPrefix(domain, "~")
+		if _, ok := seen[domain]; ok {
+			continue
+		}
+		if _, ok := seen[strings.TrimPrefix(domain, "~")]; ok {
+			continue
+		}
+		add(routeOnly)
+	}
+	if len(domains) > 0 {
+		args := append([]string{"domain", iface}, domains...)
+		if err := exec.CommandContext(ctx, "resolvectl", args...).Run(); err != nil {
+			return fmt.Errorf("resolvectl domain %s: %w", iface, err)
+		}
+	}
+	_ = exec.CommandContext(ctx, "resolvectl", "default-route", iface, "false").Run()
+	_ = exec.CommandContext(ctx, "resolvectl", "flush-caches").Run()
+	return nil
+}
+
+func restoreLinkDNS(tunAddress string) error {
+	iface, err := ifaceNameForTUN(tunAddress)
+	if err != nil {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "resolvectl", "revert", iface).Run()
+	return nil
+}
+
+func ifaceNameForTUN(tunAddress string) (string, error) {
+	want, err := tunHostAddr(tunAddress)
+	if err != nil {
+		return "", err
+	}
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		return "", err
+	}
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, addr := range addrs {
+			ipNet, ok := addr.(*net.IPNet)
+			if !ok || ipNet.IP == nil {
+				continue
+			}
+			ip, ok := netip.AddrFromSlice(ipNet.IP.To4())
+			if !ok {
+				ip, ok = netip.AddrFromSlice(ipNet.IP)
+			}
+			if ok && ip == want {
+				return iface.Name, nil
+			}
+		}
+	}
+	return "", fmt.Errorf("no interface for TUN address %s", tunAddress)
+}
+
+func tunHostAddr(tunAddress string) (netip.Addr, error) {
+	if prefix, err := netip.ParsePrefix(tunAddress); err == nil {
+		return prefix.Addr(), nil
+	}
+	return netip.ParseAddr(strings.TrimSpace(tunAddress))
 }
 
 func cleanupPlatformRoutes(routes []string) {
