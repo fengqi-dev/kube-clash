@@ -67,7 +67,7 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 
 - **macOS（Homebrew）**：
   ```bash
-  brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+  brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
   brew install --cask kubeloop
   ```
 - **macOS（手动）**：从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
