@@ -127,7 +127,6 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 		`"username": "port-forward"`,
 		`"username": "exchange"`,
 		`"username": "preview"`,
-		`"username": "mirror-primary"`,
 		`"username": "mirror-shadow"`,
 		`"auth_user"`,
 		`"tag": "local"`,
@@ -135,6 +134,9 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 		if !strings.Contains(text, item) {
 			t.Fatalf("generated config missing %q:\n%s", item, text)
 		}
+	}
+	if strings.Contains(text, `"username": "mirror-primary"`) {
+		t.Fatalf("mirror-primary must use Gateway dial, not traffic-in:\n%s", text)
 	}
 }
 

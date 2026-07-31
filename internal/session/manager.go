@@ -469,10 +469,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.trafficTracker = tracker
 	m.mu.Unlock()
 	m.intercept.SetTrafficDialers(intercept.TrafficDialers{
-		Exchange:      trackedTrafficDialer(trafficEndpoints.Exchange, singbox.TrafficUserExchange, tracker),
-		Preview:       trackedTrafficDialer(trafficEndpoints.Preview, singbox.TrafficUserPreview, tracker),
-		MirrorPrimary: trackedTrafficDialer(trafficEndpoints.MirrorPrimary, singbox.TrafficUserMirrorPrimary, tracker),
-		MirrorShadow:  trackedTrafficDialer(trafficEndpoints.MirrorShadow, singbox.TrafficUserMirrorShadow, tracker),
+		Exchange:     trackedTrafficDialer(trafficEndpoints.Exchange, singbox.TrafficUserExchange, tracker),
+		Preview:      trackedTrafficDialer(trafficEndpoints.Preview, singbox.TrafficUserPreview, tracker),
+		MirrorShadow: trackedTrafficDialer(trafficEndpoints.MirrorShadow, singbox.TrafficUserMirrorShadow, tracker),
 	})
 	m.portfwd.SetTrafficDialer(
 		request.Context,
@@ -705,7 +704,7 @@ func mergeTrafficTracker(metrics singbox.Metrics, tracker *traffic.Tracker) sing
 
 func trafficOutboundForFeature(feature string) string {
 	switch feature {
-	case singbox.TrafficUserPortForward, singbox.TrafficUserMirrorPrimary:
+	case singbox.TrafficUserPortForward:
 		return singbox.KubernetesOutbound
 	case singbox.TrafficUserExchange, singbox.TrafficUserPreview, singbox.TrafficUserMirrorShadow:
 		return singbox.LocalOutbound

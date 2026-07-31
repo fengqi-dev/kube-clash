@@ -118,12 +118,12 @@ Session 启动时一次性创建以下入站：
 | `traffic-in` | SOCKS5 | 全部 feature 适配器（Port Forward / Exchange / Preview / Mirror） |
 | `dns-in` | Direct | 本地 split DNS 入口 |
 
-`traffic-in` 注册五个 SOCKS 用户；用户名即 feature 染色（`auth_user`），供路由规则匹配：
+`traffic-in` 注册四个 SOCKS 用户；用户名即 feature 染色（`auth_user`），供路由规则匹配。
+Mirror primary **不**走 `traffic-in`，而是通过 Gateway 拨回原 Pod。
 
 | Username（`auth_user`） | 路由类 |
 | --- | --- |
 | `port-forward` | cluster → `kubernetes-out` |
-| `mirror-primary` | cluster → `kubernetes-out` |
 | `exchange` | local（反环）→ `local-out` |
 | `preview` | local（反环）→ `local-out` |
 | `mirror-shadow` | local（反环）→ `local-out` |
@@ -163,7 +163,7 @@ sing-box 的 Direct inbound 很适合表达固定目标的端口转发，但每�
 
 | 匹配 | Outbound |
 | --- | --- |
-| `traffic-in` + `auth_user` ∈ {`port-forward`, `mirror-primary`} | `kubernetes-out` |
+| `traffic-in` + `auth_user` = `port-forward` | `kubernetes-out` |
 | `traffic-in` + local users + 集群 CIDR | reject（反环） |
 | `traffic-in` + local users + loopback/private | `local-out` |
 | `traffic-in` + 未知/缺失 `auth_user` | reject |
@@ -188,8 +188,8 @@ UDP frames → SOCKS5 UDP association
 每次适配至少携带：
 
 ```text
-Feature       port-forward | exchange | preview | mirror-primary | mirror-shadow
-              (= SOCKS username / auth_user 染料)
+Feature       port-forward | exchange | preview | mirror-shadow
+              (= SOCKS username / auth_user 染料；Mirror primary 走 Gateway dial)
 MappingID     功能映射 ID
 Inbound       traffic-in（共享 listen）
 Network       tcp | udp
@@ -328,7 +328,8 @@ Preview 与 Exchange 共用 `traffic-in`，但使用独立的 `auth_user=preview
 ### 11.1 数据路径
 
 sing-box 普通 route 动作只选择一个 outbound，不能直接完成一进两出的流量复制。因此
-Mirror Engine 保留在 KubeLoop 中，复制后将两条分支分别注入 sing-box。
+Mirror Engine 保留在 KubeLoop 中：Primary 经 Gateway outbound dial 回原 Pod，
+Shadow 注入 sing-box `traffic-in`（`auth_user=mirror-shadow`）。
 
 ```mermaid
 flowchart LR
@@ -336,20 +337,18 @@ flowchart LR
     GatewayIn["Gateway 反向流"]
     Tee["KubeLoop Mirror Engine"]
 
-    PrimaryIn["traffic-in auth_user=mirror-primary"]
     ShadowIn["traffic-in auth_user=mirror-shadow"]
     SingBox["sing-box"]
-    KubeOut["kubernetes-out"]
     LocalOut["local-out"]
 
-    GatewayOut["Gateway"]
+    GatewayDial["Gateway outbound dial"]
     Pod["原 Pod"]
     Local["本机服务"]
 
     Client --> GatewayIn --> Tee
-    Tee -->|Primary| PrimaryIn --> SingBox --> KubeOut --> GatewayOut --> Pod
+    Tee -->|Primary| GatewayDial --> Pod
     Tee -->|Shadow| ShadowIn --> SingBox --> LocalOut --> Local
-    Pod --> GatewayOut --> KubeOut --> SingBox --> PrimaryIn --> Tee --> GatewayIn --> Client
+    Pod --> GatewayDial --> Tee --> GatewayIn --> Client
 ```
 
 只有 Primary 响应返回集群客户端。Shadow 响应必须持续读取并丢弃，避免本机服务写阻塞。
@@ -446,7 +445,7 @@ Gateway 继续执行私有集群目标校验，形成桌面端与集群端双重
 - 本机目标等于 SOCKS Bridge；
 - Port Forward 本地监听端口等于内部端口；
 - Host Alias 把本地域名解析到内部控制端口；
-- Mirror Primary 被错误地发送到 `local-out`。
+- Mirror Primary 被错误地经 `traffic-in` / `local-out` 转发，而不是 Gateway dial。
 
 ## 13. 生命周期
 
@@ -598,14 +597,14 @@ UI 可以按 feature、mapping、inbound 和 outbound 聚合，而不是只展�
 
 ### 阶段四：Mirror
 
-- Primary 使用 `auth_user=mirror-primary`。
-- Shadow 使用 `auth_user=mirror-shadow`。
+- Primary 经 Gateway（`dialGatewayOpen`）回原 Pod。
+- Shadow 使用 `traffic-in` 上的 `auth_user=mirror-shadow`。
 - 引入有界异步 Shadow 缓冲。
 - 验证 Shadow 故障完全不影响 Primary。
 
 ### 阶段五：收口
 
-- UI 统一展示五类 inbound 流量。
+- UI 统一展示四类 traffic-in feature 染色流量。
 - 删除无必要的业务直连分支。
 - 完善诊断包、路由命中信息和错误阶段。
 - 根据兼容性决定是否删除旧 Port Forward 数据路径。

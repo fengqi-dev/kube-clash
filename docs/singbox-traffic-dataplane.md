@@ -128,13 +128,13 @@ The following inbounds are created once when a Session starts:
 | `traffic-in` | SOCKS5 | All feature adapters (Port Forward, Exchange, Preview, Mirror) |
 | `dns-in` | Direct | Local split DNS entry point |
 
-`traffic-in` registers five SOCKS users. The username is the feature dye
-(`auth_user`) used by route rules:
+`traffic-in` registers four SOCKS users. The username is the feature dye
+(`auth_user`) used by route rules. Mirror primary does **not** use
+`traffic-in`; it dials the original Pod through the Gateway control/data plane.
 
 | Username (`auth_user`) | Route class |
 | --- | --- |
 | `port-forward` | cluster → `kubernetes-out` |
-| `mirror-primary` | cluster → `kubernetes-out` |
 | `exchange` | local (anti-loop) → `local-out` |
 | `preview` | local (anti-loop) → `local-out` |
 | `mirror-shadow` | local (anti-loop) → `local-out` |
@@ -177,7 +177,7 @@ The basic routing relationships are:
 
 | Match | Outbound |
 | --- | --- |
-| `traffic-in` + `auth_user` ∈ {`port-forward`, `mirror-primary`} | `kubernetes-out` |
+| `traffic-in` + `auth_user` = `port-forward` | `kubernetes-out` |
 | `traffic-in` + local users + cluster CIDR | reject (anti-loop) |
 | `traffic-in` + local users + loopback/private | `local-out` |
 | `traffic-in` + unknown/missing `auth_user` | reject |
@@ -204,8 +204,8 @@ UDP frames → SOCKS5 UDP association
 Each adaptation carries at least:
 
 ```text
-Feature       port-forward | exchange | preview | mirror-primary | mirror-shadow
-              (= SOCKS username / auth_user dye)
+Feature       port-forward | exchange | preview | mirror-shadow
+              (= SOCKS username / auth_user dye; Mirror primary uses Gateway dial)
 MappingID     Feature mapping ID
 Inbound       traffic-in (shared listen)
 Network       tcp | udp
@@ -356,7 +356,8 @@ dye to enable:
 
 A standard sing-box route action selects only one outbound and therefore cannot
 directly perform one-to-two traffic replication. The Mirror Engine remains in
-KubeLoop and injects the two branches separately into sing-box after replication.
+KubeLoop: Primary dials the original Pod through the Gateway, while Shadow is
+injected into sing-box `traffic-in` (`auth_user=mirror-shadow`).
 
 ```mermaid
 flowchart LR
@@ -364,20 +365,18 @@ flowchart LR
     GatewayIn["Gateway Reverse Stream"]
     Tee["KubeLoop Mirror Engine"]
 
-    PrimaryIn["traffic-in auth_user=mirror-primary"]
     ShadowIn["traffic-in auth_user=mirror-shadow"]
     SingBox["sing-box"]
-    KubeOut["kubernetes-out"]
     LocalOut["local-out"]
 
-    GatewayOut["Gateway"]
+    GatewayDial["Gateway outbound dial"]
     Pod["Original Pod"]
     Local["Local Service"]
 
     Client --> GatewayIn --> Tee
-    Tee -->|Primary| PrimaryIn --> SingBox --> KubeOut --> GatewayOut --> Pod
+    Tee -->|Primary| GatewayDial --> Pod
     Tee -->|Shadow| ShadowIn --> SingBox --> LocalOut --> Local
-    Pod --> GatewayOut --> KubeOut --> SingBox --> PrimaryIn --> Tee --> GatewayIn --> Client
+    Pod --> GatewayDial --> Tee --> GatewayIn --> Client
 ```
 
 Only the Primary response is returned to the cluster client. Shadow responses must
@@ -478,7 +477,7 @@ The following cases must be rejected when starting a Session or creating a mappi
 - a local target equals the SOCKS Bridge;
 - the Port Forward local listening port equals an internal port;
 - a Host Alias resolves a local domain name to an internal control port;
-- Mirror Primary is incorrectly sent to `local-out`.
+- Mirror Primary is incorrectly routed through `traffic-in` / `local-out` instead of Gateway dial.
 
 ## 13. Lifecycle
 
@@ -636,14 +635,14 @@ only total TUN traffic.
 
 ### Phase 4: Mirror
 
-- Connect Primary with `auth_user=mirror-primary`.
-- Connect Shadow with `auth_user=mirror-shadow`.
+- Dial Primary through the Gateway (`dialGatewayOpen`).
+- Connect Shadow with `auth_user=mirror-shadow` on `traffic-in`.
 - Introduce a bounded asynchronous Shadow buffer.
 - Verify that Shadow failures have no effect on Primary.
 
 ### Phase 5: Consolidation
 
-- Present all five feature dyes uniformly in the UI.
+- Present the four traffic-in feature dyes uniformly in the UI.
 - Remove unnecessary business direct-connection branches.
 - Improve diagnostic bundles, route-match information, and error stages.
 - Decide whether to remove the legacy Port Forward data path based on compatibility.
