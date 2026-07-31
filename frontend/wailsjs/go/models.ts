@@ -738,6 +738,7 @@ export namespace singbox {
 	    downloadSpeed?: number;
 	    startedAt: string;
 	    inbound: string;
+	    feature?: string;
 	    outbound: string;
 	    rule: string;
 	
@@ -758,6 +759,7 @@ export namespace singbox {
 	        this.downloadSpeed = source["downloadSpeed"];
 	        this.startedAt = source["startedAt"];
 	        this.inbound = source["inbound"];
+	        this.feature = source["feature"];
 	        this.outbound = source["outbound"];
 	        this.rule = source["rule"];
 	    }

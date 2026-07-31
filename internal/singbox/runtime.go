@@ -63,15 +63,17 @@ type TrafficEndpoints struct {
 func (e TrafficEndpoints) Validate() error {
 	items := []struct {
 		name     string
+		username string
 		endpoint TrafficEndpoint
 	}{
-		{PortForwardInbound, e.PortForward},
-		{ExchangeInbound, e.Exchange},
-		{PreviewInbound, e.Preview},
-		{MirrorPrimaryInbound, e.MirrorPrimary},
-		{MirrorShadowInbound, e.MirrorShadow},
+		{TrafficUserPortForward, TrafficUserPortForward, e.PortForward},
+		{TrafficUserExchange, TrafficUserExchange, e.Exchange},
+		{TrafficUserPreview, TrafficUserPreview, e.Preview},
+		{TrafficUserMirrorPrimary, TrafficUserMirrorPrimary, e.MirrorPrimary},
+		{TrafficUserMirrorShadow, TrafficUserMirrorShadow, e.MirrorShadow},
 	}
-	for _, item := range items {
+	var sharedAddress, sharedPassword string
+	for i, item := range items {
 		host, rawPort, err := net.SplitHostPort(item.endpoint.Address)
 		if err != nil {
 			return fmt.Errorf("%s address: %w", item.name, err)
@@ -84,8 +86,22 @@ func (e TrafficEndpoints) Validate() error {
 		if err != nil || port < 1 || port > 65535 {
 			return fmt.Errorf("%s has invalid port", item.name)
 		}
-		if item.endpoint.Username == "" || item.endpoint.Password == "" {
-			return fmt.Errorf("%s credentials are required", item.name)
+		if item.endpoint.Username != item.username {
+			return fmt.Errorf("%s username must be %q", item.name, item.username)
+		}
+		if item.endpoint.Password == "" {
+			return fmt.Errorf("%s password is required", item.name)
+		}
+		if i == 0 {
+			sharedAddress = item.endpoint.Address
+			sharedPassword = item.endpoint.Password
+			continue
+		}
+		if item.endpoint.Address != sharedAddress {
+			return errors.New("traffic endpoints must share one listen address")
+		}
+		if item.endpoint.Password != sharedPassword {
+			return errors.New("traffic endpoints must share one password")
 		}
 	}
 	return nil
@@ -138,10 +154,6 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
-	trafficUsername, err := randomSecret()
-	if err != nil {
-		return nil, err
-	}
 	trafficPassword, err := randomSecret()
 	if err != nil {
 		return nil, err
@@ -178,7 +190,6 @@ func (r *Runtime) Start(
 		DNSNamespace:     dnsNamespace,
 		Hosts:            normalizedHosts,
 		TrafficPorts:     trafficPorts,
-		TrafficUsername:  trafficUsername,
 		TrafficPassword:  trafficPassword,
 	}
 	if r.PrivilegedStart == nil {
@@ -212,7 +223,7 @@ func (r *Runtime) Start(
 		resolverDomains:   resolverDomains,
 		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
-		trafficEndpoints:  trafficEndpoints(trafficPorts, trafficUsername, trafficPassword),
+		trafficEndpoints:  trafficEndpoints(trafficPorts, trafficPassword),
 		config:            config,
 		spec:              spec,
 		updateDNS:         r.PrivilegedUpdateDNS,
@@ -387,6 +398,7 @@ type clashConnection struct {
 		Process         string `json:"process"`
 		ProcessPath     string `json:"processPath"`
 		Type            string `json:"type"`
+		User            string `json:"user"`
 	} `json:"metadata"`
 	Upload   int64    `json:"upload"`
 	Download int64    `json:"download"`
@@ -412,6 +424,11 @@ func mapClashMetrics(raw clashConnections) Metrics {
 		if len(item.Chains) > 0 {
 			outbound = item.Chains[0]
 		}
+		inbound := inboundTag(item.Metadata.Type)
+		feature := ""
+		if inbound == TrafficInbound {
+			feature = item.Metadata.User
+		}
 		connections = append(connections, Connection{
 			ID:          item.ID,
 			Network:     item.Metadata.Network,
@@ -421,7 +438,8 @@ func mapClashMetrics(raw clashConnections) Metrics {
 			Upload:      item.Upload,
 			Download:    item.Download,
 			StartedAt:   item.Start,
-			Inbound:     inboundTag(item.Metadata.Type),
+			Inbound:     inbound,
+			Feature:     feature,
 			Outbound:    outbound,
 			Rule:        item.Rule,
 		})
@@ -571,49 +589,37 @@ func availablePort() (int, error) {
 }
 
 func availableTrafficPorts(excluded ...int) (TrafficInboundPorts, error) {
-	ports := TrafficInboundPorts{}
-	targets := []*int{
-		&ports.PortForward,
-		&ports.Exchange,
-		&ports.Preview,
-		&ports.MirrorPrimary,
-		&ports.MirrorShadow,
-	}
-	seen := make(map[int]struct{}, len(targets)+len(excluded))
+	seen := make(map[int]struct{}, len(excluded))
 	for _, port := range excluded {
 		seen[port] = struct{}{}
 	}
-	for _, target := range targets {
-		for {
-			port, err := availablePort()
-			if err != nil {
-				return TrafficInboundPorts{}, err
-			}
-			if _, exists := seen[port]; exists {
-				continue
-			}
-			seen[port] = struct{}{}
-			*target = port
-			break
+	for {
+		port, err := availablePort()
+		if err != nil {
+			return TrafficInboundPorts{}, err
 		}
+		if _, exists := seen[port]; exists {
+			continue
+		}
+		return TrafficInboundPorts{Listen: port}, nil
 	}
-	return ports, nil
 }
 
-func trafficEndpoints(ports TrafficInboundPorts, username, password string) TrafficEndpoints {
-	endpoint := func(port int) TrafficEndpoint {
+func trafficEndpoints(ports TrafficInboundPorts, password string) TrafficEndpoints {
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(ports.Listen))
+	endpoint := func(username string) TrafficEndpoint {
 		return TrafficEndpoint{
-			Address:  net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+			Address:  address,
 			Username: username,
 			Password: password,
 		}
 	}
 	return TrafficEndpoints{
-		PortForward:   endpoint(ports.PortForward),
-		Exchange:      endpoint(ports.Exchange),
-		Preview:       endpoint(ports.Preview),
-		MirrorPrimary: endpoint(ports.MirrorPrimary),
-		MirrorShadow:  endpoint(ports.MirrorShadow),
+		PortForward:   endpoint(TrafficUserPortForward),
+		Exchange:      endpoint(TrafficUserExchange),
+		Preview:       endpoint(TrafficUserPreview),
+		MirrorPrimary: endpoint(TrafficUserMirrorPrimary),
+		MirrorShadow:  endpoint(TrafficUserMirrorShadow),
 	}
 }
 

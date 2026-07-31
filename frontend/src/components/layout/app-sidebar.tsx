@@ -52,12 +52,13 @@ const storageKey = "kubeloop.sidebar.collapsed";
 
 export function AppSidebar({
   view,
-  ready,
+  connectionsAlert,
   updateAvailable,
   onNavigate,
 }: {
   view: AppView;
-  ready: boolean;
+  /** Green dot on Connections: true when unread/new sessions appeared. */
+  connectionsAlert?: boolean;
   updateAvailable: boolean;
   onNavigate(view: AppView): void;
 }) {
@@ -202,10 +203,10 @@ export function AppSidebar({
             Icon: icon,
             label: t(navKeys[id]),
             trailing:
-              id === "connections" && ready ? (
+              id === "connections" && connectionsAlert ? (
                 <span className="ml-auto size-1.5 rounded-full bg-success" />
               ) : undefined,
-            dot: id === "connections" && ready ? "success" : undefined,
+            dot: id === "connections" && connectionsAlert ? "success" : undefined,
           }),
         )}
       </nav>

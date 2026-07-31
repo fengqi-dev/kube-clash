@@ -16,6 +16,7 @@ import (
 	loopmcp "github.com/fengqi-dev/kube-loop/internal/mcp"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
+	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/fengqi-dev/kube-loop/internal/tray"
 	"github.com/fengqi-dev/kube-loop/internal/update"
@@ -86,6 +87,12 @@ func (a *App) startup(ctx context.Context) {
 	a.once.Do(func() {
 		a.manager.Subscribe(func(state session.State) {
 			runtime.EventsEmit(ctx, "session:state", state)
+		})
+		a.manager.SubscribeMetrics(func(metrics *singbox.Metrics) {
+			if metrics == nil {
+				return
+			}
+			runtime.EventsEmit(ctx, "session:metrics", metrics)
 		})
 		go func() {
 			state := a.checkForUpdates(ctx)

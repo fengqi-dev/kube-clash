@@ -66,6 +66,13 @@ export function useSession() {
     const unsubscribe = backend.onSession((session) => {
       if (active) setData((current) => ({ ...current, session }));
     });
+    const unsubscribeMetrics = backend.onSessionMetrics((metrics) => {
+      if (!active) return;
+      setData((current) => ({
+        ...current,
+        session: { ...current.session, metrics },
+      }));
+    });
     const unsubscribeUpdate = backend.onUpdate((update) => {
       if (active) setData((current) => ({ ...current, update }));
     });
@@ -95,6 +102,7 @@ export function useSession() {
     return () => {
       active = false;
       unsubscribe();
+      unsubscribeMetrics();
       unsubscribeUpdate();
     };
   }, []);

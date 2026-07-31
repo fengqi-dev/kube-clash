@@ -104,26 +104,33 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 		PodCIDRs: []string{"10.244.0.0/16"},
 	}, Options{
 		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "test-secret",
-		DNSPort: 1053,
-		TrafficPorts: TrafficInboundPorts{
-			PortForward: 18081, Exchange: 18082, Preview: 18083,
-			MirrorPrimary: 18084, MirrorShadow: 18085,
-		},
-		TrafficUsername: "traffic-user-1234",
+		DNSPort:         1053,
+		TrafficPorts:    TrafficInboundPorts{Listen: 18081},
 		TrafficPassword: "traffic-password-1234567890123456",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	text := string(content)
+	if strings.Count(text, `"type": "socks"`) != 2 {
+		// traffic-in + kubernetes outbound socks
+		t.Fatalf("expected one traffic socks inbound (+ kubernetes outbound):\n%s", text)
+	}
+	if strings.Contains(text, `"tag": "portfwd-in"`) ||
+		strings.Contains(text, `"tag": "exchange-in"`) ||
+		strings.Contains(text, `"tag": "preview-in"`) {
+		t.Fatalf("legacy per-feature inbounds must be merged into traffic-in:\n%s", text)
+	}
 	for _, item := range []string{
-		`"tag": "portfwd-in"`,
-		`"tag": "exchange-in"`,
-		`"tag": "preview-in"`,
-		`"tag": "mirror-primary-in"`,
-		`"tag": "mirror-shadow-in"`,
+		`"tag": "traffic-in"`,
+		`"listen_port": 18081`,
+		`"username": "port-forward"`,
+		`"username": "exchange"`,
+		`"username": "preview"`,
+		`"username": "mirror-primary"`,
+		`"username": "mirror-shadow"`,
+		`"auth_user"`,
 		`"tag": "local"`,
-		`"username": "traffic-user-1234"`,
 	} {
 		if !strings.Contains(text, item) {
 			t.Fatalf("generated config missing %q:\n%s", item, text)

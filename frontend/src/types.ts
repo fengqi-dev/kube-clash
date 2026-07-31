@@ -82,6 +82,7 @@ export interface Connection {
   downloadSpeed?: number;
   startedAt: string;
   inbound: string;
+  feature?: string;
   outbound: string;
   rule: string;
 }
