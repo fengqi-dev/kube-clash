@@ -159,13 +159,42 @@ jobs:
           eval "$(minikube docker-env --shell bash)"
           docker build -t kube-loop-gateway:dev -f build/gateway.e2e.Dockerfile .
 
+      - name: Install privileged helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./build/bundle-helper.sh
+          go run ./e2e/scripts/ensure-singbox.go
+          mkdir -p "${HOME}/.kubeloop" build/bin
+          if [[ ! -s "${HOME}/.kubeloop/helper.token" ]]; then
+            openssl rand -hex 32 >"${HOME}/.kubeloop/helper.token"
+            chmod 600 "${HOME}/.kubeloop/helper.token"
+          fi
+          cp build/embedded/kubeloop-helper build/bin/kubeloop-helper
+          chmod 755 build/bin/kubeloop-helper build/bin/sing-box
+          sudo build/embedded/kubeloop-helper install \
+            --source "${PWD}/build/embedded/kubeloop-helper" \
+            --token "$(tr -d '[:space:]' <"${HOME}/.kubeloop/helper.token")" \
+            --uid "$(id -u)" \
+            --home "${HOME}" \
+            --version dev \
+            --sing-box "${PWD}/build/bin/sing-box"
+          go run ./e2e/scripts/helper-ping.go
+          go run ./e2e/scripts/stop-helper.go || true
+
       - name: Run Minikube e2e tests
         shell: bash
         env:
           KUBELOOP_E2E: "1"
           KUBELOOP_E2E_CONTEXT: minikube
           KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
+          KUBELOOP_SINGBOX_PATH: ${{ github.workspace }}/build/bin/sing-box
         run: go test -tags=e2e ./e2e/... -count=1 -timeout=25m -p 1 -v
+
+      - name: Stop helper sessions
+        if: always()
+        shell: bash
+        run: go run ./e2e/scripts/stop-helper.go || true
 
   windows-e2e:
     name: Windows integration

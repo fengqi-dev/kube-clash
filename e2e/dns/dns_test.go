@@ -3,7 +3,6 @@
 package dns
 
 import (
-	"strings"
 	"testing"
 	"time"
 
@@ -28,7 +27,6 @@ func TestTUNDNSResolution(t *testing.T) {
 		t.Fatal(err)
 	}
 	clusterIP := harness.EchoServiceIP(t, ctx, client)
-	_, podIP := harness.EchoPodIP(t, ctx, client)
 	aliasDomain := "echo.kubeloop-e2e.test"
 
 	live := harness.ConnectSession(t, ctx, session.Request{
@@ -81,15 +79,6 @@ func TestTUNDNSResolution(t *testing.T) {
 	})
 	t.Run("nxdomain-missing-service", func(t *testing.T) {
 		harness.WaitDNSNXDOMAIN(t, port, "no-such-service."+harness.EchoNamespace+".svc.cluster.local")
-	})
-	t.Run("ptr-clusterip", func(t *testing.T) {
-		harness.WaitDNSPTR(t, port, clusterIP, "echo."+harness.EchoNamespace+".svc.cluster.local")
-	})
-	t.Run("ptr-podip", func(t *testing.T) {
-		// Minikube CoreDNS often answers Pod PTR as
-		// <ip-dashes>.<svc>.<ns>.svc.cluster.local (endpoint-style).
-		dashed := strings.ReplaceAll(podIP, ".", "-")
-		harness.WaitDNSPTR(t, port, podIP, dashed)
 	})
 	t.Run("os-resolver-fqdn", func(t *testing.T) {
 		harness.WaitLookupIP(t, fqdn, clusterIP)

@@ -169,11 +169,10 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 	hosts, _ := NormalizeHostAliases(s.Hosts)
 	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
 	ns := s.dnsNamespace()
-	reverse := ReverseZones(s.PodCIDRs, s.ServiceCIDRs, s.ServiceIPs)
 	return DNSMeta{
 		Listen:  s.DNSHost,
 		Port:    s.PublicDNSPort,
-		Domains: ResolverDomains(ns, domains, hosts, reverse...),
+		Domains: ResolverDomains(ns, domains, hosts),
 		Search:  SearchDomains(ns, domains...),
 		Ndots:   5,
 	}, nil

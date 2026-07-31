@@ -30,10 +30,11 @@ export function CopyableText({
     return <span className={className}>{label ?? empty}</span>;
   }
 
+  const text = value;
   async function copy() {
     try {
-      await navigator.clipboard.writeText(value);
-      toast.success(t(successKey), { description: value });
+      await navigator.clipboard.writeText(text);
+      toast.success(t(successKey), { description: text });
     } catch {
       toast.error(t(failKey));
     }
@@ -49,7 +50,7 @@ export function CopyableText({
         className,
       )}
     >
-      {label ?? value}
+      {label ?? text}
     </button>
   );
 }

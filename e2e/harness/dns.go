@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"net"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 
@@ -29,27 +28,6 @@ func WaitDNSA(t *testing.T, port int, name, wantIP string) {
 		}
 		return false
 	}, fmt.Sprintf("A %s -> %s", name, wantIP))
-}
-
-// WaitDNSPTR queries PTR for ip until the answer contains wantSuffix (e.g. service FQDN).
-func WaitDNSPTR(t *testing.T, port int, ip, wantSuffix string) {
-	t.Helper()
-	arpa, err := dns.ReverseAddr(ip)
-	if err != nil {
-		t.Fatalf("reverse addr %s: %v", ip, err)
-	}
-	wantSuffix = strings.TrimSuffix(strings.ToLower(wantSuffix), ".")
-	waitDNS(t, port, "udp", arpa, dns.TypePTR, func(msg *dns.Msg) bool {
-		for _, rr := range msg.Answer {
-			if ptr, ok := rr.(*dns.PTR); ok {
-				got := strings.TrimSuffix(strings.ToLower(ptr.Ptr), ".")
-				if got == wantSuffix || strings.HasSuffix(got, "."+wantSuffix) || strings.Contains(got, wantSuffix) {
-					return true
-				}
-			}
-		}
-		return false
-	}, fmt.Sprintf("PTR %s contains %s", ip, wantSuffix))
 }
 
 // WaitDNSTCPA is WaitDNSA over TCP (exercises the search-proxy TCP path).
