@@ -33,7 +33,6 @@ type Controller struct {
 	recentRoot     *systray.MenuItem
 	recentItems    []*systray.MenuItem
 	recentEmpty    *systray.MenuItem
-
 }
 
 // Start prepares the tray. On Windows/Linux the tray message loop runs in a

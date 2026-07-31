@@ -71,7 +71,7 @@ Other options:
 
 - **macOS (Homebrew)**:
   ```bash
-  brew tap fengqi-dev/kube-loop https://github.com/fengqi-dev/kube-loop
+  brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
   brew install --cask kubeloop
   ```
 - **macOS (manual)**: download the `.dmg` from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
