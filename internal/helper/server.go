@@ -30,12 +30,13 @@ type Server struct {
 }
 
 type session struct {
-	workDir string
-	cmd     *exec.Cmd
-	done    chan struct{}
-	exited  chan sessionExit
-	routes  []string
-	dns     singbox.DNSMeta
+	workDir    string
+	cmd        *exec.Cmd
+	done       chan struct{}
+	exited     chan sessionExit
+	routes     []string
+	dns        singbox.DNSMeta
+	tunAddress string
 }
 
 type sessionExit struct {
@@ -170,7 +171,7 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 
 	current := &session{
 		done: make(chan struct{}), exited: make(chan sessionExit, 1),
-		routes: routes, dns: dns,
+		routes: routes, dns: dns, tunAddress: spec.TUNAddress,
 	}
 	s.mu.Lock()
 	if existing := s.sessions[spec.ID]; existing != nil {
@@ -273,6 +274,7 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		if waitErr != nil {
 			s.Log.Printf("sing-box session %s exited: %v", spec.ID, waitErr)
 		}
+		_ = restoreLinkDNS(current.tunAddress)
 		_ = restorePlatformDNS(current.workDir, current.dns)
 		cleanupPlatformRoutes(current.routes)
 		_ = logFile.Close()
@@ -286,6 +288,7 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 	deadline := time.Now().Add(2 * time.Second)
 	ticker := time.NewTicker(50 * time.Millisecond)
 	defer ticker.Stop()
+	linkDNSApplied := false
 	for {
 		select {
 		case result := <-current.exited:
@@ -298,11 +301,20 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 			}
 			return fmt.Errorf("sing-box exited during startup: %s", detail)
 		case <-ticker.C:
+			if !linkDNSApplied && applyLinkDNS(spec.TUNAddress, dns) == nil {
+				linkDNSApplied = true
+			}
 			if controllerReady(controller, spec.ControllerSecret) {
+				if !linkDNSApplied {
+					_ = applyLinkDNS(spec.TUNAddress, dns)
+				}
 				return nil
 			}
 			if time.Now().After(deadline) {
 				// Process is still alive; let the desktop-side waitReady continue.
+				if !linkDNSApplied {
+					_ = applyLinkDNS(spec.TUNAddress, dns)
+				}
 				return nil
 			}
 		}
@@ -350,10 +362,17 @@ func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
 	if current.workDir == "" {
 		return fmt.Errorf("session work directory is unavailable")
 	}
+	_ = restoreLinkDNS(current.tunAddress)
 	_ = restorePlatformDNS(current.workDir, current.dns)
 	if err := applyPlatformDNS(current.workDir, dns); err != nil {
 		_ = applyPlatformDNS(current.workDir, current.dns)
+		_ = applyLinkDNS(current.tunAddress, current.dns)
 		return fmt.Errorf("install split DNS: %w", err)
+	}
+	if err := applyLinkDNS(current.tunAddress, dns); err != nil {
+		// Drop-in may still be enough for FQDN; keep going so SetDNSNamespace
+		// is not blocked by a transient missing TUN iface.
+		s.Log.Printf("link DNS update for %s: %v", sessionID, err)
 	}
 	meta, _ := json.Marshal(dns)
 	_ = os.WriteFile(filepath.Join(current.workDir, "dns-meta.json"), meta, 0o600)
