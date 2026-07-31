@@ -8,6 +8,7 @@ const dictionary = {
     "nav.getStarted": "Get started",
     "nav.product": "Product",
     "nav.workflows": "Workflows",
+    "nav.mcp": "MCP",
     "nav.architecture": "Architecture",
     "nav.design": "Design notes",
     "sidebar.group.start": "Start",
@@ -38,10 +39,13 @@ const dictionary = {
     "overview.guides.title": "Guides",
     "overview.guides.product.title": "Product capabilities",
     "overview.guides.product.body":
-      "TUN, DNS, Host Aliases, and cluster management.",
+      "TUN, DNS, Host Aliases, cluster management, and MCP for AI agents.",
     "overview.guides.workflows.title": "Everyday workflows",
     "overview.guides.workflows.body":
       "Open Services, map custom domains, debug Pods, exchange, mirror, or preview locally.",
+    "overview.guides.mcp.title": "MCP for AI agents",
+    "overview.guides.mcp.body":
+      "Install a local Streamable HTTP endpoint into Cursor, Claude Code, Codex, or VS Code.",
     "overview.guides.arch.title": "Architecture",
     "overview.guides.arch.body": "How traffic flows from your apps to the Gateway.",
     "overview.more.title": "Also useful",
@@ -98,10 +102,13 @@ const dictionary = {
     "started.after.title": "After you are connected",
     "started.after.body":
       "Use Overview for traffic and status, Workload / Network for Port Forward, Exchange, Mirror, and Preview, and Host Aliases for custom domain → IP maps. Short names like mysql.default resolve via Kubernetes search domains.",
+    "started.mcp.title": "Optional: MCP for AI agents",
+    "started.mcp.body":
+      "Open the MCP tab, install into Cursor / Claude Code / Codex / VS Code, then refresh MCP in that client. Off by default; localhost only.",
 
     "product.title": "Product",
     "product.desc":
-      "Transparent cluster networking — TUN, DNS, Host Aliases, and cluster management.",
+      "Transparent cluster networking — TUN, DNS, Host Aliases, cluster management, and MCP for AI agents.",
     "product.core.title": "Core capabilities",
     "product.core.tun.title": "Transparent TUN",
     "product.core.tun.body": "Managed sing-box routes only discovered Pod and Service traffic.",
@@ -113,6 +120,9 @@ const dictionary = {
       "Per-context domain → IPv4 maps via local DNS while connected. Reconnect to apply; cleared on disconnect.",
     "product.core.clusters.title": "Cluster management",
     "product.core.clusters.body": "Add kubeconfig files, list Contexts, probe and switch.",
+    "product.core.mcp.title": "MCP for AI agents",
+    "product.core.mcp.body":
+      "Optional local Streamable HTTP server so agents can connect, discover, and run network tools.",
     "product.tools.title": "Developer tools",
     "product.tools.desc":
       "Four ways to move traffic between your app, KubeLoop, and Kubernetes.",
@@ -142,9 +152,38 @@ const dictionary = {
     "product.gateway.body":
       "Unprivileged in-cluster Deployment reached only via API Server port-forward. Works with scoped RBAC and admin-preinstalled Gateways.",
 
+    "mcp.title": "MCP for AI agents",
+    "mcp.desc":
+      "Let Cursor, Claude Code, Codex, or VS Code drive KubeLoop over a local Model Context Protocol endpoint.",
+    "mcp.what.title": "What it is",
+    "mcp.what.body":
+      "KubeLoop can expose its desktop control plane as a local MCP server (Streamable HTTP on 127.0.0.1). Tools cover connect/disconnect, discovery, Port Forward, Exchange, Mirror, Preview, and helper install.",
+    "mcp.setup.title": "Set up in three steps",
+    "mcp.setup.s1.title": "Open the MCP tab",
+    "mcp.setup.s1.body": "Start KubeLoop Desktop and open the MCP page in the sidebar.",
+    "mcp.setup.s2.title": "Install into your client",
+    "mcp.setup.s2.body":
+      "Choose Claude Code, Codex, Cursor, or VS Code, then click Install MCP server. This writes the user-scoped config and enables the local endpoint if needed.",
+    "mcp.setup.s3.title": "Refresh the client",
+    "mcp.setup.s3.body":
+      "Restart or refresh MCP in that client so it picks up the new server.",
+    "mcp.tips.title": "Tips",
+    "mcp.tips.body":
+      "You can also Copy config for the selected client. MCP is off by default until enabled or installed; it binds only to localhost. Bearer token auth is optional and off by default.",
+    "mcp.tools.title": "What agents can do",
+    "mcp.tools.connect.title": "Connect & discover",
+    "mcp.tools.connect.body":
+      "Connect or disconnect, list namespaces, Services, and Pods.",
+    "mcp.tools.network.title": "Network tools",
+    "mcp.tools.network.body":
+      "Start and stop Port Forward, Exchange, Mirror, and Preview.",
+    "mcp.tools.helper.title": "Helper & config",
+    "mcp.tools.helper.body":
+      "Check or install the privileged helper, and read the active sing-box config.",
+
     "workflows.title": "Workflows",
     "workflows.desc":
-      "Browse, debug, map domains, exchange, mirror, and preview without opening a terminal for every Service.",
+      "Browse, debug, map domains, exchange, mirror, preview, and drive KubeLoop from AI agents — without opening a terminal for every Service.",
     "workflows.list.title": "Everyday paths",
     "workflows.w1.label": "Internal API",
     "workflows.w1.title": "Open a Service in the browser",
@@ -172,6 +211,11 @@ const dictionary = {
     "workflows.w6.body":
       "On Host Aliases, bind app.dev to a Service or Pod IP. Reconnect so split DNS picks it up.",
     "workflows.w6.hint": "app.dev → 10.96.x.x",
+    "workflows.w7.label": "MCP",
+    "workflows.w7.title": "Let an AI agent operate KubeLoop",
+    "workflows.w7.body":
+      "On the MCP tab, install into Cursor or another client, then ask the agent to connect and start Port Forward or Exchange.",
+    "workflows.w7.hint": "127.0.0.1 · MCP",
 
     "arch.title": "Architecture",
     "arch.desc":
@@ -267,6 +311,7 @@ const dictionary = {
     "nav.getStarted": "快速开始",
     "nav.product": "产品能力",
     "nav.workflows": "使用场景",
+    "nav.mcp": "MCP",
     "nav.architecture": "架构",
     "nav.design": "设计文档",
     "sidebar.group.start": "开始",
@@ -296,10 +341,13 @@ const dictionary = {
     "overview.start.design.body": "架构、权限与安全边界说明。",
     "overview.guides.title": "指南",
     "overview.guides.product.title": "产品能力",
-    "overview.guides.product.body": "TUN、DNS、主机别名与集群管理。",
+    "overview.guides.product.body": "TUN、DNS、主机别名、集群管理，以及面向 AI Agent 的 MCP。",
     "overview.guides.workflows.title": "使用场景",
     "overview.guides.workflows.body":
       "打开 Service、映射自定义域名、调试 Pod，以及 Exchange / Mirror / Preview。",
+    "overview.guides.mcp.title": "面向 AI Agent 的 MCP",
+    "overview.guides.mcp.body":
+      "将本机 Streamable HTTP 端点安装到 Cursor、Claude Code、Codex 或 VS Code。",
     "overview.guides.arch.title": "架构",
     "overview.guides.arch.body": "流量如何从本机应用到达 Gateway。",
     "overview.more.title": "更多",
@@ -348,9 +396,12 @@ const dictionary = {
     "started.after.title": "连接之后",
     "started.after.body":
       "在概览查看流量与状态；在工作负载 / 网络使用端口转发、Exchange、Mirror 与 Preview；在主机别名配置域名 → IP。mysql.default 等短名通过 Kubernetes 搜索域解析。",
+    "started.mcp.title": "可选：面向 AI Agent 的 MCP",
+    "started.mcp.body":
+      "打开 MCP 页，安装到 Cursor / Claude Code / Codex / VS Code，再在对应客户端刷新 MCP。默认关闭，仅监听本机。",
 
     "product.title": "产品能力",
-    "product.desc": "透明集群网络——TUN、DNS、主机别名与集群管理。",
+    "product.desc": "透明集群网络——TUN、DNS、主机别名、集群管理，以及面向 AI Agent 的 MCP。",
     "product.core.title": "核心能力",
     "product.core.tun.title": "透明 TUN",
     "product.core.tun.body": "托管 sing-box，仅路由已发现的 Pod 与 Service 流量。",
@@ -362,6 +413,9 @@ const dictionary = {
       "按 Context 配置域名 → IPv4；连接期间经本地 DNS 生效。改后需重连；断开时清理。",
     "product.core.clusters.title": "集群管理",
     "product.core.clusters.body": "添加 kubeconfig、列出 Context、探测并切换。",
+    "product.core.mcp.title": "面向 AI Agent 的 MCP",
+    "product.core.mcp.body":
+      "可选的本机 Streamable HTTP 服务，供 Agent 连接、发现并操作网络工具。",
     "product.tools.title": "开发者工具",
     "product.tools.desc": "在 User App、KubeLoop 与 Kubernetes 之间搬运流量的四种方式。",
     "product.tools.exchange.title": "Exchange",
@@ -389,8 +443,34 @@ const dictionary = {
     "product.gateway.body":
       "无特权集群内 Deployment，仅经 API Server port-forward 访问；支持受限 RBAC 与管理员预装。",
 
+    "mcp.title": "面向 AI Agent 的 MCP",
+    "mcp.desc":
+      "让 Cursor、Claude Code、Codex 或 VS Code 通过本机 Model Context Protocol 端点操控 KubeLoop。",
+    "mcp.what.title": "是什么",
+    "mcp.what.body":
+      "KubeLoop 可将桌面控制面以本机 MCP 服务暴露（127.0.0.1 上的 Streamable HTTP）。工具覆盖连接/断开、发现、Port Forward、Exchange、Mirror、Preview 与 Helper 安装。",
+    "mcp.setup.title": "三步完成",
+    "mcp.setup.s1.title": "打开 MCP 页",
+    "mcp.setup.s1.body": "启动 KubeLoop Desktop，在侧栏打开 MCP 页。",
+    "mcp.setup.s2.title": "安装到客户端",
+    "mcp.setup.s2.body":
+      "选择 Claude Code、Codex、Cursor 或 VS Code，点击「安装 MCP Server」。会写入对应用户级配置；如未启用会自动启用本机端点。",
+    "mcp.setup.s3.title": "刷新客户端",
+    "mcp.setup.s3.body": "在对应客户端中重启或刷新 MCP，以加载新服务。",
+    "mcp.tips.title": "提示",
+    "mcp.tips.body":
+      "也可对所选客户端使用「复制配置」。MCP 默认关闭（安装或手动启用后开启），仅监听本机；Bearer Token 认证可选且默认关闭。",
+    "mcp.tools.title": "Agent 能做什么",
+    "mcp.tools.connect.title": "连接与发现",
+    "mcp.tools.connect.body": "连接或断开，列出 Namespace、Service 与 Pod。",
+    "mcp.tools.network.title": "网络工具",
+    "mcp.tools.network.body": "启停 Port Forward、Exchange、Mirror 与 Preview。",
+    "mcp.tools.helper.title": "Helper 与配置",
+    "mcp.tools.helper.body": "查看或安装特权 Helper，并读取当前 sing-box 配置。",
+
     "workflows.title": "使用场景",
-    "workflows.desc": "浏览、排查、映射域名、Exchange / Mirror / Preview，不必为每个 Service 再开终端。",
+    "workflows.desc":
+      "浏览、排查、映射域名、Exchange / Mirror / Preview，以及用 AI Agent 操控 KubeLoop——不必为每个 Service 再开终端。",
     "workflows.list.title": "日常路径",
     "workflows.w1.label": "内部 API",
     "workflows.w1.title": "在浏览器打开 Service",
@@ -417,6 +497,11 @@ const dictionary = {
     "workflows.w6.body":
       "在「主机别名」将 app.dev 映射到 Service 或 Pod IP，重新连接后分流 DNS 生效。",
     "workflows.w6.hint": "app.dev → 10.96.x.x",
+    "workflows.w7.label": "MCP",
+    "workflows.w7.title": "让 AI Agent 操作 KubeLoop",
+    "workflows.w7.body":
+      "在 MCP 页安装到 Cursor 等客户端，然后让 Agent 连接集群并启动 Port Forward 或 Exchange。",
+    "workflows.w7.hint": "127.0.0.1 · MCP",
 
     "arch.title": "架构",
     "arch.desc": "本地应用经 sing-box 进入。只有集群目标会穿过 SOCKS 桥到达 Gateway。",
@@ -561,6 +646,7 @@ function mountShell() {
         <h2 data-i18n="sidebar.group.guides">Guides</h2>
         <a href="product.html" data-nav="product" data-i18n="nav.product">Product</a>
         <a href="workflows.html" data-nav="workflows" data-i18n="nav.workflows">Workflows</a>
+        <a href="mcp.html" data-nav="mcp" data-i18n="nav.mcp">MCP</a>
         <a href="architecture.html" data-nav="architecture" data-i18n="nav.architecture">Architecture</a>
       </div>
       <div class="sidebar-group">
