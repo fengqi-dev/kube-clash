@@ -130,8 +130,6 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		}
 		clusterDomains = merged
 	}
-	reverseZones := ReverseZones(discovery.PodCIDRs, discovery.ServiceCIDRs, discovery.ServiceIPs)
-
 	dnsServers := make([]map[string]any, 0, 3)
 	dnsRules := make([]map[string]any, 0, 4)
 	if len(hosts) > 0 {
@@ -162,10 +160,8 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"server": dnsIP.String(),
 			"detour": KubernetesOutbound,
 		})
-		dnsSuffixes := append([]string{}, clusterDomains...)
-		dnsSuffixes = append(dnsSuffixes, reverseZones...)
 		dnsRules = append(dnsRules, map[string]any{
-			"domain_suffix": dnsSuffixes,
+			"domain_suffix": clusterDomains,
 			"server":        "cluster",
 		})
 	}

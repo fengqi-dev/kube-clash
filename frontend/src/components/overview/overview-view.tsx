@@ -158,7 +158,6 @@ export function OverviewView({
               contextName={contextName}
               discovery={session.discovery}
               ready={ready}
-              dnsNamespace={session.dnsNamespace}
             />
 
             <div className="flex flex-col items-center justify-center self-center px-2 text-center">
@@ -308,19 +307,16 @@ function DiscoverySummary({
   contextName,
   discovery,
   ready,
-  dnsNamespace,
 }: {
   contextName: string;
   discovery?: Discovery;
   ready: boolean;
-  dnsNamespace?: string;
 }) {
   const { t } = useI18n();
   const [podCIDRs, setPodCIDRs] = useState("");
   const [serviceCIDRs, setServiceCIDRs] = useState("");
   const [dnsServer, setDnsServer] = useState("");
   const [clusterDomains, setClusterDomains] = useState("cluster.local");
-  const [dnsNs, setDnsNs] = useState("default");
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -329,7 +325,6 @@ function DiscoverySummary({
       setServiceCIDRs("");
       setDnsServer("");
       setClusterDomains("cluster.local");
-      setDnsNs("default");
       return;
     }
     let active = true;
@@ -355,7 +350,6 @@ function DiscoverySummary({
               : ["cluster.local"]
           ).join(", "),
         );
-        setDnsNs(manual.dnsNamespace || dnsNamespace || "default");
       })
       .catch(() => {
         if (!active) return;
@@ -363,7 +357,6 @@ function DiscoverySummary({
         setServiceCIDRs(discovery?.serviceCIDRs?.join(", ") ?? "");
         setDnsServer(discovery?.dnsServer || "");
         setClusterDomains((discovery?.clusterDomains ?? ["cluster.local"]).join(", "));
-        setDnsNs(dnsNamespace || "default");
       });
     return () => {
       active = false;
@@ -374,31 +367,19 @@ function DiscoverySummary({
     discovery?.podCIDRs,
     discovery?.serviceCIDRs,
     discovery?.clusterDomains,
-    dnsNamespace,
   ]);
 
   async function save() {
     if (!contextName) return;
     setSaving(true);
     try {
-      const domains = splitCIDRs(clusterDomains);
       await backend.setManualNetwork(contextName, {
         podCIDRs: splitCIDRs(podCIDRs),
         serviceCIDRs: splitCIDRs(serviceCIDRs),
         dnsServer: dnsServer.trim(),
-        clusterDomains: domains,
-        dnsNamespace: dnsNs.trim() || "default",
+        clusterDomains: splitCIDRs(clusterDomains),
       });
-      if (ready) {
-        try {
-          await backend.setDNSNamespace(contextName, dnsNs.trim() || "default");
-          toast.success(t("overview.networkSavedLiveDNS"));
-        } catch {
-          toast.success(t("overview.networkSavedReconnect"));
-        }
-      } else {
-        toast.success(t("overview.networkSaved"));
-      }
+      toast.success(ready ? t("overview.networkSavedReconnect") : t("overview.networkSaved"));
     } catch (error) {
       toast.error(t("overview.networkSaveFailed"), {
         description: error instanceof Error ? error.message : String(error),
@@ -430,13 +411,6 @@ function DiscoverySummary({
           value={clusterDomains}
           placeholder="cluster.local, corp.local"
           onChange={setClusterDomains}
-          disabled={!contextName}
-        />
-        <NetworkField
-          label={t("overview.dnsNamespace")}
-          value={dnsNs}
-          placeholder="default"
-          onChange={setDnsNs}
           disabled={!contextName}
         />
         <NetworkField
