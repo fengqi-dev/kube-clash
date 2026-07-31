@@ -6,6 +6,10 @@ export function AddKubeconfig() {
   return window['go']['main']['App']['AddKubeconfig']();
 }
 
+export function AddKubeconfigPath(arg1) {
+  return window['go']['main']['App']['AddKubeconfigPath'](arg1);
+}
+
 export function Bootstrap() {
   return window['go']['main']['App']['Bootstrap']();
 }
@@ -30,8 +34,16 @@ export function GetHostAliases(arg1) {
   return window['go']['main']['App']['GetHostAliases'](arg1);
 }
 
+export function GetMCPStatus() {
+  return window['go']['main']['App']['GetMCPStatus']();
+}
+
 export function GetManualNetwork(arg1) {
   return window['go']['main']['App']['GetManualNetwork'](arg1);
+}
+
+export function GetSingBoxConfig() {
+  return window['go']['main']['App']['GetSingBoxConfig']();
 }
 
 export function HelperStatus() {
@@ -40,6 +52,10 @@ export function HelperStatus() {
 
 export function InstallHelper() {
   return window['go']['main']['App']['InstallHelper']();
+}
+
+export function InstallMCPClient(arg1) {
+  return window['go']['main']['App']['InstallMCPClient'](arg1);
 }
 
 export function ListIntercepts() {
@@ -78,6 +94,10 @@ export function ProbeContext(arg1) {
   return window['go']['main']['App']['ProbeContext'](arg1);
 }
 
+export function RegenerateMCPToken() {
+  return window['go']['main']['App']['RegenerateMCPToken']();
+}
+
 export function ReloadContexts() {
   return window['go']['main']['App']['ReloadContexts']();
 }
@@ -100,6 +120,18 @@ export function SessionIntentCounts() {
 
 export function SetHostAliases(arg1, arg2) {
   return window['go']['main']['App']['SetHostAliases'](arg1, arg2);
+}
+
+export function SetMCPEnabled(arg1) {
+  return window['go']['main']['App']['SetMCPEnabled'](arg1);
+}
+
+export function SetMCPPort(arg1) {
+  return window['go']['main']['App']['SetMCPPort'](arg1);
+}
+
+export function SetMCPTokenEnabled(arg1) {
+  return window['go']['main']['App']['SetMCPTokenEnabled'](arg1);
 }
 
 export function SetManualNetwork(arg1, arg2) {

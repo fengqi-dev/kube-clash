@@ -2,8 +2,10 @@ import { useEffect, useState } from "react";
 import {
   Check,
   CheckCircle2,
+  Copy,
   Download,
   ExternalLink,
+  FileJson,
   Loader2,
   RefreshCw,
   Shield,
@@ -12,11 +14,19 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
+import { JsonView } from "@/components/shared/json-view";
 import { PageShell } from "@/components/shared/page-shell";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Select,
   SelectContent,
@@ -52,6 +62,9 @@ export function SettingsView({
     : t("settings.checkOnStartup");
   const [helper, setHelper] = useState<HelperStatus | null>(null);
   const [helperBusy, setHelperBusy] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [configBusy, setConfigBusy] = useState(false);
+  const [configText, setConfigText] = useState("");
 
   async function refreshHelper() {
     try {
@@ -94,6 +107,36 @@ export function SettingsView({
       });
     } finally {
       setHelperBusy(false);
+    }
+  }
+
+  async function onViewConfig() {
+    if (!ready) {
+      toast.error(t("settings.configUnavailable"));
+      return;
+    }
+    setConfigBusy(true);
+    try {
+      const text = await backend.getSingBoxConfig();
+      setConfigText(text);
+      setConfigOpen(true);
+    } catch (error) {
+      toast.error(t("settings.configLoadFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
+    } finally {
+      setConfigBusy(false);
+    }
+  }
+
+  async function onCopyConfig() {
+    try {
+      await navigator.clipboard.writeText(configText);
+      toast.success(t("settings.configCopied"));
+    } catch (error) {
+      toast.error(t("settings.configLoadFailed"), {
+        description: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -194,6 +237,24 @@ export function SettingsView({
                 >
                   {ready ? t("core.running") : t("core.onDemand")}
                 </Badge>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  className={cn(
+                    "h-7 px-2 text-[11px] text-muted-foreground",
+                    ready && "text-foreground hover:text-foreground",
+                  )}
+                  disabled={!ready || configBusy}
+                  onClick={() => void onViewConfig()}
+                >
+                  {configBusy ? (
+                    <Loader2 data-icon="inline-start" className="animate-spin" />
+                  ) : (
+                    <FileJson data-icon="inline-start" />
+                  )}
+                  {t("settings.viewConfig")}
+                </Button>
               </div>
               <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="text-[11px] font-medium text-muted-foreground">
@@ -306,6 +367,30 @@ export function SettingsView({
           {t("settings.updatePrivacy")} {t("settings.updateVerify")}
         </CardFooter>
       </Card>
+
+      <Dialog open={configOpen} onOpenChange={setConfigOpen}>
+        <DialogContent className="gap-3 sm:max-w-2xl">
+          <div className="flex items-start justify-between gap-3 pr-8">
+            <DialogHeader className="min-w-0 flex-1 gap-1 pr-0 text-left">
+              <DialogTitle>{t("settings.configTitle")}</DialogTitle>
+              <DialogDescription>{t("settings.configDescription")}</DialogDescription>
+            </DialogHeader>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="shrink-0"
+              onClick={() => void onCopyConfig()}
+            >
+              <Copy data-icon="inline-start" />
+              {t("settings.configCopy")}
+            </Button>
+          </div>
+          <div className="h-[min(60vh,28rem)] overflow-y-auto overscroll-contain rounded-md border border-input bg-muted/30">
+            <JsonView value={configText} />
+          </div>
+        </DialogContent>
+      </Dialog>
     </PageShell>
   );
 }

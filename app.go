@@ -1,7 +1,9 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"log"
 	"sync"
@@ -11,6 +13,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/helper"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/locale"
+	loopmcp "github.com/fengqi-dev/kube-loop/internal/mcp"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
@@ -26,6 +29,7 @@ type App struct {
 	store       *store.Store
 	updater     *update.Checker
 	tray        *tray.Controller
+	mcp         *loopmcp.Controller
 	once        sync.Once
 	updateMu    sync.RWMutex
 	updateCheck sync.Mutex
@@ -62,16 +66,19 @@ func NewApp() *App {
 	if stateStore != nil {
 		options = append(options, session.WithStore(stateStore))
 	}
-	return &App{
+	manager := session.NewManager(provider, options...)
+	app := &App{
 		provider: provider,
-		manager:  session.NewManager(provider, options...),
+		manager:  manager,
 		store:    stateStore,
 		updater:  &update.Checker{CurrentVersion: version},
 		updateState: update.Info{
 			CurrentVersion: version,
 			URL:            "https://github.com/fengqi-dev/kube-loop/releases",
 		},
+		mcp: loopmcp.NewController(provider, manager, stateStore, version),
 	}
+	return app
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -85,6 +92,9 @@ func (a *App) startup(ctx context.Context) {
 			runtime.EventsEmit(ctx, "update:state", state)
 		}()
 		go a.manager.RestoreStartup(ctx)
+		if a.mcp != nil {
+			a.mcp.StartFromStore()
+		}
 	})
 }
 
@@ -96,6 +106,9 @@ func (a *App) beforeClose(ctx context.Context) (prevent bool) {
 }
 
 func (a *App) shutdown(context.Context) {
+	if a.mcp != nil {
+		_ = a.mcp.Stop()
+	}
 	if a.tray != nil {
 		a.tray.Stop()
 	}
@@ -171,6 +184,13 @@ func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
 	}
 	if path == "" {
 		return a.provider.Inventory()
+	}
+	return a.AddKubeconfigPath(path)
+}
+
+func (a *App) AddKubeconfigPath(path string) (cluster.ClusterInventory, error) {
+	if path == "" {
+		return cluster.ClusterInventory{}, errors.New("kubeconfig path is required")
 	}
 	if err := cluster.ValidateKubeconfigFile(path); err != nil {
 		return cluster.ClusterInventory{}, err
@@ -400,6 +420,20 @@ func (a *App) CheckForUpdates() update.Info {
 	return state
 }
 
+// GetSingBoxConfig returns the active session's generated sing-box config JSON.
+// Available only while connected.
+func (a *App) GetSingBoxConfig() (string, error) {
+	raw, err := a.manager.SingBoxConfig()
+	if err != nil {
+		return "", err
+	}
+	var pretty bytes.Buffer
+	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
+		return string(raw), nil
+	}
+	return pretty.String(), nil
+}
+
 func (a *App) HelperStatus() helper.Status {
 	ctx := a.ctx
 	if ctx == nil {
@@ -436,6 +470,50 @@ func (a *App) OpenUpdatePage() error {
 	}
 	runtime.BrowserOpenURL(a.ctx, target)
 	return nil
+}
+
+// MCP Wails bindings — implementation is internal/mcp.Controller.
+
+func (a *App) GetMCPStatus() loopmcp.Status {
+	if a.mcp == nil {
+		return loopmcp.Status{}
+	}
+	return a.mcp.Status()
+}
+
+func (a *App) SetMCPEnabled(enabled bool) error {
+	if a.mcp == nil {
+		return errors.New("mcp server unavailable")
+	}
+	return a.mcp.SetEnabled(enabled)
+}
+
+func (a *App) SetMCPPort(port int) error {
+	if a.mcp == nil {
+		return errors.New("mcp server unavailable")
+	}
+	return a.mcp.SetPort(port)
+}
+
+func (a *App) SetMCPTokenEnabled(enabled bool) error {
+	if a.mcp == nil {
+		return errors.New("mcp server unavailable")
+	}
+	return a.mcp.SetTokenEnabled(enabled)
+}
+
+func (a *App) RegenerateMCPToken() (string, error) {
+	if a.mcp == nil {
+		return "", errors.New("mcp server unavailable")
+	}
+	return a.mcp.RegenerateToken()
+}
+
+func (a *App) InstallMCPClient(client string) (loopmcp.InstallResult, error) {
+	if a.mcp == nil {
+		return loopmcp.InstallResult{}, errors.New("mcp server unavailable")
+	}
+	return a.mcp.InstallClient(client)
 }
 
 func (a *App) checkForUpdates(ctx context.Context) update.Info {

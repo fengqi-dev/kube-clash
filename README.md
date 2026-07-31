@@ -113,6 +113,18 @@ Exchange / Mirror / Preview stay disabled when Service / EndpointSlice / Endpoin
 primary path and tees TCP/UDP requests to a local process.
 See [docs/design.md](docs/design.md) §8 (or [中文](docs/design.zh-CN.md)) for example Roles.
 
+## MCP (Cursor / AI agents)
+
+KubeLoop can expose its desktop control plane as a local [MCP](https://modelcontextprotocol.io) server (Streamable HTTP on `127.0.0.1`). Tools cover connect/disconnect, discovery, Port Forward, Exchange, Mirror, Preview, and helper install.
+
+1. Start KubeLoop, open the **MCP** tab.
+2. Choose a client (Claude Code / Codex / Cursor / VS Code) and click **Install MCP server**
+   (writes the user-scoped config and enables the local endpoint if needed).
+3. Restart or refresh MCP in that client.
+
+You can also **Copy config** for the selected client. MCP is **off by default** until enabled
+or installed; it binds only to localhost. Bearer token auth is optional and **off by default**.
+
 ## Security posture
 
 KubeLoop is built so cluster access stays scoped and recoverable:
@@ -129,6 +141,7 @@ KubeLoop is built so cluster access stays scoped and recoverable:
   session description — never caller-supplied commands, executable paths, or config
   paths. It regenerates config and manages the verified core under protected system
   storage, and never talks to the Kubernetes API.
+- The optional MCP server listens on `127.0.0.1` only; Bearer token auth is optional (off by default).
 
 ## Platform notes
 

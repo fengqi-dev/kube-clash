@@ -15,7 +15,19 @@ const currentVersion = 1
 type State struct {
 	Version  int                      `json:"version"`
 	UI       UIState                  `json:"ui"`
+	MCP      MCPConfig                `json:"mcp,omitempty"`
 	Clusters map[string]*ClusterState `json:"clusters"`
+}
+
+// DefaultMCPPort is the Streamable HTTP listen port when unset.
+const DefaultMCPPort = 30808
+
+// MCPConfig persists the embedded MCP server settings.
+type MCPConfig struct {
+	Enabled      bool   `json:"enabled,omitempty"`
+	Port         int    `json:"port,omitempty"`         // default DefaultMCPPort
+	TokenEnabled bool   `json:"tokenEnabled,omitempty"` // default false; require Bearer token
+	Token        string `json:"token,omitempty"`        // opaque bearer (used when TokenEnabled)
 }
 
 // UIState remembers the last selected context in the desktop UI.
@@ -160,6 +172,21 @@ func (s *Store) Snapshot() State {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return cloneState(s.state)
+}
+
+// MCP returns a copy of the embedded MCP server configuration.
+func (s *Store) MCP() MCPConfig {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return normalizeMCP(s.state.MCP)
+}
+
+// SetMCP replaces the embedded MCP server configuration.
+func (s *Store) SetMCP(cfg MCPConfig) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.state.MCP = normalizeMCP(cfg)
+	return s.saveLocked()
 }
 
 func (s *Store) SetUI(contextName, namespace string) error {
@@ -447,6 +474,13 @@ func (s *Store) saveLocked() error {
 	return nil
 }
 
+func normalizeMCP(cfg MCPConfig) MCPConfig {
+	if cfg.Port <= 0 {
+		cfg.Port = DefaultMCPPort
+	}
+	return cfg
+}
+
 func cloneState(state State) State {
 	out := State{
 		Version: state.Version,
@@ -455,6 +489,7 @@ func cloneState(state State) State {
 			LastNamespace:   state.UI.LastNamespace,
 			KubeconfigFiles: cloneStrings(state.UI.KubeconfigFiles),
 		},
+		MCP:      normalizeMCP(state.MCP),
 		Clusters: make(map[string]*ClusterState, len(state.Clusters)),
 	}
 	for name, item := range state.Clusters {

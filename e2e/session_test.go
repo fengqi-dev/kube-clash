@@ -104,6 +104,7 @@ func (r *recordingProcess) TrafficEndpoints() singbox.TrafficEndpoints {
 		MirrorPrimary: endpoint, MirrorShadow: endpoint,
 	}
 }
+func (r *recordingProcess) Config() []byte { return []byte(`{"log":{"level":"info"}}`) }
 func (r *recordingProcess) Close() error {
 	select {
 	case <-r.done:

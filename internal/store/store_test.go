@@ -89,6 +89,36 @@ func TestClearSessionIntents(t *testing.T) {
 	}
 }
 
+func TestMCPConfigRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+	s, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg := s.MCP()
+	if cfg.Enabled || cfg.TokenEnabled || cfg.Port != DefaultMCPPort || cfg.Token != "" {
+		t.Fatalf("default mcp=%#v", cfg)
+	}
+	if err := s.SetMCP(MCPConfig{Enabled: true, Port: 19001, TokenEnabled: true, Token: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := reloaded.MCP()
+	if !got.Enabled || !got.TokenEnabled || got.Port != 19001 || got.Token != "abc" {
+		t.Fatalf("mcp=%#v", got)
+	}
+	if err := s.SetMCP(MCPConfig{Enabled: false, Port: 0, Token: "abc"}); err != nil {
+		t.Fatal(err)
+	}
+	got = s.MCP()
+	if got.Enabled || got.TokenEnabled || got.Port != DefaultMCPPort || got.Token != "abc" {
+		t.Fatalf("normalized mcp=%#v", got)
+	}
+}
+
 func TestHostAliasesClear(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "state.json"))
 	if err != nil {

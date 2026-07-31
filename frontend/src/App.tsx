@@ -5,6 +5,7 @@ import { ClustersView } from "@/components/clusters/clusters-view";
 import { ConnectionsView } from "@/components/connections/connections-view";
 import { HostAliasesView } from "@/components/host-aliases/host-aliases-view";
 import { LogsView } from "@/components/logs/logs-view";
+import { MCPView } from "@/components/mcp/mcp-view";
 import { NetworkView } from "@/components/network/network-view";
 import { WorkloadView } from "@/components/network/workload-view";
 import { OverviewView } from "@/components/overview/overview-view";
@@ -124,6 +125,7 @@ function App() {
           {view === "logs" && (
             <LogsView session={session} error={uiError || session.error || ""} />
           )}
+          {view === "mcp" && <MCPView />}
           {view === "settings" && (
             <SettingsView
               ready={ready}

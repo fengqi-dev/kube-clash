@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
+  Bot,
   Boxes,
   Gauge,
   Network,
@@ -31,6 +32,7 @@ const navigation: Array<{ id: Exclude<AppView, "settings">; icon: LucideIcon }> 
   { id: "workload", icon: Boxes },
   { id: "network", icon: Network },
   { id: "host-aliases", icon: Globe },
+  { id: "mcp", icon: Bot },
   { id: "logs", icon: ScrollText },
 ];
 
@@ -42,6 +44,7 @@ const navKeys: Record<AppView, TranslationKey> = {
   network: "nav.network",
   "host-aliases": "nav.hostAliases",
   logs: "nav.logs",
+  mcp: "nav.mcp",
   settings: "nav.settings",
 };
 
@@ -189,7 +192,7 @@ export function AppSidebar({
 
       <nav
         className={cn(
-          "mt-5 space-y-1",
+          "mt-5 min-h-0 flex-1 space-y-1 overflow-y-auto",
           collapsed && "flex flex-col items-center",
         )}
       >

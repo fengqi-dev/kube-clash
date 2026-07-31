@@ -31,6 +31,8 @@ type RunningCore interface {
 	Err() error
 	Snapshot(ctx context.Context) (Metrics, error)
 	TrafficEndpoints() TrafficEndpoints
+	// Config returns the generated sing-box config JSON for the active core.
+	Config() []byte
 }
 
 type TrafficEndpoint struct {
@@ -166,6 +168,10 @@ func (r *Runtime) Start(
 	if err := spec.Validate(); err != nil {
 		return nil, err
 	}
+	config, err := spec.GenerateConfig()
+	if err != nil {
+		return nil, fmt.Errorf("generate sing-box config: %w", err)
+	}
 	meta, err := spec.DNS()
 	if err != nil {
 		return nil, err
@@ -187,6 +193,7 @@ func (r *Runtime) Start(
 		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
 		trafficEndpoints:  trafficEndpoints(trafficPorts, trafficUsername, trafficPassword),
+		config:            config,
 	}
 	stop, startErr := r.PrivilegedStart(ctx, spec)
 	if startErr != nil {
@@ -252,6 +259,7 @@ type Process struct {
 	errMu             sync.RWMutex
 	waitErr           error
 	trafficEndpoints  TrafficEndpoints
+	config            []byte
 }
 
 func (p *Process) Done() <-chan struct{} { return p.done }
@@ -263,6 +271,15 @@ func (p *Process) Err() error {
 }
 
 func (p *Process) TrafficEndpoints() TrafficEndpoints { return p.trafficEndpoints }
+
+func (p *Process) Config() []byte {
+	if len(p.config) == 0 {
+		return nil
+	}
+	out := make([]byte, len(p.config))
+	copy(out, p.config)
+	return out
+}
 
 func (p *Process) Snapshot(ctx context.Context) (Metrics, error) {
 	response, err := p.request(ctx, "/connections")

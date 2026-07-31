@@ -160,6 +160,7 @@ type Manager struct {
 	recentConnections map[string]recentConnection
 	lastTraffic       map[string]connectionTraffic
 	restoring         bool
+	runningCore       singbox.RunningCore
 }
 
 // Keep short-lived TUN connections visible between core snapshot polls.
@@ -209,6 +210,22 @@ func (m *Manager) ListPods(
 	ctx context.Context, contextName, namespace string,
 ) ([]cluster.PodInfo, error) {
 	return m.provider.ListPods(ctx, contextName, namespace)
+}
+
+// SingBoxConfig returns the active session's generated sing-box config JSON.
+func (m *Manager) SingBoxConfig() ([]byte, error) {
+	m.mu.RLock()
+	core := m.runningCore
+	phase := m.state.Phase
+	m.mu.RUnlock()
+	if core == nil || phase != PhaseConnected {
+		return nil, errors.New("not connected")
+	}
+	config := core.Config()
+	if len(config) == 0 {
+		return nil, errors.New("sing-box config unavailable")
+	}
+	return config, nil
 }
 
 func (m *Manager) State() State {
@@ -271,6 +288,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		if m.done == done {
 			m.cancel = nil
 			m.done = nil
+			m.runningCore = nil
 		}
 		m.mu.Unlock()
 		close(done)
@@ -402,6 +420,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	resources = append(resources, core)
+	m.mu.Lock()
+	m.runningCore = core
+	m.mu.Unlock()
 	trafficEndpoints := core.TrafficEndpoints()
 	if err := trafficEndpoints.Validate(); err != nil {
 		m.fail(ctx, state, "sing-box feature inbounds are unavailable", err)
