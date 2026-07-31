@@ -25,5 +25,7 @@
 //
 // Or (Helper must already be installed with matching token/sing-box):
 //
-//	KUBELOOP_E2E=1 go test -tags=e2e ./e2e/... -count=1 -timeout=30m -parallel=1 -p 1 -v
+//	KUBELOOP_E2E=1 ./e2e/scripts/run-go-test.sh
+//
+// run-go-test.sh prints a failed-test summary at the end.
 package e2e

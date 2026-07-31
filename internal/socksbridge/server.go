@@ -29,10 +29,16 @@ const (
 // When ok is true, the bridge writes the SOCKS success reply then calls serve.
 type HostTCPHandler func(host string, port uint16) (serve func(net.Conn), ok bool)
 
+// HostUDPHandler claims intercepted UDP destinations on the host TUN path.
+// dial opens a connection that exchanges raw datagram payloads via Read/Write
+// (not tunnel length-prefix framing).
+type HostUDPHandler func(host string, port uint16) (dial func(context.Context) (net.Conn, error), ok bool)
+
 type Server struct {
 	GatewayAddress string
 	DialTimeout    time.Duration
 	HostTCP        HostTCPHandler
+	HostUDP        HostUDPHandler
 }
 
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
@@ -43,6 +49,10 @@ type Bridge struct {
 
 func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
 	b.server.HostTCP = handler
+}
+
+func (b *Bridge) SetHostUDPHandler(handler HostUDPHandler) {
+	b.server.HostUDP = handler
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -154,7 +164,10 @@ type udpTunnel struct {
 	connection net.Conn
 	host       string
 	port       uint16
-	writeMu    sync.Mutex
+	// framed is true for Gateway UDP tunnels (length-prefixed datagrams).
+	// HostUDP bypass connections use raw Read/Write payloads.
+	framed  bool
+	writeMu sync.Mutex
 }
 
 func (a *udpAssociation) serve() {
@@ -179,7 +192,11 @@ func (a *udpAssociation) serve() {
 			}
 		}
 		item.writeMu.Lock()
-		err = tunnel.WriteDatagram(item.connection, payload)
+		if item.framed {
+			err = tunnel.WriteDatagram(item.connection, payload)
+		} else {
+			_, err = item.connection.Write(payload)
+		}
 		item.writeMu.Unlock()
 		if err != nil {
 			a.removeTunnel(item)
@@ -188,11 +205,11 @@ func (a *udpAssociation) serve() {
 }
 
 func (a *udpAssociation) newTunnel(host string, port uint16) (*udpTunnel, error) {
-	connection, err := a.server.openGateway(tunnel.CommandUDP, host, port)
+	connection, framed, err := a.openUDP(host, port)
 	if err != nil {
 		return nil, err
 	}
-	item := &udpTunnel{connection: connection, host: host, port: port}
+	item := &udpTunnel{connection: connection, host: host, port: port, framed: framed}
 	key := net.JoinHostPort(host, strconv.Itoa(int(port)))
 	a.mu.Lock()
 	if a.closed {
@@ -211,7 +228,49 @@ func (a *udpAssociation) newTunnel(host string, port uint16) (*udpTunnel, error)
 	return item, nil
 }
 
+func (a *udpAssociation) openUDP(host string, port uint16) (net.Conn, bool, error) {
+	if a.server.HostUDP != nil {
+		if dial, ok := a.server.HostUDP(host, port); ok && dial != nil {
+			conn, err := dial(context.Background())
+			if err != nil {
+				return nil, false, err
+			}
+			return conn, false, nil
+		}
+	}
+	conn, err := a.server.openGateway(tunnel.CommandUDP, host, port)
+	if err != nil {
+		return nil, false, err
+	}
+	return conn, true, nil
+}
+
 func (a *udpAssociation) readReplies(item *udpTunnel) {
+	if item.framed {
+		a.readFramedReplies(item)
+		return
+	}
+	buffer := make([]byte, tunnel.MaxDatagramSize)
+	for {
+		n, err := item.connection.Read(buffer)
+		if err != nil {
+			a.removeTunnel(item)
+			return
+		}
+		packet, err := encodeUDPPacket(item.host, item.port, buffer[:n])
+		if err != nil {
+			continue
+		}
+		a.mu.Lock()
+		client := a.client
+		a.mu.Unlock()
+		if client != nil {
+			_, _ = a.listener.WriteToUDP(packet, client)
+		}
+	}
+}
+
+func (a *udpAssociation) readFramedReplies(item *udpTunnel) {
 	reader := bufio.NewReader(item.connection)
 	var buffer []byte
 	for {

@@ -583,6 +583,26 @@ func (m *Manager) HostTCP(host string, port uint16) (func(net.Conn), bool) {
 	}, true
 }
 
+// HostUDP returns a dialer when host:port is an active UDP intercept / preview
+// target. Used by the local SOCKS bridge so host TUN UDP does not hairpin
+// through the Gateway ClusterIP.
+func (m *Manager) HostUDP(host string, port uint16) (func(context.Context) (net.Conn, error), bool) {
+	m.mu.Lock()
+	route := m.hostRoutes[hostRouteKey{host: strings.ToLower(strings.TrimSpace(host)), port: port}]
+	if route == nil {
+		m.mu.Unlock()
+		return nil, false
+	}
+	copyRoute := *route
+	gatewayAddress := m.gatewayAddress
+	dialers := m.traffic
+	m.mu.Unlock()
+
+	return func(ctx context.Context) (net.Conn, error) {
+		return m.dialHostUDP(ctx, gatewayAddress, copyRoute, dialers)
+	}, true
+}
+
 func (m *Manager) serveHostTCP(
 	ctx context.Context,
 	gatewayAddress string,
@@ -615,6 +635,54 @@ func (m *Manager) serveHostTCP(
 	}
 	defer localConn.Close()
 	relayTCP(client, localConn)
+}
+
+func (m *Manager) dialHostUDP(
+	ctx context.Context,
+	gatewayAddress string,
+	route hostRoute,
+	dialers TrafficDialers,
+) (net.Conn, error) {
+	host := route.local.LocalHost
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	localTarget := net.JoinHostPort(host, fmt.Sprintf("%d", route.local.LocalPort))
+
+	if route.mode == ModeMirror {
+		return m.dialHostMirrorUDP(
+			ctx, gatewayAddress, route.primaryAddr, host, route.local.LocalPort, dialers,
+		)
+	}
+
+	localDialer := dialers.Exchange
+	if route.preview {
+		localDialer = dialers.Preview
+	}
+	return dialTraffic(ctx, localDialer, "udp", localTarget)
+}
+
+func (m *Manager) dialHostMirrorUDP(
+	ctx context.Context,
+	gatewayAddress, primaryAddr, localHost string,
+	localPort int,
+	dialers TrafficDialers,
+) (net.Conn, error) {
+	if primaryAddr == "" {
+		return nil, fmt.Errorf("mirror primary address is required")
+	}
+	primary, primaryFramed, err := dialMirrorPrimary(
+		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP, dialers.MirrorPrimary,
+	)
+	if err != nil {
+		return nil, err
+	}
+	localAddr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
+	localConn, err := dialTraffic(ctx, dialers.MirrorShadow, "udp", localAddr)
+	if err != nil {
+		localConn = nil
+	}
+	return newHostMirrorUDPConn(primary, primaryFramed, localConn), nil
 }
 
 func (m *Manager) allocateListenPort() int32 {
@@ -1020,9 +1088,6 @@ func (m *Manager) installHostRoutes(
 		m.hostRoutes = make(map[hostRouteKey]*hostRoute)
 	}
 	for _, port := range ports {
-		if port.Protocol == corev1.ProtocolUDP {
-			continue
-		}
 		network := protocolToNetwork(port.Protocol)
 		subID := fmt.Sprintf("%s:%s:%d", interceptID, networkName(network), port.ServicePort)
 		local := localFor(port, nil)

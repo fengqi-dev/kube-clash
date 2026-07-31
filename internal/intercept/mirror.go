@@ -305,3 +305,74 @@ func writeMirrorUDP(primary net.Conn, framed bool, payload []byte) error {
 	_, err := primary.Write(payload)
 	return err
 }
+
+// hostMirrorUDPConn is the host-TUN view of a mirrored UDP Service: requests
+// go to primary (response path) and are teed to the local shadow.
+type hostMirrorUDPConn struct {
+	primary       net.Conn
+	primaryFramed bool
+	primaryReader *bufio.Reader
+	shadow        *shadowWriter
+	closeOnce     sync.Once
+}
+
+func newHostMirrorUDPConn(primary net.Conn, primaryFramed bool, local net.Conn) net.Conn {
+	conn := &hostMirrorUDPConn{primary: primary, primaryFramed: primaryFramed}
+	if primaryFramed {
+		conn.primaryReader = bufio.NewReader(primary)
+	}
+	if local != nil {
+		go func() {
+			buf := make([]byte, tunnel.MaxDatagramSize)
+			for {
+				if _, err := local.Read(buf); err != nil {
+					return
+				}
+			}
+		}()
+		conn.shadow = newShadowWriter(local)
+	}
+	return conn
+}
+
+func (c *hostMirrorUDPConn) Read(buffer []byte) (int, error) {
+	if c.primaryFramed {
+		payload, err := tunnel.ReadDatagram(c.primaryReader, nil)
+		if err != nil {
+			return 0, err
+		}
+		n := copy(buffer, payload)
+		if n < len(payload) {
+			return n, io.ErrShortBuffer
+		}
+		return n, nil
+	}
+	return c.primary.Read(buffer)
+}
+
+func (c *hostMirrorUDPConn) Write(payload []byte) (int, error) {
+	if c.shadow != nil {
+		_, _ = c.shadow.Write(payload)
+	}
+	if err := writeMirrorUDP(c.primary, c.primaryFramed, payload); err != nil {
+		return 0, err
+	}
+	return len(payload), nil
+}
+
+func (c *hostMirrorUDPConn) Close() error {
+	var err error
+	c.closeOnce.Do(func() {
+		if c.shadow != nil {
+			_ = c.shadow.Close()
+		}
+		err = c.primary.Close()
+	})
+	return err
+}
+
+func (c *hostMirrorUDPConn) LocalAddr() net.Addr                { return c.primary.LocalAddr() }
+func (c *hostMirrorUDPConn) RemoteAddr() net.Addr               { return c.primary.RemoteAddr() }
+func (c *hostMirrorUDPConn) SetDeadline(t time.Time) error      { return c.primary.SetDeadline(t) }
+func (c *hostMirrorUDPConn) SetReadDeadline(t time.Time) error  { return c.primary.SetReadDeadline(t) }
+func (c *hostMirrorUDPConn) SetWriteDeadline(t time.Time) error { return c.primary.SetWriteDeadline(t) }

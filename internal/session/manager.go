@@ -429,8 +429,10 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	resources = append(resources, bridge)
 	if hostBridge, ok := bridge.(*socksbridge.Bridge); ok {
 		hostBridge.SetHostTCPHandler(m.intercept.HostTCP)
+		hostBridge.SetHostUDPHandler(m.intercept.HostUDP)
 		resources = append(resources, closerFunc(func() {
 			hostBridge.SetHostTCPHandler(nil)
+			hostBridge.SetHostUDPHandler(nil)
 		}))
 	}
 
