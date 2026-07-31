@@ -8,14 +8,17 @@ import (
 )
 
 func platformSystemStateDir() string {
+	if IsDevBuild() {
+		return "/var/lib/kubeloop-dev"
+	}
 	return "/var/lib/kubeloop"
 }
 
 func platformBinaryInstallPath() string {
 	if runtime.GOOS == "darwin" {
-		return "/Library/PrivilegedHelperTools/" + ServiceLabel
+		return "/Library/PrivilegedHelperTools/" + ServiceLabel()
 	}
-	return "/usr/local/libexec/kubeloop-helper"
+	return "/usr/local/libexec/" + HelperBinaryBaseName()
 }
 
 func platformLegacyBinaryInstallPath() string {
@@ -27,6 +30,9 @@ func platformBundledSingBoxPath() string {
 	case "darwin":
 		return ""
 	case "linux":
+		if IsDevBuild() {
+			return "/usr/lib/kubeloop-dev/sing-box"
+		}
 		return "/usr/lib/kubeloop/sing-box"
 	default:
 		return ""

@@ -52,5 +52,5 @@ func RunService(server *Server) error {
 	if !isService {
 		return server.Serve(context.Background())
 	}
-	return svc.Run(ServiceNameWin, &windowsService{server: server})
+	return svc.Run(ServiceNameWin(), &windowsService{server: server})
 }

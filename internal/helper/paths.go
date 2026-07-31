@@ -70,6 +70,9 @@ func SocketPath() string {
 	case "windows":
 		return filepath.Join(SystemStateDir(), "helper.sock")
 	default:
+		if IsDevBuild() {
+			return "/var/run/kubeloop-dev/helper.sock"
+		}
 		return "/var/run/kubeloop/helper.sock"
 	}
 }

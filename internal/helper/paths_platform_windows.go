@@ -13,7 +13,7 @@ func platformSystemStateDir() string {
 	if err != nil {
 		root = `C:\ProgramData`
 	}
-	return filepath.Join(root, "KubeLoop")
+	return filepath.Join(root, InstallProductDir())
 }
 
 func platformBinaryInstallPath() string {
@@ -22,7 +22,7 @@ func platformBinaryInstallPath() string {
 		root = `C:\Program Files`
 	}
 	// Clash Verge-style layout: Program Files\KubeLoop\resources\kubeloop-helper.exe
-	return filepath.Join(root, "KubeLoop", "resources", "kubeloop-helper.exe")
+	return filepath.Join(root, InstallProductDir(), "resources", HelperBinaryBaseName()+".exe")
 }
 
 // platformLegacyBinaryInstallPath is the pre-resources helper location.
@@ -31,7 +31,7 @@ func platformLegacyBinaryInstallPath() string {
 	if err != nil {
 		root = `C:\Program Files`
 	}
-	return filepath.Join(root, "KubeLoop", "kubeloop-helper.exe")
+	return filepath.Join(root, InstallProductDir(), HelperBinaryBaseName()+".exe")
 }
 
 func platformBundledSingBoxPath() string {
@@ -39,7 +39,7 @@ func platformBundledSingBoxPath() string {
 	if err != nil {
 		root = `C:\Program Files`
 	}
-	return filepath.Join(root, "KubeLoop", "sing-box.exe")
+	return filepath.Join(root, InstallProductDir(), "sing-box.exe")
 }
 
 func platformInstallRoot() string {
@@ -47,5 +47,5 @@ func platformInstallRoot() string {
 	if err != nil {
 		root = `C:\Program Files`
 	}
-	return filepath.Join(root, "KubeLoop")
+	return filepath.Join(root, InstallProductDir())
 }

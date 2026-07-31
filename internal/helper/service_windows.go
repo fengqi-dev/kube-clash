@@ -22,7 +22,9 @@ func enableService(binaryPath string) error {
 	defer manager.Disconnect()
 
 	wantBinary := syscall.EscapeArg(binaryPath) + " run"
-	service, openErr := manager.OpenService(ServiceNameWin)
+	name := ServiceNameWin()
+	display := ServiceDisplayName()
+	service, openErr := manager.OpenService(name)
 	if openErr == nil {
 		defer service.Close()
 		cfg, configErr := service.Config()
@@ -35,10 +37,10 @@ func enableService(binaryPath string) error {
 		}
 		configChanged := !serviceBinaryPathMatches(cfg.BinaryPathName, wantBinary) ||
 			cfg.StartType != mgr.StartAutomatic ||
-			cfg.DisplayName != "KubeLoop Helper"
+			cfg.DisplayName != display
 		if configChanged {
 			cfg.BinaryPathName = wantBinary
-			cfg.DisplayName = "KubeLoop Helper"
+			cfg.DisplayName = display
 			cfg.Description = "Privileged helper for KubeLoop TUN networking"
 			cfg.StartType = mgr.StartAutomatic
 			if err := service.UpdateConfig(cfg); err != nil {
@@ -62,11 +64,11 @@ func enableService(binaryPath string) error {
 	}
 
 	cfg := mgr.Config{
-		DisplayName: "KubeLoop Helper",
+		DisplayName: display,
 		Description: "Privileged helper for KubeLoop TUN networking",
 		StartType:   mgr.StartAutomatic,
 	}
-	service, err = manager.CreateService(ServiceNameWin, binaryPath, cfg, "run")
+	service, err = manager.CreateService(name, binaryPath, cfg, "run")
 	if err != nil {
 		return fmt.Errorf("create windows service: %w", err)
 	}
@@ -93,7 +95,7 @@ func stopServiceForUpgrade() error {
 		return fmt.Errorf("connect service manager: %w", err)
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(ServiceNameWin)
+	service, err := manager.OpenService(ServiceNameWin())
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
 	}
@@ -127,7 +129,7 @@ func stopWindowsService(service *mgr.Service, timeout time.Duration) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for %s to stop", ServiceNameWin)
+	return fmt.Errorf("timed out waiting for %s to stop", ServiceNameWin())
 }
 
 func disableService() error {
@@ -136,7 +138,8 @@ func disableService() error {
 		return fmt.Errorf("connect service manager: %w", err)
 	}
 	defer manager.Disconnect()
-	service, err := manager.OpenService(ServiceNameWin)
+	name := ServiceNameWin()
+	service, err := manager.OpenService(name)
 	if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 		return nil
 	}
@@ -156,7 +159,7 @@ func disableService() error {
 	}
 	deadline := time.Now().Add(20 * time.Second)
 	for time.Now().Before(deadline) {
-		probe, openErr := manager.OpenService(ServiceNameWin)
+		probe, openErr := manager.OpenService(name)
 		if errors.Is(openErr, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 			return nil
 		}
@@ -166,7 +169,7 @@ func disableService() error {
 		_ = probe.Close()
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for %s deletion", ServiceNameWin)
+	return fmt.Errorf("timed out waiting for %s deletion", name)
 }
 
 func waitServiceRunning(service *mgr.Service, timeout time.Duration) error {
@@ -181,5 +184,5 @@ func waitServiceRunning(service *mgr.Service, timeout time.Duration) error {
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
-	return fmt.Errorf("timed out waiting for %s to run", ServiceNameWin)
+	return fmt.Errorf("timed out waiting for %s to run", ServiceNameWin())
 }
