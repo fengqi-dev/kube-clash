@@ -19,4 +19,10 @@ func TestTrafficEndpointsShareListenAndDyeUsers(t *testing.T) {
 	if endpoints.Exchange.Username == endpoints.Preview.Username {
 		t.Fatal("exchange and preview must use distinct auth_user dyes")
 	}
+	if endpoints.MirrorShadow.Username != TrafficUserMirrorShadow {
+		t.Fatalf("mirror-shadow user = %q", endpoints.MirrorShadow.Username)
+	}
+	if endpoints.PortForward.Username != TrafficUserPortForward {
+		t.Fatalf("port-forward user = %q", endpoints.PortForward.Username)
+	}
 }

@@ -63,10 +63,9 @@ type TrafficDialer interface {
 }
 
 type TrafficDialers struct {
-	Exchange      TrafficDialer
-	Preview       TrafficDialer
-	MirrorPrimary TrafficDialer
-	MirrorShadow  TrafficDialer
+	Exchange     TrafficDialer
+	Preview      TrafficDialer
+	MirrorShadow TrafficDialer
 }
 
 type Manager struct {
@@ -620,7 +619,7 @@ func (m *Manager) serveHostTCP(
 	if route.mode == ModeMirror {
 		m.serveMirrorTCP(
 			ctx, gatewayAddress, client, route.primaryAddr, host, route.local.LocalPort,
-			dialers.MirrorPrimary, dialers.MirrorShadow,
+			dialers.MirrorShadow,
 		)
 		return
 	}
@@ -672,7 +671,7 @@ func (m *Manager) dialHostMirrorUDP(
 		return nil, fmt.Errorf("mirror primary address is required")
 	}
 	primary, primaryFramed, err := dialMirrorPrimary(
-		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP, dialers.MirrorPrimary,
+		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP,
 	)
 	if err != nil {
 		return nil, err
@@ -731,7 +730,7 @@ func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint
 	}
 	go m.serveInbound(
 		ctx, gatewayAddress, streamID, network, local, mode, primaryAddr,
-		localDialer, dialers.MirrorPrimary, dialers.MirrorShadow,
+		localDialer, dialers.MirrorShadow,
 	)
 }
 
@@ -744,7 +743,6 @@ func (m *Manager) serveInbound(
 	mode string,
 	primaryAddr string,
 	localDialer TrafficDialer,
-	mirrorPrimaryDialer TrafficDialer,
 	mirrorShadowDialer TrafficDialer,
 ) {
 	tunnelConn, err := acceptStream(ctx, gatewayAddress, streamID)
@@ -758,7 +756,7 @@ func (m *Manager) serveInbound(
 	if mode == ModeMirror {
 		m.serveMirror(
 			ctx, gatewayAddress, tunnelConn, network, primaryAddr, host, local.LocalPort,
-			mirrorPrimaryDialer, mirrorShadowDialer,
+			mirrorShadowDialer,
 		)
 		return
 	}
@@ -789,7 +787,6 @@ func (m *Manager) serveMirror(
 	network byte,
 	primaryAddr, localHost string,
 	localPort int,
-	primaryDialer TrafficDialer,
 	shadowDialer TrafficDialer,
 ) {
 	if primaryAddr == "" {
@@ -798,14 +795,12 @@ func (m *Manager) serveMirror(
 	}
 	if network == tunnel.NetworkUDP {
 		m.serveMirrorUDP(
-			ctx, gatewayAddress, client, primaryAddr, localHost, localPort,
-			primaryDialer, shadowDialer,
+			ctx, gatewayAddress, client, primaryAddr, localHost, localPort, shadowDialer,
 		)
 		return
 	}
 	m.serveMirrorTCP(
-		ctx, gatewayAddress, client, primaryAddr, localHost, localPort,
-		primaryDialer, shadowDialer,
+		ctx, gatewayAddress, client, primaryAddr, localHost, localPort, shadowDialer,
 	)
 }
 
@@ -815,11 +810,10 @@ func (m *Manager) serveMirrorTCP(
 	client net.Conn,
 	primaryAddr, localHost string,
 	localPort int,
-	primaryDialer TrafficDialer,
 	shadowDialer TrafficDialer,
 ) {
 	primary, _, err := dialMirrorPrimary(
-		ctx, gatewayAddress, primaryAddr, tunnel.NetworkTCP, primaryDialer,
+		ctx, gatewayAddress, primaryAddr, tunnel.NetworkTCP,
 	)
 	if err != nil {
 		_ = client.Close()
@@ -840,11 +834,10 @@ func (m *Manager) serveMirrorUDP(
 	client net.Conn,
 	primaryAddr, localHost string,
 	localPort int,
-	primaryDialer TrafficDialer,
 	shadowDialer TrafficDialer,
 ) {
 	primary, primaryFramed, err := dialMirrorPrimary(
-		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP, primaryDialer,
+		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP,
 	)
 	if err != nil {
 		_ = client.Close()
@@ -858,24 +851,15 @@ func (m *Manager) serveMirrorUDP(
 	mirrorUDP(client, primary, primaryFramed, localConn)
 }
 
-// dialMirrorPrimary reaches the original Pod backend. Prefer Gateway outbound
-// dial so Pod IPs work without a host route/TUN; fall back to a direct dial
-// for loopback addresses used in unit tests.
+// dialMirrorPrimary reaches the original Pod backend via Gateway outbound dial
+// so Pod IPs work without a host route/TUN. Loopback addresses used in unit
+// tests fall back to a direct dial.
 // framed is true when the returned conn uses tunnel datagram framing (Gateway UDP).
 func dialMirrorPrimary(
 	ctx context.Context,
 	gatewayAddress, primaryAddr string,
 	network byte,
-	trafficDialer TrafficDialer,
 ) (conn net.Conn, framed bool, err error) {
-	networkName := "tcp"
-	if network == tunnel.NetworkUDP {
-		networkName = "udp"
-	}
-	if trafficDialer != nil {
-		conn, err := trafficDialer.DialContext(ctx, networkName, primaryAddr)
-		return conn, false, err
-	}
 	host, portStr, err := net.SplitHostPort(primaryAddr)
 	if err != nil {
 		return nil, false, err

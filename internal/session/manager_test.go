@@ -201,11 +201,10 @@ func (f *fakeProcess) TrafficEndpoints() singbox.TrafficEndpoints {
 		}
 	}
 	return singbox.TrafficEndpoints{
-		PortForward:   endpoint(singbox.TrafficUserPortForward),
-		Exchange:      endpoint(singbox.TrafficUserExchange),
-		Preview:       endpoint(singbox.TrafficUserPreview),
-		MirrorPrimary: endpoint(singbox.TrafficUserMirrorPrimary),
-		MirrorShadow:  endpoint(singbox.TrafficUserMirrorShadow),
+		PortForward:  endpoint(singbox.TrafficUserPortForward),
+		Exchange:     endpoint(singbox.TrafficUserExchange),
+		Preview:      endpoint(singbox.TrafficUserPreview),
+		MirrorShadow: endpoint(singbox.TrafficUserMirrorShadow),
 	}
 }
 func (f *fakeProcess) Config() []byte {

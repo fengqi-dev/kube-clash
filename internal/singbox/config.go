@@ -25,11 +25,10 @@ const (
 	// Feature identity is carried as SOCKS auth_user (see TrafficUser*).
 	TrafficInbound = "traffic-in"
 
-	TrafficUserPortForward   = "port-forward"
-	TrafficUserExchange      = "exchange"
-	TrafficUserPreview       = "preview"
-	TrafficUserMirrorPrimary = "mirror-primary"
-	TrafficUserMirrorShadow  = "mirror-shadow"
+	TrafficUserPortForward  = "port-forward"
+	TrafficUserExchange     = "exchange"
+	TrafficUserPreview      = "preview"
+	TrafficUserMirrorShadow = "mirror-shadow"
 )
 
 // TrafficInboundPorts holds the single fixed loopback SOCKS listen port used by
@@ -40,18 +39,18 @@ type TrafficInboundPorts struct {
 }
 
 // TrafficFeatureUsers returns every SOCKS auth user registered on traffic-in.
+// Mirror primary reaches the original Pod via Gateway dial, not traffic-in.
 func TrafficFeatureUsers() []string {
 	return []string{
 		TrafficUserPortForward,
 		TrafficUserExchange,
 		TrafficUserPreview,
-		TrafficUserMirrorPrimary,
 		TrafficUserMirrorShadow,
 	}
 }
 
 func clusterTrafficUsers() []string {
-	return []string{TrafficUserPortForward, TrafficUserMirrorPrimary}
+	return []string{TrafficUserPortForward}
 }
 
 func localTrafficUsers() []string {

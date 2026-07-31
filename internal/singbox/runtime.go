@@ -53,11 +53,10 @@ type TrafficEndpoint struct {
 }
 
 type TrafficEndpoints struct {
-	PortForward   TrafficEndpoint
-	Exchange      TrafficEndpoint
-	Preview       TrafficEndpoint
-	MirrorPrimary TrafficEndpoint
-	MirrorShadow  TrafficEndpoint
+	PortForward  TrafficEndpoint
+	Exchange     TrafficEndpoint
+	Preview      TrafficEndpoint
+	MirrorShadow TrafficEndpoint
 }
 
 func (e TrafficEndpoints) Validate() error {
@@ -69,7 +68,6 @@ func (e TrafficEndpoints) Validate() error {
 		{TrafficUserPortForward, TrafficUserPortForward, e.PortForward},
 		{TrafficUserExchange, TrafficUserExchange, e.Exchange},
 		{TrafficUserPreview, TrafficUserPreview, e.Preview},
-		{TrafficUserMirrorPrimary, TrafficUserMirrorPrimary, e.MirrorPrimary},
 		{TrafficUserMirrorShadow, TrafficUserMirrorShadow, e.MirrorShadow},
 	}
 	var sharedAddress, sharedPassword string
@@ -615,11 +613,10 @@ func trafficEndpoints(ports TrafficInboundPorts, password string) TrafficEndpoin
 		}
 	}
 	return TrafficEndpoints{
-		PortForward:   endpoint(TrafficUserPortForward),
-		Exchange:      endpoint(TrafficUserExchange),
-		Preview:       endpoint(TrafficUserPreview),
-		MirrorPrimary: endpoint(TrafficUserMirrorPrimary),
-		MirrorShadow:  endpoint(TrafficUserMirrorShadow),
+		PortForward:  endpoint(TrafficUserPortForward),
+		Exchange:     endpoint(TrafficUserExchange),
+		Preview:      endpoint(TrafficUserPreview),
+		MirrorShadow: endpoint(TrafficUserMirrorShadow),
 	}
 }
 
