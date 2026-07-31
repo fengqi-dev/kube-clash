@@ -18,6 +18,7 @@ import {
   ALL_NAMESPACES,
   ResourceToolbar,
 } from "@/components/network/resource-toolbar";
+import { CopyableText } from "@/components/shared/copyable-text";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import {
@@ -218,15 +219,29 @@ export function NetworkView({
                   <TableRow key={`${item.namespace}/${item.name}`}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell className="text-primary">{item.namespace}</TableCell>
-                    <TableCell className="font-mono text-[12px]">{item.clusterIP}</TableCell>
+                    <TableCell className="font-mono text-[12px]">
+                      <CopyableText value={item.clusterIP} />
+                    </TableCell>
                     <TableCell className="font-mono text-[12px] text-muted-foreground">
-                      <div className="flex flex-col gap-0.5">
-                        {item.ports.map((port) => (
-                          <span key={`${port.protocol}-${port.port}-${port.name || ""}`}>
-                            {port.protocol}/{port.port}
-                          </span>
-                        ))}
-                      </div>
+                      {item.ports.length > 0 ? (
+                        <div className="flex flex-col gap-0.5">
+                          {item.ports.map((port) => (
+                            <CopyableText
+                              key={`${port.protocol}-${port.port}-${port.name || ""}`}
+                              value={
+                                item.clusterIP ? `${item.clusterIP}:${port.port}` : null
+                              }
+                              label={`${port.protocol}/${port.port}`}
+                              titleKey="network.copyAddress"
+                              successKey="network.addressCopied"
+                              failKey="network.addressCopyFailed"
+                              empty={`${port.protocol}/${port.port}`}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        "—"
+                      )}
                     </TableCell>
                     <TableCell>
                       <div className="flex items-center gap-1">

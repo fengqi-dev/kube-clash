@@ -12,6 +12,7 @@ import {
   ALL_NAMESPACES,
   ResourceToolbar,
 } from "@/components/network/resource-toolbar";
+import { CopyableText } from "@/components/shared/copyable-text";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
 import {
@@ -166,7 +167,9 @@ export function WorkloadView({
                   <TableRow key={`${item.namespace}/${item.name}`}>
                     <TableCell className="font-medium">{item.name}</TableCell>
                     <TableCell className="text-primary">{item.namespace}</TableCell>
-                    <TableCell className="font-mono text-[12px]">{item.ip || "—"}</TableCell>
+                    <TableCell className="font-mono text-[12px]">
+                      <CopyableText value={item.ip} />
+                    </TableCell>
                     <TableCell>
                       <StatusPill
                         ok={item.ready}
@@ -178,9 +181,15 @@ export function WorkloadView({
                       {item.ports.length > 0 ? (
                         <div className="flex flex-col gap-0.5">
                           {item.ports.map((port) => (
-                            <span key={`${port.protocol}-${port.port}-${port.name || ""}`}>
-                              {port.protocol}/{port.port}
-                            </span>
+                            <CopyableText
+                              key={`${port.protocol}-${port.port}-${port.name || ""}`}
+                              value={item.ip ? `${item.ip}:${port.port}` : null}
+                              label={`${port.protocol}/${port.port}`}
+                              titleKey="network.copyAddress"
+                              successKey="network.addressCopied"
+                              failKey="network.addressCopyFailed"
+                              empty={`${port.protocol}/${port.port}`}
+                            />
                           ))}
                         </div>
                       ) : (
