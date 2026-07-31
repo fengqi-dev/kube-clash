@@ -2,6 +2,7 @@ package singbox
 
 import (
 	"encoding/json"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -57,6 +58,13 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		if strings.Contains(text, item) {
 			t.Errorf("generated config unexpectedly contains %q:\n%s", item, text)
 		}
+	}
+	if runtime.GOOS == "linux" {
+		if !strings.Contains(text, `"auto_redirect": true`) {
+			t.Fatalf("linux tun config must enable auto_redirect:\n%s", text)
+		}
+	} else if strings.Contains(text, `"auto_redirect"`) {
+		t.Fatalf("auto_redirect is linux-only:\n%s", text)
 	}
 
 	var parsed map[string]any
