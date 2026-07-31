@@ -18,7 +18,8 @@ var version = "dev"
 
 func main() {
 	app := NewApp()
-	// Start tray before wails.Run so its Win32 message loop is not tied to WebView startup.
+	// Windows/Linux: tray owns a background message loop. macOS: tray is a no-op
+	// for now (see internal/tray/tray_darwin.go).
 	app.tray = tray.Start(&trayHost{app: app})
 	if err := wails.Run(&options.App{
 		Title:         "KubeLoop",

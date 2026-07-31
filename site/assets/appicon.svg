@@ -1,18 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" fill="none">
-  <defs>
-    <linearGradient id="bg" x1="160" y1="64" x2="880" y2="980" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#1A1A1A"/>
-      <stop offset="1" stop-color="#0F0F0F"/>
-    </linearGradient>
-  </defs>
-
-  <rect width="1024" height="1024" rx="228" fill="url(#bg)"/>
-  <rect x="30" y="30" width="964" height="964" rx="204" stroke="#FFFFFF" stroke-opacity="0.05" stroke-width="2"/>
-
-  <g transform="translate(512 520) rotate(-32)">
-    <ellipse cx="0" cy="0" rx="286" ry="164" stroke="#F4F4F4" stroke-width="64"/>
-    <ellipse cx="0" cy="0" rx="132" ry="76" stroke="#F4F4F4" stroke-opacity="0.3" stroke-width="30"/>
-    <circle cx="0" cy="0" r="40" fill="#F4F4F4"/>
-    <circle cx="272" cy="-52" r="58" fill="#30A46C"/>
-  </g>
+  <!-- Bauhaus: primary shapes composing KL -->
+  <rect width="1024" height="1024" rx="228" fill="#FAFAFA"/>
+  <rect x="300" y="210" width="100" height="600" fill="#326CE5"/>
+  <circle cx="620" cy="360" r="120" fill="#30A46C"/>
+  <polygon points="420,480 780,700 420,700" fill="#F5A524"/>
+  <rect x="300" y="740" width="380" height="90" fill="#326CE5"/>
 </svg>
