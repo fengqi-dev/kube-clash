@@ -26,9 +26,11 @@ type Capabilities struct {
 
 // ManualNetwork is user-supplied discovery when cluster-wide reads are forbidden.
 type ManualNetwork struct {
-	PodCIDRs     []string `json:"podCIDRs,omitempty"`
-	ServiceCIDRs []string `json:"serviceCIDRs,omitempty"`
-	DNSServer    string   `json:"dnsServer,omitempty"`
+	PodCIDRs       []string `json:"podCIDRs,omitempty"`
+	ServiceCIDRs   []string `json:"serviceCIDRs,omitempty"`
+	DNSServer      string   `json:"dnsServer,omitempty"`
+	ClusterDomains []string `json:"clusterDomains,omitempty"`
+	DNSNamespace   string   `json:"dnsNamespace,omitempty"`
 }
 
 func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (Capabilities, error) {
@@ -147,6 +149,15 @@ func MergeManualNetwork(auto Discovery, manual ManualNetwork) Discovery {
 	if out.DNSServer == "" && manual.DNSServer != "" {
 		out.DNSServer = manual.DNSServer
 	}
+	if len(out.ClusterDomains) == 0 && len(manual.ClusterDomains) > 0 {
+		out.ClusterDomains = append([]string{}, manual.ClusterDomains...)
+	}
+	domains, err := NormalizeClusterDomains(out.ClusterDomains)
+	if err == nil {
+		out.ClusterDomains = domains
+	} else if len(out.ClusterDomains) == 0 {
+		out.ClusterDomains = []string{DefaultClusterDomain}
+	}
 	return out
 }
 
@@ -174,6 +185,23 @@ func NormalizeManualNetwork(network ManualNetwork) (ManualNetwork, error) {
 			return ManualNetwork{}, fmt.Errorf("dns server: invalid IP %q", dns)
 		}
 		out.DNSServer = addr.String()
+	}
+	domains, err := NormalizeClusterDomains(network.ClusterDomains)
+	if err != nil {
+		return ManualNetwork{}, err
+	}
+	// Persist custom domains only; default alone clears to empty (Merge fills it).
+	if len(domains) == 1 && domains[0] == DefaultClusterDomain {
+		out.ClusterDomains = nil
+	} else {
+		out.ClusterDomains = domains
+	}
+	ns := strings.TrimSpace(network.DNSNamespace)
+	if ns != "" {
+		if !safeClusterDomain(ns) || strings.Contains(ns, ".") {
+			return ManualNetwork{}, fmt.Errorf("invalid DNS namespace %q", network.DNSNamespace)
+		}
+		out.DNSNamespace = strings.ToLower(ns)
 	}
 	return out, nil
 }

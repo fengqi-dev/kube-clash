@@ -27,10 +27,12 @@ type idIn struct {
 }
 
 type manualNetworkIn struct {
-	Context      string   `json:"context" jsonschema:"Kubernetes context name"`
-	PodCIDRs     []string `json:"podCIDRs,omitempty" jsonschema:"Pod CIDR list"`
-	ServiceCIDRs []string `json:"serviceCIDRs,omitempty" jsonschema:"Service CIDR list"`
-	DNSServer    string   `json:"dnsServer,omitempty" jsonschema:"CoreDNS / cluster DNS IP"`
+	Context        string   `json:"context" jsonschema:"Kubernetes context name"`
+	PodCIDRs       []string `json:"podCIDRs,omitempty" jsonschema:"Pod CIDR list"`
+	ServiceCIDRs   []string `json:"serviceCIDRs,omitempty" jsonschema:"Service CIDR list"`
+	DNSServer      string   `json:"dnsServer,omitempty" jsonschema:"CoreDNS / cluster DNS IP"`
+	ClusterDomains []string `json:"clusterDomains,omitempty" jsonschema:"Cluster DNS domains; always includes cluster.local"`
+	DNSNamespace   string   `json:"dnsNamespace,omitempty" jsonschema:"Namespace used for short-name DNS search"`
 }
 
 type hostAlias struct {
@@ -144,9 +146,11 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 		Description: "Set manual Pod/Service CIDR and DNS overrides for a context.",
 	}, func(_ context.Context, _ *mcpsdk.CallToolRequest, in manualNetworkIn) (*mcpsdk.CallToolResult, any, error) {
 		err := backend.SetManualNetwork(in.Context, cluster.ManualNetwork{
-			PodCIDRs:     in.PodCIDRs,
-			ServiceCIDRs: in.ServiceCIDRs,
-			DNSServer:    in.DNSServer,
+			PodCIDRs:       in.PodCIDRs,
+			ServiceCIDRs:   in.ServiceCIDRs,
+			DNSServer:      in.DNSServer,
+			ClusterDomains: in.ClusterDomains,
+			DNSNamespace:   in.DNSNamespace,
 		})
 		if err != nil {
 			return nil, nil, err

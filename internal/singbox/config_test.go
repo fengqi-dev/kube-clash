@@ -29,6 +29,8 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		`"10.244.0.0/16"`,
 		`"10.96.0.0/12"`,
 		`"cluster.local"`,
+		`"prefer_ipv4"`,
+		`"244.10.in-addr.arpa"`,
 		`"tag": "kubernetes"`,
 		`"type": "socks"`,
 		`"final": "direct"`,
@@ -123,14 +125,19 @@ func TestGenerateFixedTrafficInbounds(t *testing.T) {
 }
 
 func TestResolverDomains(t *testing.T) {
-	got := ResolverDomains("demo")
-	want := []string{"cluster.local", "svc.cluster.local", "svc", "demo.svc.cluster.local"}
+	got := ResolverDomains("demo", nil, nil)
+	want := []string{"cluster.local", "svc.cluster.local", "demo.svc.cluster.local", "svc"}
 	if strings.Join(got, ",") != strings.Join(want, ",") {
 		t.Fatalf("ResolverDomains = %v, want %v", got, want)
 	}
-	withHosts := ResolverDomains("demo", HostAlias{Domain: "app.dev", IP: "10.96.0.50"})
+	withHosts := ResolverDomains("demo", []string{"cluster.local"}, []HostAlias{{Domain: "app.dev", IP: "10.96.0.50"}})
 	if !strings.Contains(strings.Join(withHosts, ","), "app.dev") {
 		t.Fatalf("ResolverDomains missing host alias: %v", withHosts)
+	}
+	custom := ResolverDomains("demo", []string{"corp.local"}, nil)
+	if !strings.Contains(strings.Join(custom, ","), "corp.local") ||
+		!strings.Contains(strings.Join(custom, ","), "cluster.local") {
+		t.Fatalf("ResolverDomains custom domains: %v", custom)
 	}
 }
 
@@ -142,6 +149,23 @@ func TestDNSSearchCandidates(t *testing.T) {
 	}
 	if got[0] != "static-web.default.svc." {
 		t.Fatalf("original name should be first: %v", got)
+	}
+	fqdn := dnsSearchCandidates("api.default.svc.cluster.local.", SearchDomains("default"))
+	if len(fqdn) != 1 || fqdn[0] != "api.default.svc.cluster.local." {
+		t.Fatalf("FQDN should not expand: %v", fqdn)
+	}
+}
+
+func TestReverseZones(t *testing.T) {
+	got := ReverseZones([]string{"10.244.0.0/16"}, []string{"10.96.0.0/12"}, []string{"10.96.0.10"})
+	joined := strings.Join(got, ",")
+	for _, want := range []string{"244.10.in-addr.arpa", "96.10.in-addr.arpa", "111.10.in-addr.arpa", "10.0.96.10.in-addr.arpa"} {
+		if !strings.Contains(joined, want) {
+			t.Fatalf("ReverseZones missing %s: %v", want, got)
+		}
+	}
+	if strings.Contains(joined, "in-addr.arpa") && strings.HasPrefix(joined, "in-addr.arpa") {
+		t.Fatal("must not claim root in-addr.arpa")
 	}
 }
 

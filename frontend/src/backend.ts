@@ -38,6 +38,7 @@ declare global {
           Disconnect(): Promise<void>;
           GetManualNetwork(contextName: string): Promise<ManualNetwork>;
           SetManualNetwork(contextName: string, network: ManualNetwork): Promise<void>;
+          SetDNSNamespace(contextName: string, namespace: string): Promise<void>;
           GetHostAliases(contextName: string): Promise<HostAlias[]>;
           SetHostAliases(contextName: string, items: HostAlias[]): Promise<void>;
           GatewayInstallManifest(): Promise<string>;
@@ -106,6 +107,8 @@ export const backend = {
     Promise.resolve().then(() => api().GetManualNetwork(contextName)),
   setManualNetwork: (contextName: string, network: ManualNetwork) =>
     Promise.resolve().then(() => api().SetManualNetwork(contextName, network)),
+  setDNSNamespace: (contextName: string, namespace: string) =>
+    Promise.resolve().then(() => api().SetDNSNamespace(contextName, namespace)),
   getHostAliases: (contextName: string) =>
     Promise.resolve().then(() => api().GetHostAliases(contextName)),
   setHostAliases: (contextName: string, items: HostAlias[]) =>

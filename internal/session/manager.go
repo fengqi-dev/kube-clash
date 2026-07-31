@@ -59,8 +59,10 @@ type State struct {
 	Phase           Phase                 `json:"phase"`
 	Context         string                `json:"context"`
 	Namespace       string                `json:"namespace"`
+	DNSNamespace    string                `json:"dnsNamespace,omitempty"`
 	Message         string                `json:"message"`
 	Error           string                `json:"error,omitempty"`
+	DNSWarning      string                `json:"dnsWarning,omitempty"`
 	Discovery       *cluster.Discovery    `json:"discovery,omitempty"`
 	Capabilities    *cluster.Capabilities `json:"capabilities,omitempty"`
 	ScopeNamespaces []string              `json:"scopeNamespaces,omitempty"`
@@ -361,15 +363,21 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "Could not read cluster network information", err)
 		return
 	}
+	dnsNamespace := request.Namespace
 	if m.store != nil {
 		manual := m.store.ManualNetwork(request.Context)
 		discovery = cluster.MergeManualNetwork(discovery, cluster.ManualNetwork{
-			PodCIDRs:     manual.PodCIDRs,
-			ServiceCIDRs: manual.ServiceCIDRs,
-			DNSServer:    manual.DNSServer,
+			PodCIDRs:       manual.PodCIDRs,
+			ServiceCIDRs:   manual.ServiceCIDRs,
+			DNSServer:      manual.DNSServer,
+			ClusterDomains: manual.ClusterDomains,
 		})
+		if manual.DNSNamespace != "" {
+			dnsNamespace = manual.DNSNamespace
+		}
 	}
 	state.Discovery = &discovery
+	state.DNSNamespace = dnsNamespace
 
 	forwarder, err := m.provider.StartPortForward(
 		ctx, request.Context, gateway.Name, cluster.GatewayPort,
@@ -414,7 +422,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Message = "Installing and starting sing-box TUN"
 	m.publish(state)
 	hosts := m.hostAliasesFor(request.Context)
-	core, err := m.core.Start(ctx, discovery, bridge.Addr().String(), request.Namespace, hosts)
+	core, err := m.core.Start(ctx, discovery, bridge.Addr().String(), dnsNamespace, hosts)
 	if err != nil {
 		m.fail(ctx, state, "Could not start sing-box TUN", err)
 		return
@@ -452,6 +460,8 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.Metrics = &singbox.Metrics{}
 	state.Capabilities = &caps
 	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
+	state.DNSNamespace = dnsNamespace
+	state.DNSWarning = ""
 	m.publish(state)
 	m.AppendLog("INFO", fmt.Sprintf("connected to context %s", request.Context))
 	if m.store != nil {
@@ -459,6 +469,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			log.Printf("persist connected state: %v", err)
 		}
 	}
+	m.probeClusterDNS(ctx, state, core)
 	m.restoreBindings(ctx, request.Context)
 
 	inventory, err := m.provider.WatchInventory(ctx, request.Context, scopeNS, func(snap cluster.InventorySnapshot) {
@@ -917,7 +928,11 @@ func (m *Manager) ManualNetwork(contextName string) cluster.ManualNetwork {
 	}
 	item := m.store.ManualNetwork(contextName)
 	return cluster.ManualNetwork{
-		PodCIDRs: item.PodCIDRs, ServiceCIDRs: item.ServiceCIDRs, DNSServer: item.DNSServer,
+		PodCIDRs:       item.PodCIDRs,
+		ServiceCIDRs:   item.ServiceCIDRs,
+		DNSServer:      item.DNSServer,
+		ClusterDomains: item.ClusterDomains,
+		DNSNamespace:   item.DNSNamespace,
 	}
 }
 
@@ -933,8 +948,82 @@ func (m *Manager) SetManualNetwork(contextName string, network cluster.ManualNet
 		return err
 	}
 	return m.store.SetManualNetwork(contextName, store.ManualNetwork{
-		PodCIDRs: normalized.PodCIDRs, ServiceCIDRs: normalized.ServiceCIDRs, DNSServer: normalized.DNSServer,
+		PodCIDRs:       normalized.PodCIDRs,
+		ServiceCIDRs:   normalized.ServiceCIDRs,
+		DNSServer:      normalized.DNSServer,
+		ClusterDomains: normalized.ClusterDomains,
+		DNSNamespace:   normalized.DNSNamespace,
 	})
+}
+
+// SetDNSNamespace updates short-name search namespace for the active tunnel.
+func (m *Manager) SetDNSNamespace(contextName, namespace string) error {
+	namespace = strings.TrimSpace(namespace)
+	if contextName == "" {
+		return errors.New("context is required")
+	}
+	if namespace == "" {
+		namespace = "default"
+	}
+	normalized, err := cluster.NormalizeManualNetwork(cluster.ManualNetwork{DNSNamespace: namespace})
+	if err != nil {
+		return err
+	}
+	namespace = normalized.DNSNamespace
+	if namespace == "" {
+		namespace = "default"
+	}
+	if m.store != nil {
+		current := m.ManualNetwork(contextName)
+		current.DNSNamespace = namespace
+		if err := m.SetManualNetwork(contextName, current); err != nil {
+			return err
+		}
+	}
+	m.mu.Lock()
+	core := m.runningCore
+	state := m.state
+	m.mu.Unlock()
+	if core == nil || state.Phase != PhaseConnected || state.Context != contextName {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := core.UpdateDNSNamespace(ctx, namespace); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	next := m.state
+	next.DNSNamespace = namespace
+	next.DNSWarning = ""
+	m.state = next
+	m.mu.Unlock()
+	m.publish(next)
+	m.AppendLog("INFO", "DNS search namespace set to "+namespace)
+	m.probeClusterDNS(ctx, next, core)
+	return nil
+}
+
+func (m *Manager) probeClusterDNS(parent context.Context, state State, core singbox.RunningCore) {
+	if core == nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(parent, 5*time.Second)
+	defer cancel()
+	if err := core.ProbeClusterDNS(ctx); err != nil {
+		warning := "Cluster DNS probe failed; split DNS may be overridden by another proxy (for example Clash Verge TUN/system DNS). Try disabling the other client's TUN DNS or reconnect KubeLoop last."
+		m.mu.Lock()
+		next := m.state
+		if next.Phase == PhaseConnected && next.Context == state.Context {
+			next.DNSWarning = warning
+			m.state = next
+			m.mu.Unlock()
+			m.publish(next)
+			m.AppendLog("WARN", warning+": "+err.Error())
+			return
+		}
+		m.mu.Unlock()
+	}
 }
 
 func (m *Manager) HostAliases(contextName string) []store.HostAliasSpec {

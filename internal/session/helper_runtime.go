@@ -38,6 +38,18 @@ func newSingboxRuntime() *singbox.Runtime {
 			return err
 		}, nil
 	}
+	runtime.PrivilegedUpdateDNS = func(
+		ctx context.Context, sessionID string, dns singbox.DNSMeta,
+	) error {
+		client, err := helper.NewClient()
+		if err != nil {
+			return err
+		}
+		if _, err := client.UpdateDNS(ctx, sessionID, dns); err != nil {
+			return fmt.Errorf("helper update DNS: %w", err)
+		}
+		return nil
+	}
 	return runtime
 }
 

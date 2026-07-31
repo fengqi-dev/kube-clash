@@ -118,6 +118,10 @@ export function SessionIntentCounts() {
   return window['go']['main']['App']['SessionIntentCounts']();
 }
 
+export function SetDNSNamespace(arg1, arg2) {
+  return window['go']['main']['App']['SetDNSNamespace'](arg1, arg2);
+}
+
 export function SetHostAliases(arg1, arg2) {
   return window['go']['main']['App']['SetHostAliases'](arg1, arg2);
 }

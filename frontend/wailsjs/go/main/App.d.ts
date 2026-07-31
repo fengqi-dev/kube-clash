@@ -67,6 +67,8 @@ export function ResetSessions():Promise<void>;
 
 export function SessionIntentCounts():Promise<store.SessionIntentCounts>;
 
+export function SetDNSNamespace(arg1:string,arg2:string):Promise<void>;
+
 export function SetHostAliases(arg1:string,arg2:Array<store.HostAliasSpec>):Promise<void>;
 
 export function SetMCPEnabled(arg1:boolean):Promise<void>;

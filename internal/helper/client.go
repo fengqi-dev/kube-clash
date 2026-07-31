@@ -45,6 +45,10 @@ func (c *Client) StopAll(ctx context.Context) (Response, error) {
 	return c.roundTrip(ctx, Request{Op: OpStopAll})
 }
 
+func (c *Client) UpdateDNS(ctx context.Context, sessionID string, dns singbox.DNSMeta) (Response, error) {
+	return c.roundTrip(ctx, Request{Op: OpUpdateDNS, SessionID: sessionID, DNS: &dns})
+}
+
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
 	if c.Token == "" {
 		return Response{}, fmt.Errorf("helper token is required")

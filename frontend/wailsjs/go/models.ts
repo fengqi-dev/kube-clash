@@ -102,6 +102,7 @@ export namespace cluster {
 	    serviceCIDRs: string[];
 	    serviceIPs: string[];
 	    dnsServer: string;
+	    clusterDomains?: string[];
 	    pods: number;
 	    services: number;
 	    deployments: number;
@@ -116,6 +117,7 @@ export namespace cluster {
 	        this.serviceCIDRs = source["serviceCIDRs"];
 	        this.serviceIPs = source["serviceIPs"];
 	        this.dnsServer = source["dnsServer"];
+	        this.clusterDomains = source["clusterDomains"];
 	        this.pods = source["pods"];
 	        this.services = source["services"];
 	        this.deployments = source["deployments"];
@@ -144,6 +146,8 @@ export namespace cluster {
 	    podCIDRs?: string[];
 	    serviceCIDRs?: string[];
 	    dnsServer?: string;
+	    clusterDomains?: string[];
+	    dnsNamespace?: string;
 	
 	    static createFrom(source: any = {}) {
 	        return new ManualNetwork(source);
@@ -154,6 +158,8 @@ export namespace cluster {
 	        this.podCIDRs = source["podCIDRs"];
 	        this.serviceCIDRs = source["serviceCIDRs"];
 	        this.dnsServer = source["dnsServer"];
+	        this.clusterDomains = source["clusterDomains"];
+	        this.dnsNamespace = source["dnsNamespace"];
 	    }
 	}
 	export class PodPortInfo {
@@ -649,8 +655,10 @@ export namespace session {
 	    phase: string;
 	    context: string;
 	    namespace: string;
+	    dnsNamespace?: string;
 	    message: string;
 	    error?: string;
+	    dnsWarning?: string;
 	    discovery?: cluster.Discovery;
 	    capabilities?: cluster.Capabilities;
 	    scopeNamespaces?: string[];
@@ -676,8 +684,10 @@ export namespace session {
 	        this.phase = source["phase"];
 	        this.context = source["context"];
 	        this.namespace = source["namespace"];
+	        this.dnsNamespace = source["dnsNamespace"];
 	        this.message = source["message"];
 	        this.error = source["error"];
+	        this.dnsWarning = source["dnsWarning"];
 	        this.discovery = this.convertValues(source["discovery"], cluster.Discovery);
 	        this.capabilities = this.convertValues(source["capabilities"], cluster.Capabilities);
 	        this.scopeNamespaces = source["scopeNamespaces"];

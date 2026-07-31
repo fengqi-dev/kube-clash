@@ -57,9 +57,11 @@ type HostAliasSpec struct {
 
 // ManualNetwork is user-supplied Pod/Service CIDR and CoreDNS when auto-discovery fails.
 type ManualNetwork struct {
-	PodCIDRs     []string `json:"podCIDRs,omitempty"`
-	ServiceCIDRs []string `json:"serviceCIDRs,omitempty"`
-	DNSServer    string   `json:"dnsServer,omitempty"`
+	PodCIDRs       []string `json:"podCIDRs,omitempty"`
+	ServiceCIDRs   []string `json:"serviceCIDRs,omitempty"`
+	DNSServer      string   `json:"dnsServer,omitempty"`
+	ClusterDomains []string `json:"clusterDomains,omitempty"`
+	DNSNamespace   string   `json:"dnsNamespace,omitempty"`
 }
 
 // PortForwardSpec is a port-forward intent (not runtime listen state).
@@ -419,7 +421,9 @@ func (s *Store) SetManualNetwork(contextName string, network ManualNetwork) erro
 		return nil
 	}
 	cluster := s.ensureClusterLocked(contextName)
-	if len(network.PodCIDRs) == 0 && len(network.ServiceCIDRs) == 0 && network.DNSServer == "" {
+	if len(network.PodCIDRs) == 0 && len(network.ServiceCIDRs) == 0 &&
+		network.DNSServer == "" && len(network.ClusterDomains) == 0 &&
+		network.DNSNamespace == "" {
 		cluster.ManualNetwork = nil
 	} else {
 		copyItem := cloneManualNetwork(network)
@@ -551,9 +555,11 @@ func cloneHostAliases(items []HostAliasSpec) []HostAliasSpec {
 
 func cloneManualNetwork(item ManualNetwork) ManualNetwork {
 	return ManualNetwork{
-		PodCIDRs:     cloneStrings(item.PodCIDRs),
-		ServiceCIDRs: cloneStrings(item.ServiceCIDRs),
-		DNSServer:    item.DNSServer,
+		PodCIDRs:       cloneStrings(item.PodCIDRs),
+		ServiceCIDRs:   cloneStrings(item.ServiceCIDRs),
+		DNSServer:      item.DNSServer,
+		ClusterDomains: cloneStrings(item.ClusterDomains),
+		DNSNamespace:   item.DNSNamespace,
 	}
 }
 

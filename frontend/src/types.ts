@@ -40,6 +40,7 @@ export interface Discovery {
   serviceCIDRs: string[];
   serviceIPs: string[];
   dnsServer: string;
+  clusterDomains?: string[];
   pods: number;
   services: number;
   deployments: number;
@@ -60,6 +61,8 @@ export interface ManualNetwork {
   podCIDRs?: string[];
   serviceCIDRs?: string[];
   dnsServer?: string;
+  clusterDomains?: string[];
+  dnsNamespace?: string;
 }
 
 export interface HostAlias {
@@ -111,8 +114,10 @@ export interface SessionState {
   phase: Phase;
   context: string;
   namespace: string;
+  dnsNamespace?: string;
   message: string;
   error?: string;
+  dnsWarning?: string;
   discovery?: Discovery;
   capabilities?: Capabilities;
   scopeNamespaces?: string[];
