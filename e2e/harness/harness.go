@@ -1,6 +1,6 @@
 //go:build e2e
 
-package e2e
+package harness
 
 import (
 	"context"
@@ -19,38 +19,40 @@ import (
 const (
 	defaultContext = "minikube"
 	defaultImage   = "kube-loop-gateway:dev"
-	echoNamespace  = "kubeloop-e2e"
+
+	// EchoNamespace is the Minikube namespace for e2e echo fixtures.
+	EchoNamespace = "kubeloop-e2e"
 )
 
-func requireE2E(t *testing.T) {
+func RequireE2E(t *testing.T) {
 	t.Helper()
 	if os.Getenv("KUBELOOP_E2E") != "1" {
 		t.Skip("set KUBELOOP_E2E=1 to run Minikube end-to-end tests")
 	}
 }
 
-func kubeContext() string {
+func KubeContext() string {
 	if value := os.Getenv("KUBELOOP_E2E_CONTEXT"); value != "" {
 		return value
 	}
 	return defaultContext
 }
 
-func gatewayImage() string {
+func GatewayImage() string {
 	if value := os.Getenv("KUBELOOP_GATEWAY_IMAGE"); value != "" {
 		return value
 	}
 	return defaultImage
 }
 
-func newProvider(t *testing.T) *cluster.Provider {
+func NewProvider(t *testing.T) *cluster.Provider {
 	t.Helper()
 	return cluster.NewProvider()
 }
 
-func kubeClient(t *testing.T, provider *cluster.Provider) kubernetes.Interface {
+func KubeClient(t *testing.T, provider *cluster.Provider) kubernetes.Interface {
 	t.Helper()
-	cfg, err := provider.RESTConfig(kubeContext())
+	cfg, err := provider.RESTConfig(KubeContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,20 +63,20 @@ func kubeClient(t *testing.T, provider *cluster.Provider) kubernetes.Interface {
 	return client
 }
 
-func testContext(t *testing.T, timeout time.Duration) (context.Context, context.CancelFunc) {
+func TestContext(t *testing.T, timeout time.Duration) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(context.Background(), timeout)
 }
 
-func ensureGateway(
+func EnsureGateway(
 	t *testing.T, ctx context.Context, provider *cluster.Provider,
 ) (cluster.GatewayInfo, cluster.PortForward) {
 	t.Helper()
-	gateway, err := provider.EnsureGateway(ctx, kubeContext(), gatewayImage())
+	gateway, err := provider.EnsureGateway(ctx, KubeContext(), GatewayImage())
 	if err != nil {
 		t.Fatalf("ensure gateway: %v", err)
 	}
-	forwarder, err := provider.StartPortForward(ctx, kubeContext(), gateway.Name, cluster.GatewayPort)
+	forwarder, err := provider.StartPortForward(ctx, KubeContext(), gateway.Name, cluster.GatewayPort)
 	if err != nil {
 		t.Fatalf("gateway port-forward: %v", err)
 	}
@@ -89,7 +91,6 @@ func ensureGateway(
 	return gateway, forwarder
 }
 
-// waitGatewayControl dials the Gateway control session until handshake succeeds.
 func waitGatewayControl(ctx context.Context, address string) error {
 	deadline := time.Now().Add(60 * time.Second)
 	var last error

@@ -178,18 +178,28 @@ func (p *Provider) Discover(ctx context.Context, contextName string, namespaces 
 		}
 	}
 
-	if len(podCIDRs) == 0 {
-		for _, pod := range pods {
-			for _, raw := range pod.Status.PodIPs {
-				if ip, parseErr := netip.ParseAddr(raw.IP); parseErr == nil {
-					podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
-				}
+	// Node PodCIDRs can be narrower than the real pod network (common on
+	// Minikube). Always add host routes for observed Pod IPs that fall
+	// outside discovered prefixes so TUN + reverse DNS still cover them.
+	addPodIP := func(raw string) {
+		ip, parseErr := netip.ParseAddr(raw)
+		if parseErr != nil {
+			return
+		}
+		for cidr := range podCIDRs {
+			prefix, prefixErr := netip.ParsePrefix(cidr)
+			if prefixErr == nil && prefix.Contains(ip) {
+				return
 			}
-			if pod.Status.PodIP != "" {
-				if ip, parseErr := netip.ParseAddr(pod.Status.PodIP); parseErr == nil {
-					podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
-				}
-			}
+		}
+		podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
+	}
+	for _, pod := range pods {
+		for _, item := range pod.Status.PodIPs {
+			addPodIP(item.IP)
+		}
+		if pod.Status.PodIP != "" {
+			addPodIP(pod.Status.PodIP)
 		}
 	}
 

@@ -1,6 +1,6 @@
 //go:build e2e
 
-package e2e
+package mirror
 
 import (
 	"context"
@@ -12,22 +12,24 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
+	"github.com/fengqi-dev/kube-loop/e2e/harness"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/session"
 )
 
-func TestServiceMirrorTCPAndUDP(t *testing.T) {
-	requireE2E(t)
-	ctx, cancel := testContext(t, 5*time.Minute)
+func TestMain(m *testing.M) { harness.RunMain(m) }
+
+func TestTUNServiceMirrorTCPAndUDP(t *testing.T) {
+	harness.RequireE2E(t)
+	ctx, cancel := harness.TestContext(t, 6*time.Minute)
 	defer cancel()
 
-	provider := newProvider(t)
-	gateway, forwarder := ensureGateway(t, ctx, provider)
-	client := kubeClient(t, provider)
-
-	if err := ensureEchoWorkload(ctx, client); err != nil {
+	provider := harness.NewProvider(t)
+	client := harness.KubeClient(t, provider)
+	if err := harness.EnsureEchoWorkload(ctx, client); err != nil {
 		t.Fatal(err)
 	}
-	service, err := client.CoreV1().Services(echoNamespace).Get(ctx, "echo", metav1.GetOptions{})
+	service, err := client.CoreV1().Services(harness.EchoNamespace).Get(ctx, "echo", metav1.GetOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -39,22 +41,15 @@ func TestServiceMirrorTCPAndUDP(t *testing.T) {
 	localUDP, localUDPAddr := startLocalUDPCapture(t, udpMirrored)
 	defer localUDP.Close()
 
-	manager := intercept.NewManager(provider)
-	dataPlane := startTrafficDataPlane(t, ctx, provider, forwarder.Address())
-	manager.SetTrafficDialers(intercept.TrafficDialers{
-		MirrorPrimary: dataPlane.dialer(dataPlane.endpoints.MirrorPrimary),
-		MirrorShadow:  dataPlane.dialer(dataPlane.endpoints.MirrorShadow),
-	})
-	if err := manager.Start(ctx, kubeContext(), gateway.IP, forwarder.Address()); err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = manager.StopAll(context.Background()) }()
+	live := harness.ConnectSession(t, ctx, session.Request{
+		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
+	}, nil)
 
-	_ = waitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 8080, "tcp", "ping", "cluster-tcp:")
-	_ = waitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 9090, "udp", "ping", "cluster-udp:")
+	_ = harness.WaitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 8080, "tcp", "ping", "cluster-tcp:")
+	_ = harness.WaitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 9090, "udp", "ping", "cluster-udp:")
 
-	info, err := manager.StartMirror(ctx, intercept.Mapping{
-		Namespace: echoNamespace,
+	info, err := live.Manager.StartMirror(ctx, intercept.Mapping{
+		Namespace: harness.EchoNamespace,
 		Service:   "echo",
 		Ports: []intercept.PortMapping{
 			{
@@ -73,28 +68,29 @@ func TestServiceMirrorTCPAndUDP(t *testing.T) {
 	if info.Mode != intercept.ModeMirror {
 		t.Fatalf("mode=%q, want mirror", info.Mode)
 	}
-	if len(manager.List()) != 0 || len(manager.ListMirrors()) != 1 {
-		t.Fatalf("list exchange=%d mirror=%d", len(manager.List()), len(manager.ListMirrors()))
+	if len(live.Manager.ListIntercepts()) != 0 || len(live.Manager.ListMirrors()) != 1 {
+		t.Fatalf(
+			"list exchange=%d mirror=%d",
+			len(live.Manager.ListIntercepts()), len(live.Manager.ListMirrors()),
+		)
 	}
 
-	// ClusterIP may briefly still hit the Pod before kube-proxy picks up the
-	// Gateway EndpointSlice. Retry until a probe both returns the primary
-	// response and delivers a request copy to the local mirror listener.
 	if err := waitMirrorActive(ctx, client, service.Spec.ClusterIP, 8080, "tcp", "cluster-tcp:", tcpMirrored); err != nil {
 		t.Fatal(err)
 	}
 	if err := waitMirrorActive(ctx, client, service.Spec.ClusterIP, 9090, "udp", "cluster-udp:", udpMirrored); err != nil {
 		t.Fatal(err)
 	}
+	harness.WaitHostTCP(t, service.Spec.ClusterIP, 8080, "host-mirror", "cluster-tcp:")
 
-	if err := manager.Stop(ctx, info.ID); err != nil {
+	if err := live.Manager.StopIntercept(ctx, info.ID); err != nil {
 		t.Fatal(err)
 	}
-	if len(manager.ListMirrors()) != 0 {
-		t.Fatalf("expected no mirrors after stop, got %d", len(manager.ListMirrors()))
+	if len(live.Manager.ListMirrors()) != 0 {
+		t.Fatalf("expected no mirrors after stop, got %d", len(live.Manager.ListMirrors()))
 	}
-	_ = waitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 8080, "tcp", "ping", "cluster-tcp:")
-	_ = waitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 9090, "udp", "ping", "cluster-udp:")
+	_ = harness.WaitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 8080, "tcp", "ping", "cluster-tcp:")
+	_ = harness.WaitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 9090, "udp", "ping", "cluster-udp:")
 }
 
 func waitMirrorActive(
@@ -112,7 +108,7 @@ func waitMirrorActive(
 	var lastProbeErr error
 	for time.Now().Before(deadline) {
 		drainMirror(mirrored)
-		got, err := probeFromCluster(ctx, client, clusterIP, port, protocol, payload)
+		got, err := harness.ProbeFromCluster(ctx, client, clusterIP, port, protocol, payload)
 		lastProbe, lastProbeErr = got, err
 		if err == nil && got == wantProbe {
 			select {
@@ -122,7 +118,6 @@ func waitMirrorActive(
 				}
 				return nil
 			case <-time.After(2 * time.Second):
-				// Stale ClusterIP path still talking to the Pod.
 			}
 		}
 		time.Sleep(2 * time.Second)
@@ -143,7 +138,6 @@ func drainMirror(ch <-chan string) {
 	}
 }
 
-// startLocalTCPCapture accepts TCP payloads and sends them on received.
 func startLocalTCPCapture(t *testing.T, received chan<- string) (net.Listener, *net.TCPAddr) {
 	t.Helper()
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
@@ -174,7 +168,6 @@ func startLocalTCPCapture(t *testing.T, received chan<- string) (net.Listener, *
 	return listener, listener.Addr().(*net.TCPAddr)
 }
 
-// startLocalUDPCapture receives UDP payloads and sends them on received.
 func startLocalUDPCapture(t *testing.T, received chan<- string) (net.PacketConn, *net.UDPAddr) {
 	t.Helper()
 	conn, err := net.ListenPacket("udp", "127.0.0.1:0")

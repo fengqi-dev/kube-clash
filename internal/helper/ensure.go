@@ -85,13 +85,21 @@ func EnsureInstall(ctx context.Context) error {
 	defer ensureInstallMu.Unlock()
 
 	status := GetStatus(ctx)
+	source, locateErr := LocateBundledHelper()
+	needsBinaryUpdate := false
+	if locateErr == nil {
+		var hashErr error
+		needsBinaryUpdate, hashErr = helperNeedsBinaryUpdate(source, BinaryInstallPath())
+		if hashErr != nil {
+			return hashErr
+		}
+	}
 	if status.Running && status.Version == Version &&
-		status.Protocol == ProtocolVersion && status.CoreReady {
+		status.Protocol == ProtocolVersion && status.CoreReady && !needsBinaryUpdate {
 		return nil
 	}
-	source, err := LocateBundledHelper()
-	if err != nil {
-		return err
+	if locateErr != nil {
+		return locateErr
 	}
 	sourceSHA256, err := bundledHelperSHA256(source)
 	if err != nil {

@@ -165,7 +165,7 @@ jobs:
           KUBELOOP_E2E: "1"
           KUBELOOP_E2E_CONTEXT: minikube
           KUBELOOP_GATEWAY_IMAGE: kube-loop-gateway:dev
-        run: go test -tags=e2e ./e2e -count=1 -timeout=25m -v
+        run: go test -tags=e2e ./e2e/... -count=1 -timeout=25m -p 1 -v
 
   windows-e2e:
     name: Windows integration
