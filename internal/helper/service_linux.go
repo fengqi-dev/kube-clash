@@ -6,14 +6,19 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 )
 
-const systemdUnitPath = "/etc/systemd/system/kubeloop-helper.service"
+func systemdUnitPath() string {
+	return filepath.Join("/etc/systemd/system", SystemdUnitName())
+}
 
 func enableService(binaryPath string) error {
+	unitPath := systemdUnitPath()
+	unitName := SystemdUnitName()
 	unit := fmt.Sprintf(`[Unit]
-Description=KubeLoop Privileged Helper
+Description=%s
 After=network.target
 
 [Service]
@@ -24,13 +29,13 @@ RestartSec=2
 
 [Install]
 WantedBy=multi-user.target
-`, binaryPath)
-	if err := os.WriteFile(systemdUnitPath, []byte(unit), 0o644); err != nil {
+`, ServiceDisplayName(), binaryPath)
+	if err := os.WriteFile(unitPath, []byte(unit), 0o644); err != nil {
 		return err
 	}
 	commands := [][]string{
 		{"systemctl", "daemon-reload"},
-		{"systemctl", "enable", "--now", "kubeloop-helper.service"},
+		{"systemctl", "enable", "--now", unitName},
 	}
 	for _, args := range commands {
 		cmd := exec.Command(args[0], args[1:]...)
@@ -43,8 +48,10 @@ WantedBy=multi-user.target
 }
 
 func disableService() error {
-	_ = exec.Command("systemctl", "disable", "--now", "kubeloop-helper.service").Run()
-	_ = os.Remove(systemdUnitPath)
+	unitName := SystemdUnitName()
+	unitPath := systemdUnitPath()
+	_ = exec.Command("systemctl", "disable", "--now", unitName).Run()
+	_ = os.Remove(unitPath)
 	_ = exec.Command("systemctl", "daemon-reload").Run()
 	return nil
 }
