@@ -2,8 +2,10 @@ package socksbridge
 
 import (
 	"bytes"
+	"context"
 	"io"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -118,6 +120,109 @@ func TestHostTCPHandlerBypassesGateway(t *testing.T) {
 		t.Fatal(err)
 	}
 	if got := string(buf[:n]); got != "local:ping" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+func TestHostUDPHandlerBypassesGateway(t *testing.T) {
+	local, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			n, addr, err := local.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			_, _ = local.WriteTo(append([]byte("local-udp:"), buf[:n]...), addr)
+		}
+	}()
+	localPort := local.LocalAddr().(*net.UDPAddr).Port
+
+	server := &Server{
+		GatewayAddress: "127.0.0.1:1", // must not be used
+		HostUDP: func(host string, port uint16) (func(context.Context) (net.Conn, error), bool) {
+			if host != "10.105.153.132" || port != 9090 {
+				return nil, false
+			}
+			return func(ctx context.Context) (net.Conn, error) {
+				var dialer net.Dialer
+				return dialer.DialContext(
+					ctx, "udp", net.JoinHostPort("127.0.0.1", strconv.Itoa(localPort)),
+				)
+			}, true
+		},
+	}
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	go func() { _ = server.Serve(listener) }()
+
+	control, err := net.Dial("tcp", listener.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer control.Close()
+	_ = control.SetDeadline(time.Now().Add(3 * time.Second))
+
+	if _, err := control.Write([]byte{5, 1, 0}); err != nil {
+		t.Fatal(err)
+	}
+	reply := make([]byte, 2)
+	if _, err := io.ReadFull(control, reply); err != nil {
+		t.Fatal(err)
+	}
+	// UDP ASSOCIATE
+	if _, err := control.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
+		t.Fatal(err)
+	}
+	head := make([]byte, 4)
+	if _, err := io.ReadFull(control, head); err != nil {
+		t.Fatal(err)
+	}
+	if head[1] != 0 {
+		t.Fatalf("socks status=%d", head[1])
+	}
+	bindIP := make([]byte, 4)
+	if _, err := io.ReadFull(control, bindIP); err != nil {
+		t.Fatal(err)
+	}
+	var bindPort [2]byte
+	if _, err := io.ReadFull(control, bindPort[:]); err != nil {
+		t.Fatal(err)
+	}
+	relayPort := int(bindPort[0])<<8 | int(bindPort[1])
+	relayAddr := &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1), Port: relayPort}
+
+	client, err := net.DialUDP("udp", nil, relayAddr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	_ = client.SetDeadline(time.Now().Add(3 * time.Second))
+
+	packet, err := encodeUDPPacket("10.105.153.132", 9090, []byte("ping"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.Write(packet); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 512)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, payload, err := parseUDPPacket(buf[:n])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(payload); got != "local-udp:ping" {
 		t.Fatalf("got %q", got)
 	}
 }

@@ -602,6 +602,91 @@ func TestHostTCPServesExchangeWithoutGatewayHairpin(t *testing.T) {
 	}
 }
 
+func TestHostUDPServesExchangeWithoutGatewayHairpin(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	local, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	go func() {
+		buf := make([]byte, 64)
+		for {
+			n, addr, err := local.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			_, _ = local.WriteTo([]byte(fmt.Sprintf("local-udp:%s", buf[:n])), addr)
+		}
+	}()
+
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "static-web", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.105.153.132",
+				Selector:  map[string]string{"role": "myrole"},
+				Ports: []corev1.ServicePort{{
+					Name: "dns", Port: 9090, Protocol: corev1.ProtocolUDP,
+				}},
+			},
+		},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.199", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	info, err := manager.StartIntercept(ctx, Mapping{
+		Namespace: "default",
+		Service:   "static-web",
+		Ports: []PortMapping{{
+			ServicePort: 9090, Protocol: "UDP",
+			LocalHost: "127.0.0.1", LocalPort: local.LocalAddr().(*net.UDPAddr).Port,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	dial, ok := manager.HostUDP("10.105.153.132", 9090)
+	if !ok || dial == nil {
+		t.Fatal("expected host UDP route for ClusterIP")
+	}
+	conn, err := dial(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(3 * time.Second))
+	if _, err := conn.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	buf := make([]byte, 64)
+	n, err := conn.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buf[:n]); got != "local-udp:ping" {
+		t.Fatalf("got %q", got)
+	}
+	if err := manager.Stop(ctx, info.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := manager.HostUDP("10.105.153.132", 9090); ok {
+		t.Fatal("host UDP route should be cleared after stop")
+	}
+}
+
 func TestRecoverControlRedialsAndReregisters(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

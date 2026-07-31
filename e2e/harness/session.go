@@ -340,6 +340,13 @@ func isKubeLoopTUN(iface string) bool {
 // owns the destination CIDR — direct Pod IP cannot be validated in that environment.
 func RequireRoutedViaKubeLoop(t *testing.T, host, referenceHost string) {
 	t.Helper()
+	if runtime.GOOS == "linux" {
+		// Linux uses sing-box auto_redirect (nftables). ip route get often still
+		// shows the Docker/Minikube path instead of tun*, so the route table is
+		// not a reliable TUN ownership signal. WaitHostTCP/UDP cover reachability.
+		t.Log("skipping TUN route table check on linux (auto_redirect)")
+		return
+	}
 	deadline := time.Now().Add(15 * time.Second)
 	var last hostRoute
 	var lastErr error
