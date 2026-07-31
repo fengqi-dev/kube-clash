@@ -116,7 +116,11 @@ func InstallFromCLI(source, token string, uid int, version, homeDir, ownerSID, s
 	}); err != nil {
 		return err
 	}
-	return enableService(dest)
+	if err := enableService(dest); err != nil {
+		return err
+	}
+	cleanupDisplacedHelperBinaries(dest)
+	return nil
 }
 
 func singBoxNearHelperSource(source string) string {
@@ -171,10 +175,12 @@ func UninstallFromCLI() error {
 	if err := disableService(); err != nil {
 		return err
 	}
-	_ = os.Remove(BinaryInstallPath())
+	current := BinaryInstallPath()
+	_ = os.Remove(current)
 	if legacy := LegacyBinaryInstallPath(); legacy != "" {
 		_ = os.Remove(legacy)
 	}
+	cleanupDisplacedHelperBinaries(current)
 	_ = os.Remove(SystemAuthPath())
 	_ = os.Remove(SystemTokenPath())
 	_ = os.Remove(SocketPath())

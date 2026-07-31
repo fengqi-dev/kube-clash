@@ -177,7 +177,7 @@ func LocateBundledUninstallTool() (string, error) {
 
 func locateBundledTool(baseName string) (string, error) {
 	name := helperBinaryName(baseName)
-	// Prefer on-disk package resources (Program Files\...\resources) over
+	// Prefer on-disk package resources ({installRoot}\resources) over
 	// materializing the embedded copy — avoids multi-MB read/write on every elevate.
 	if path, err := findBundledToolOnDisk(name); err == nil {
 		return path, nil
