@@ -1,0 +1,80 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kubeloop-e2e
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: echo
+  namespace: kubeloop-e2e
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: kubeloop-e2e-echo
+  template:
+    metadata:
+      labels:
+        app: kubeloop-e2e-echo
+    spec:
+      containers:
+        - name: echo
+          image: python:3.12-alpine
+          command:
+            - python
+            - -u
+            - -c
+            - |
+              import socket, threading
+
+              def handle_tcp(c):
+                  try:
+                      data = c.recv(64)
+                      c.sendall(b"cluster-tcp:" + data)
+                  finally:
+                      c.close()
+
+              def tcp():
+                  s = socket.socket()
+                  s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                  s.bind(("0.0.0.0", 8080))
+                  s.listen()
+                  while True:
+                      c, _ = s.accept()
+                      threading.Thread(target=handle_tcp, args=(c,), daemon=True).start()
+
+              def udp():
+                  s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                  s.bind(("0.0.0.0", 9090))
+                  while True:
+                      data, addr = s.recvfrom(64)
+                      s.sendto(b"cluster-udp:" + data, addr)
+
+              threading.Thread(target=tcp, daemon=True).start()
+              udp()
+          ports:
+            - name: tcp
+              containerPort: 8080
+              protocol: TCP
+            - name: udp
+              containerPort: 9090
+              protocol: UDP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: echo
+  namespace: kubeloop-e2e
+spec:
+  selector:
+    app: kubeloop-e2e-echo
+  ports:
+    - name: tcp
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+    - name: udp
+      port: 9090
+      targetPort: 9090
+      protocol: UDP

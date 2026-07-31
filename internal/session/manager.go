@@ -230,6 +230,22 @@ func (m *Manager) SingBoxConfig() ([]byte, error) {
 	return config, nil
 }
 
+// DNSPort returns the local split-DNS / search-proxy listen port for the active session.
+func (m *Manager) DNSPort() (int, error) {
+	m.mu.RLock()
+	core := m.runningCore
+	phase := m.state.Phase
+	m.mu.RUnlock()
+	if core == nil || phase != PhaseConnected {
+		return 0, errors.New("not connected")
+	}
+	port := core.DNSPort()
+	if port < 1 {
+		return 0, errors.New("DNS port is unavailable")
+	}
+	return port, nil
+}
+
 func (m *Manager) State() State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()

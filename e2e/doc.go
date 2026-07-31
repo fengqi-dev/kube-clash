@@ -1,17 +1,29 @@
 // Package e2e contains Minikube end-to-end tests for KubeLoop core paths.
 //
-// Covered flows:
-//   - Port Forward (TCP) — e2e/portfwd_test.go
-//   - Exchange (TCP/UDP) — e2e/intercept_test.go
-//   - Mirror (TCP/UDP)   — e2e/mirror_test.go
-//   - Preview (TCP/UDP)  — e2e/preview_test.go
-//   - Gateway / SOCKS TCP+UDP echo + DNS — gateway_test.go, session_test.go
+// Layout (by business area):
 //
-// Run against a local Minikube cluster:
+//	e2e/harness/   shared TUN Connect helpers and echo fixtures
+//	e2e/connect/   Connect TUN data path, manual network, disconnect
+//	e2e/dns/       Split DNS / search proxy / PTR / host aliases
+//	e2e/portfwd/   Port Forward (Service / Pod)
+//	e2e/exchange/  Service Exchange
+//	e2e/mirror/    Service Mirror
+//	e2e/preview/   Preview
+//	e2e/scripts/   Helper install / stop helpers for run.sh
+//
+// All tests use a real privileged TUN Connect via session.Manager and the
+// local Helper (dev.fengqi.kubeloop.helper.dev).
+//
+// Prerequisites:
+//   - Minikube (or compatible) context
+//   - sudo / macOS admin prompt to install or upgrade the Helper
+//   - No other TUN client owning Pod CIDRs (Clash steals 10.244/16 → Pod IP test skips)
+//
+// Run:
 //
 //	./e2e/run.sh
 //
-// Or:
+// Or (Helper must already be installed with matching token/sing-box):
 //
-//	KUBELOOP_E2E=1 go test -tags=e2e ./e2e -count=1 -timeout=20m -v
+//	KUBELOOP_E2E=1 go test -tags=e2e ./e2e/... -count=1 -timeout=30m -parallel=1 -p 1 -v
 package e2e
