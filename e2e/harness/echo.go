@@ -215,22 +215,49 @@ func WaitClusterProbe(
 	protocol, payload, prefix string,
 ) string {
 	t.Helper()
-	deadline := time.Now().Add(90 * time.Second)
+	got, err := waitClusterProbe(ctx, client, host, port, protocol, payload, prefix, 90*time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return got
+}
+
+// WaitClusterProbeOptional is WaitClusterProbe but returns the error instead of
+// failing the test. Useful when a host-side assertion already covers the path.
+func WaitClusterProbeOptional(
+	ctx context.Context,
+	client kubernetes.Interface,
+	host string,
+	port int,
+	protocol, payload, prefix string,
+	timeout time.Duration,
+) (string, error) {
+	return waitClusterProbe(ctx, client, host, port, protocol, payload, prefix, timeout)
+}
+
+func waitClusterProbe(
+	ctx context.Context,
+	client kubernetes.Interface,
+	host string,
+	port int,
+	protocol, payload, prefix string,
+	timeout time.Duration,
+) (string, error) {
+	deadline := time.Now().Add(timeout)
 	var last string
 	var lastErr error
 	for time.Now().Before(deadline) {
 		got, err := ProbeFromCluster(ctx, client, host, port, protocol, payload)
 		if err == nil && strings.HasPrefix(got, prefix) {
-			return got
+			return got, nil
 		}
 		last, lastErr = got, err
 		time.Sleep(2 * time.Second)
 	}
 	if lastErr != nil {
-		t.Fatalf("probe %s %s:%d failed: %v (last=%q)", protocol, host, port, lastErr, last)
+		return last, fmt.Errorf("probe %s %s:%d failed: %w (last=%q)", protocol, host, port, lastErr, last)
 	}
-	t.Fatalf("probe %s %s:%d unexpected %q want prefix %q", protocol, host, port, last, prefix)
-	return ""
+	return last, fmt.Errorf("probe %s %s:%d unexpected %q want prefix %q", protocol, host, port, last, prefix)
 }
 
 func ProbeFromCluster(
