@@ -15,6 +15,7 @@ import type {
   PreviewRequest,
   ProbeResult,
   ServiceInfo,
+  Metrics,
   SessionIntentCounts,
   SessionState,
   UpdateInfo,
@@ -151,6 +152,13 @@ export const backend = {
   onSession: (callback: (state: SessionState) => void) => {
     if (!window.runtime) return () => undefined;
     return window.runtime.EventsOn("session:state", callback as (state: never) => void);
+  },
+  onSessionMetrics: (callback: (metrics: Metrics) => void) => {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOn(
+      "session:metrics",
+      callback as (metrics: never) => void,
+    );
   },
   onUpdate: (callback: (state: UpdateInfo) => void) => {
     if (!window.runtime) return () => undefined;

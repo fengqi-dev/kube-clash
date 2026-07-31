@@ -21,38 +21,41 @@ const (
 	DefaultDNSListen   = "127.0.0.1"
 	DefaultDNSPort     = 1053
 
-	PortForwardInbound   = "portfwd-in"
-	ExchangeInbound      = "exchange-in"
-	PreviewInbound       = "preview-in"
-	MirrorPrimaryInbound = "mirror-primary-in"
-	MirrorShadowInbound  = "mirror-shadow-in"
+	// TrafficInbound is the single loopback SOCKS inbound for all feature adapters.
+	// Feature identity is carried as SOCKS auth_user (see TrafficUser*).
+	TrafficInbound = "traffic-in"
+
+	TrafficUserPortForward   = "port-forward"
+	TrafficUserExchange      = "exchange"
+	TrafficUserPreview       = "preview"
+	TrafficUserMirrorPrimary = "mirror-primary"
+	TrafficUserMirrorShadow  = "mirror-shadow"
 )
 
-// TrafficInboundPorts contains the fixed loopback SOCKS inbounds used by
-// KubeLoop's feature adapters. Targets remain dynamic and are carried in the
-// SOCKS request, so feature sessions do not require a sing-box reload.
+// TrafficInboundPorts holds the single fixed loopback SOCKS listen port used by
+// all feature adapters. Targets remain dynamic in the SOCKS request; feature
+// identity is the SOCKS username (TrafficUser*).
 type TrafficInboundPorts struct {
-	PortForward   int `json:"portForward"`
-	Exchange      int `json:"exchange"`
-	Preview       int `json:"preview"`
-	MirrorPrimary int `json:"mirrorPrimary"`
-	MirrorShadow  int `json:"mirrorShadow"`
+	Listen int `json:"listen"`
 }
 
-func (p TrafficInboundPorts) items() []struct {
-	tag  string
-	port int
-} {
-	return []struct {
-		tag  string
-		port int
-	}{
-		{PortForwardInbound, p.PortForward},
-		{ExchangeInbound, p.Exchange},
-		{PreviewInbound, p.Preview},
-		{MirrorPrimaryInbound, p.MirrorPrimary},
-		{MirrorShadowInbound, p.MirrorShadow},
+// TrafficFeatureUsers returns every SOCKS auth user registered on traffic-in.
+func TrafficFeatureUsers() []string {
+	return []string{
+		TrafficUserPortForward,
+		TrafficUserExchange,
+		TrafficUserPreview,
+		TrafficUserMirrorPrimary,
+		TrafficUserMirrorShadow,
 	}
+}
+
+func clusterTrafficUsers() []string {
+	return []string{TrafficUserPortForward, TrafficUserMirrorPrimary}
+}
+
+func localTrafficUsers() []string {
+	return []string{TrafficUserExchange, TrafficUserPreview, TrafficUserMirrorShadow}
 }
 
 // HostAlias maps a DNS name to an IPv4 address for the local dns-in resolver.
@@ -74,7 +77,6 @@ type Options struct {
 	ClusterDomains   []string
 	Hosts            []HostAlias
 	TrafficPorts     TrafficInboundPorts
-	TrafficUsername  string
 	TrafficPassword  string
 }
 
@@ -168,36 +170,52 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 	}
 	dnsServers = append(dnsServers, map[string]any{"type": "local", "tag": "local"})
 
-	localInbounds := []string{ExchangeInbound, PreviewInbound, MirrorShadowInbound}
+	trafficIn := []string{TrafficInbound}
+	clusterUsers := clusterTrafficUsers()
+	localUsers := localTrafficUsers()
 	routeRules := []map[string]any{
 		{"inbound": []string{"dns-in"}, "action": "hijack-dns"},
-		{"inbound": []string{PortForwardInbound}, "outbound": KubernetesOutbound},
-		{"inbound": []string{MirrorPrimaryInbound}, "outbound": KubernetesOutbound},
+		{
+			"inbound":   trafficIn,
+			"auth_user": clusterUsers,
+			"outbound":  KubernetesOutbound,
+		},
 	}
 	for _, route := range routes {
 		routeRules = append(routeRules, map[string]any{
-			"inbound": localInbounds,
-			"ip_cidr": []string{route},
-			"action":  "reject",
+			"inbound":   trafficIn,
+			"auth_user": localUsers,
+			"ip_cidr":   []string{route},
+			"action":    "reject",
 		})
 	}
 	routeRules = append(routeRules,
 		map[string]any{
-			"inbound":  localInbounds,
-			"ip_cidr":  []string{"127.0.0.0/8", "::1/128"},
-			"outbound": LocalOutbound,
+			"inbound":   trafficIn,
+			"auth_user": localUsers,
+			"ip_cidr":   []string{"127.0.0.0/8", "::1/128"},
+			"outbound":  LocalOutbound,
 		},
 		map[string]any{
-			"inbound":  localInbounds,
-			"domain":   []string{"localhost"},
-			"outbound": LocalOutbound,
+			"inbound":   trafficIn,
+			"auth_user": localUsers,
+			"domain":    []string{"localhost"},
+			"outbound":  LocalOutbound,
 		},
 		map[string]any{
-			"inbound":       localInbounds,
+			"inbound":       trafficIn,
+			"auth_user":     localUsers,
 			"ip_is_private": true,
 			"outbound":      LocalOutbound,
 		},
-		map[string]any{"inbound": localInbounds, "action": "reject"},
+		map[string]any{
+			"inbound":   trafficIn,
+			"auth_user": localUsers,
+			"action":    "reject",
+		},
+		// Unknown or missing auth_user on traffic-in must not fall through to
+		// TUN/cluster rules (UDP ASSOCIATE dye loss would otherwise misroute).
+		map[string]any{"inbound": trafficIn, "action": "reject"},
 		map[string]any{"action": "sniff"},
 		map[string]any{"protocol": "dns", "action": "hijack-dns"},
 		map[string]any{
@@ -238,25 +256,27 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"listen_port": options.DNSPort,
 		},
 	}
-	if options.TrafficPorts != (TrafficInboundPorts{}) {
-		if options.TrafficUsername == "" || options.TrafficPassword == "" {
-			return nil, errors.New("traffic inbound credentials are required")
+	if options.TrafficPorts.Listen != 0 {
+		if options.TrafficPassword == "" {
+			return nil, errors.New("traffic inbound password is required")
 		}
-		for _, item := range options.TrafficPorts.items() {
-			if err := validatePort(item.port, item.tag); err != nil {
-				return nil, err
-			}
-			inbounds = append(inbounds, map[string]any{
-				"type":        "socks",
-				"tag":         item.tag,
-				"listen":      "127.0.0.1",
-				"listen_port": item.port,
-				"users": []map[string]any{{
-					"username": options.TrafficUsername,
-					"password": options.TrafficPassword,
-				}},
+		if err := validatePort(options.TrafficPorts.Listen, TrafficInbound); err != nil {
+			return nil, err
+		}
+		users := make([]map[string]any, 0, len(TrafficFeatureUsers()))
+		for _, username := range TrafficFeatureUsers() {
+			users = append(users, map[string]any{
+				"username": username,
+				"password": options.TrafficPassword,
 			})
 		}
+		inbounds = append(inbounds, map[string]any{
+			"type":        "socks",
+			"tag":         TrafficInbound,
+			"listen":      "127.0.0.1",
+			"listen_port": options.TrafficPorts.Listen,
+			"users":       users,
+		})
 	}
 
 	config := map[string]any{

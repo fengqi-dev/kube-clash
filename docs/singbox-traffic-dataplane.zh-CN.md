@@ -56,11 +56,7 @@ flowchart LR
 
     subgraph SingBox["sing-box 统一数据面"]
         TunIn["tun-in"]
-        PortFwdIn["portfwd-in"]
-        ExchangeIn["exchange-in"]
-        PreviewIn["preview-in"]
-        MirrorPrimaryIn["mirror-primary-in"]
-        MirrorShadowIn["mirror-shadow-in"]
+        TrafficIn["traffic-in"]
         Router["Route Engine"]
         KubernetesOut["kubernetes-out"]
         LocalOut["local-out"]
@@ -76,22 +72,16 @@ flowchart LR
 
     LocalApp --> TunIn
     LocalApp --> PortListener
-    PortListener --> PortFwdIn
+    PortListener --> TrafficIn
 
     ClusterClient --> Gateway
     Gateway --> GatewayAdapter
-    GatewayAdapter --> ExchangeIn
-    GatewayAdapter --> PreviewIn
+    GatewayAdapter --> TrafficIn
     GatewayAdapter --> MirrorEngine
-    MirrorEngine --> MirrorPrimaryIn
-    MirrorEngine --> MirrorShadowIn
+    MirrorEngine --> TrafficIn
 
     TunIn --> Router
-    PortFwdIn --> Router
-    ExchangeIn --> Router
-    PreviewIn --> Router
-    MirrorPrimaryIn --> Router
-    MirrorShadowIn --> Router
+    TrafficIn --> Router
 
     Router --> KubernetesOut
     Router --> LocalOut
@@ -125,18 +115,24 @@ Session 启动时一次性创建以下入站：
 | Inbound tag | 类型 | 用途 |
 | --- | --- | --- |
 | `tun-in` | TUN | 普通 Pod、Service 和集群 DNS 访问 |
-| `portfwd-in` | SOCKS5 | Port Forward |
-| `exchange-in` | SOCKS5 | Exchange 到本机服务 |
-| `preview-in` | SOCKS5 | Preview 到本机服务 |
-| `mirror-primary-in` | SOCKS5 | Mirror 原 Pod 主路径 |
-| `mirror-shadow-in` | SOCKS5 | Mirror 本机副本 |
+| `traffic-in` | SOCKS5 | 全部 feature 适配器（Port Forward / Exchange / Preview / Mirror） |
 | `dns-in` | Direct | 本地 split DNS 入口 |
 
-除 TUN 外，所有业务入站：
+`traffic-in` 注册五个 SOCKS 用户；用户名即 feature 染色（`auth_user`），供路由规则匹配：
+
+| Username（`auth_user`） | 路由类 |
+| --- | --- |
+| `port-forward` | cluster → `kubernetes-out` |
+| `mirror-primary` | cluster → `kubernetes-out` |
+| `exchange` | local（反环）→ `local-out` |
+| `preview` | local（反环）→ `local-out` |
+| `mirror-shadow` | local（反环）→ `local-out` |
+
+除 TUN 外，业务入站：
 
 - 只监听 `127.0.0.1`；
 - 使用系统分配的随机端口；
-- 使用每个 Session 随机生成的认证信息；
+- 密码为 Session 随机 secret（用户名为固定 feature 染料）；
 - 不对局域网或公网开放；
 - 不因新增或停止一条业务映射而改变。
 
@@ -165,19 +161,18 @@ sing-box 的 Direct inbound 很适合表达固定目标的端口转发，但每�
 
 基础路由关系：
 
-| Inbound | Outbound |
+| 匹配 | Outbound |
 | --- | --- |
-| `portfwd-in` | `kubernetes-out` |
-| `exchange-in` | `local-out` |
-| `preview-in` | `local-out` |
-| `mirror-primary-in` | `kubernetes-out` |
-| `mirror-shadow-in` | `local-out` |
+| `traffic-in` + `auth_user` ∈ {`port-forward`, `mirror-primary`} | `kubernetes-out` |
+| `traffic-in` + local users + 集群 CIDR | reject（反环） |
+| `traffic-in` + local users + loopback/private | `local-out` |
+| `traffic-in` + 未知/缺失 `auth_user` | reject |
 | `tun-in` + 集群 CIDR/域名 | `kubernetes-out` |
 | `tun-in` + 非集群目标 | `direct-out` |
 | 任意不合法组合 | `block-out` |
 
-路由应优先匹配 inbound tag，再校验目标范围。不能只根据目标 IP 选择 outbound，否则无法
-可靠区分本机副本、集群主路径和内部控制连接。
+路由匹配 `traffic-in` 与 `auth_user`（feature 染色），再对 local 类用户校验目标范围。
+不能只根据目标 IP 选择 outbound，否则无法把 cluster 类与 local 类安全合并到同一端口。
 
 ## 7. 统一 Traffic Adapter
 
@@ -194,8 +189,9 @@ UDP frames → SOCKS5 UDP association
 
 ```text
 Feature       port-forward | exchange | preview | mirror-primary | mirror-shadow
+              (= SOCKS username / auth_user 染料)
 MappingID     功能映射 ID
-Inbound       目标 sing-box inbound
+Inbound       traffic-in（共享 listen）
 Network       tcp | udp
 TargetHost    最终目标主机
 TargetPort    最终目标端口
@@ -204,7 +200,7 @@ Timeout       建连与空闲超时
 
 Traffic Adapter 统一处理：
 
-- SOCKS5 协商和认证；
+- SOCKS5 协商和认证（feature 用户名 + Session 密码）；
 - TCP 双向复制；
 - TCP half-close；
 - UDP 报文封装与 association 生命周期；
@@ -213,7 +209,7 @@ Traffic Adapter 统一处理：
 - 字节数、持续时间和关闭原因；
 - 结构化错误转换。
 
-四个功能不再分别实现本机直连逻辑，只负责确定 feature、inbound 和 target。
+各功能不再分别实现本机直连逻辑，只负责确定 feature 染料和 target。
 
 ## 8. Port Forward
 
@@ -224,7 +220,7 @@ flowchart LR
     Client["用户程序"]
     Listener["KubeLoop 本地监听端口"]
     Adapter["Port Forward Adapter"]
-    Inbound["portfwd-in"]
+    Inbound["traffic-in auth_user=port-forward"]
     SingBox["sing-box"]
     KubeOut["kubernetes-out"]
     Bridge["SOCKS Bridge"]
@@ -289,14 +285,14 @@ ExternalName 和无 ClusterIP 的特殊情况需要单独解析或回退到 Pod 
   → InboundReady
   → KubeLoop Accept
   → Exchange Adapter
-  → exchange-in
+  → traffic-in（auth_user=exchange）
   → sing-box
   → local-out
   → LocalHost:LocalPort
 ```
 
 KubeLoop 不再直接连接本机目标，而是把目标作为 SOCKS5 CONNECT 或 UDP association 请求
-交给 `exchange-in`。
+交给 `traffic-in`，并用 `auth_user=exchange` 染色。
 
 ### 9.2 失败语义
 
@@ -314,13 +310,13 @@ Preview Service
   → Gateway listener
   → KubeLoop Accept
   → Preview Adapter
-  → preview-in
+  → traffic-in（auth_user=preview）
   → sing-box
   → local-out
   → LocalHost:LocalPort
 ```
 
-Preview 使用独立 inbound，便于：
+Preview 与 Exchange 共用 `traffic-in`，但使用独立的 `auth_user=preview` 染料，便于：
 
 - 单独统计连接数和流量；
 - 应用不同的超时、限速或访问策略；
@@ -340,8 +336,8 @@ flowchart LR
     GatewayIn["Gateway 反向流"]
     Tee["KubeLoop Mirror Engine"]
 
-    PrimaryIn["mirror-primary-in"]
-    ShadowIn["mirror-shadow-in"]
+    PrimaryIn["traffic-in auth_user=mirror-primary"]
+    ShadowIn["traffic-in auth_user=mirror-shadow"]
     SingBox["sing-box"]
     KubeOut["kubernetes-out"]
     LocalOut["local-out"]
@@ -383,7 +379,7 @@ Shadow：尽力写入，不得向 Primary 传播背压
 - 本机服务响应慢；
 - Shadow 缓冲满；
 - 本机服务中途断开；
-- sing-box `mirror-shadow-in` 暂时不可用。
+- sing-box `traffic-in` 上 `auth_user=mirror-shadow` 路径暂时不可用。
 
 Primary 建连或传输失败则应终止客户端连接，因为 Primary 是业务响应来源。
 
@@ -588,7 +584,7 @@ UI 可以按 feature、mapping、inbound 和 outbound 聚合，而不是只展�
 
 ### 阶段二：Port Forward
 
-- 主 Session 已连接时改走 `portfwd-in → kubernetes-out`。
+- 主 Session 已连接时改走 `traffic-in`（`auth_user=port-forward`）→ `kubernetes-out`。
 - 保留未连接状态下的 Kubernetes API port-forward。
 - 对比两条路径的 TCP、UDP、延迟和错误语义。
 - 明确长期是否保留兼容模式。
@@ -602,8 +598,8 @@ UI 可以按 feature、mapping、inbound 和 outbound 聚合，而不是只展�
 
 ### 阶段四：Mirror
 
-- Primary 接入 `mirror-primary-in`。
-- Shadow 接入 `mirror-shadow-in`。
+- Primary 使用 `auth_user=mirror-primary`。
+- Shadow 使用 `auth_user=mirror-shadow`。
 - 引入有界异步 Shadow 缓冲。
 - 验证 Shadow 故障完全不影响 Primary。
 
@@ -630,7 +626,7 @@ UI 可以按 feature、mapping、inbound 和 outbound 聚合，而不是只展�
 - Pod 和 Service TCP 转发成功。
 - Pod 和 Service UDP 转发成功。
 - 指定本地端口和自动分配端口均可用。
-- 主 Session 已连接时业务数据命中 `portfwd-in`。
+- 主 Session 已连接时业务数据命中 `traffic-in`（`auth_user=port-forward`）。
 - 未连接时兼容路径行为与现状一致。
 
 ### 17.3 Exchange

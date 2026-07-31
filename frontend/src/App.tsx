@@ -12,7 +12,7 @@ import { OverviewView } from "@/components/overview/overview-view";
 import { SettingsView } from "@/components/settings/settings-view";
 import { useSession } from "@/hooks/use-session";
 import { cn } from "@/lib/utils";
-import { useMemo } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 function App() {
   const {
@@ -46,11 +46,33 @@ function App() {
   );
   const namespaceScoped = scopedNamespaces.length > 0;
 
+  const [connectionsAlert, setConnectionsAlert] = useState(false);
+  const seenConnectionIds = useRef(new Set<string>());
+
+  useEffect(() => {
+    if (!ready) {
+      seenConnectionIds.current.clear();
+      setConnectionsAlert(false);
+      return;
+    }
+    const ids = (session.metrics?.connections ?? [])
+      .map((item) => item.id)
+      .filter((id): id is string => Boolean(id));
+    if (view === "connections") {
+      for (const id of ids) seenConnectionIds.current.add(id);
+      setConnectionsAlert(false);
+      return;
+    }
+    if (ids.some((id) => !seenConnectionIds.current.has(id))) {
+      setConnectionsAlert(true);
+    }
+  }, [ready, session.metrics?.connections, view]);
+
   return (
     <div className="flex h-screen min-h-[580px] overflow-hidden bg-background text-foreground">
       <AppSidebar
         view={view}
-        ready={ready}
+        connectionsAlert={connectionsAlert}
         updateAvailable={data.update.available}
         onNavigate={setView}
       />

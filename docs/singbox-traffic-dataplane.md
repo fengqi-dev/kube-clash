@@ -66,11 +66,7 @@ flowchart LR
 
     subgraph SingBox["sing-box Unified Data Plane"]
         TunIn["tun-in"]
-        PortFwdIn["portfwd-in"]
-        ExchangeIn["exchange-in"]
-        PreviewIn["preview-in"]
-        MirrorPrimaryIn["mirror-primary-in"]
-        MirrorShadowIn["mirror-shadow-in"]
+        TrafficIn["traffic-in"]
         Router["Route Engine"]
         KubernetesOut["kubernetes-out"]
         LocalOut["local-out"]
@@ -86,22 +82,16 @@ flowchart LR
 
     LocalApp --> TunIn
     LocalApp --> PortListener
-    PortListener --> PortFwdIn
+    PortListener --> TrafficIn
 
     ClusterClient --> Gateway
     Gateway --> GatewayAdapter
-    GatewayAdapter --> ExchangeIn
-    GatewayAdapter --> PreviewIn
+    GatewayAdapter --> TrafficIn
     GatewayAdapter --> MirrorEngine
-    MirrorEngine --> MirrorPrimaryIn
-    MirrorEngine --> MirrorShadowIn
+    MirrorEngine --> TrafficIn
 
     TunIn --> Router
-    PortFwdIn --> Router
-    ExchangeIn --> Router
-    PreviewIn --> Router
-    MirrorPrimaryIn --> Router
-    MirrorShadowIn --> Router
+    TrafficIn --> Router
 
     Router --> KubernetesOut
     Router --> LocalOut
@@ -135,18 +125,25 @@ The following inbounds are created once when a Session starts:
 | Inbound tag | Type | Purpose |
 | --- | --- | --- |
 | `tun-in` | TUN | Regular Pod, Service, and cluster DNS access |
-| `portfwd-in` | SOCKS5 | Port Forward |
-| `exchange-in` | SOCKS5 | Exchange to a local service |
-| `preview-in` | SOCKS5 | Preview to a local service |
-| `mirror-primary-in` | SOCKS5 | Primary path to the original Pod for Mirror |
-| `mirror-shadow-in` | SOCKS5 | Local replica for Mirror |
+| `traffic-in` | SOCKS5 | All feature adapters (Port Forward, Exchange, Preview, Mirror) |
 | `dns-in` | Direct | Local split DNS entry point |
 
-Except for TUN, all business inbounds:
+`traffic-in` registers five SOCKS users. The username is the feature dye
+(`auth_user`) used by route rules:
+
+| Username (`auth_user`) | Route class |
+| --- | --- |
+| `port-forward` | cluster → `kubernetes-out` |
+| `mirror-primary` | cluster → `kubernetes-out` |
+| `exchange` | local (anti-loop) → `local-out` |
+| `preview` | local (anti-loop) → `local-out` |
+| `mirror-shadow` | local (anti-loop) → `local-out` |
+
+Except for TUN, business inbounds:
 
 - listen only on `127.0.0.1`;
-- use random ports assigned by the operating system;
-- use authentication credentials generated randomly for each Session;
+- use a random port assigned by the operating system;
+- use a session-random password (usernames are fixed feature dyes);
 - are not exposed to the LAN or public internet;
 - remain unchanged when an individual business mapping is created or stopped.
 
@@ -178,20 +175,19 @@ sing-box configuration.
 
 The basic routing relationships are:
 
-| Inbound | Outbound |
+| Match | Outbound |
 | --- | --- |
-| `portfwd-in` | `kubernetes-out` |
-| `exchange-in` | `local-out` |
-| `preview-in` | `local-out` |
-| `mirror-primary-in` | `kubernetes-out` |
-| `mirror-shadow-in` | `local-out` |
+| `traffic-in` + `auth_user` ∈ {`port-forward`, `mirror-primary`} | `kubernetes-out` |
+| `traffic-in` + local users + cluster CIDR | reject (anti-loop) |
+| `traffic-in` + local users + loopback/private | `local-out` |
+| `traffic-in` + unknown/missing `auth_user` | reject |
 | `tun-in` + cluster CIDR/domain | `kubernetes-out` |
 | `tun-in` + non-cluster target | `direct-out` |
 | Any invalid combination | `block-out` |
 
-Routing must first match the inbound tag and then validate the target range. Choosing
-an outbound based only on the target IP cannot reliably distinguish local replicas,
-cluster primary paths, and internal control connections.
+Routing matches `traffic-in` plus `auth_user` (feature dye), then validates the
+target range for local-class users. Choosing an outbound based only on the target
+IP cannot safely merge cluster-bound and local-bound features onto one port.
 
 ## 7. Unified Traffic Adapter
 
@@ -209,8 +205,9 @@ Each adaptation carries at least:
 
 ```text
 Feature       port-forward | exchange | preview | mirror-primary | mirror-shadow
+              (= SOCKS username / auth_user dye)
 MappingID     Feature mapping ID
-Inbound       Target sing-box inbound
+Inbound       traffic-in (shared listen)
 Network       tcp | udp
 TargetHost    Final target host
 TargetPort    Final target port
@@ -219,7 +216,7 @@ Timeout       Connection and idle timeouts
 
 The Traffic Adapter handles uniformly:
 
-- SOCKS5 negotiation and authentication;
+- SOCKS5 negotiation and authentication (feature username + session password);
 - bidirectional TCP copying;
 - TCP half-close;
 - UDP datagram encapsulation and association lifecycle;
@@ -228,8 +225,8 @@ The Traffic Adapter handles uniformly:
 - byte counts, duration, and close reasons;
 - structured error conversion.
 
-The four features no longer implement their own local direct-connection logic. They
-are responsible only for determining the feature, inbound, and target.
+The features no longer implement their own local direct-connection logic. They
+are responsible only for determining the feature dye and target.
 
 ## 8. Port Forward
 
@@ -240,7 +237,7 @@ flowchart LR
     Client["User Program"]
     Listener["KubeLoop Local Listening Port"]
     Adapter["Port Forward Adapter"]
-    Inbound["portfwd-in"]
+    Inbound["traffic-in auth_user=port-forward"]
     SingBox["sing-box"]
     KubeOut["kubernetes-out"]
     Bridge["SOCKS Bridge"]
@@ -309,14 +306,15 @@ Cluster client
   → InboundReady
   → KubeLoop Accept
   → Exchange Adapter
-  → exchange-in
+  → traffic-in (auth_user=exchange)
   → sing-box
   → local-out
   → LocalHost:LocalPort
 ```
 
 KubeLoop no longer connects directly to the local target. Instead, it submits the
-target to `exchange-in` as a SOCKS5 CONNECT or UDP association request.
+target to `traffic-in` as a SOCKS5 CONNECT or UDP association request dyed with
+`auth_user=exchange`.
 
 ### 9.2 Failure Semantics
 
@@ -338,13 +336,14 @@ Preview Service
   → Gateway listener
   → KubeLoop Accept
   → Preview Adapter
-  → preview-in
+  → traffic-in (auth_user=preview)
   → sing-box
   → local-out
   → LocalHost:LocalPort
 ```
 
-Preview uses a dedicated inbound to enable:
+Preview shares `traffic-in` with Exchange but uses a dedicated `auth_user=preview`
+dye to enable:
 
 - independent connection-count and traffic metrics;
 - different timeout, rate-limit, or access policies;
@@ -365,8 +364,8 @@ flowchart LR
     GatewayIn["Gateway Reverse Stream"]
     Tee["KubeLoop Mirror Engine"]
 
-    PrimaryIn["mirror-primary-in"]
-    ShadowIn["mirror-shadow-in"]
+    PrimaryIn["traffic-in auth_user=mirror-primary"]
+    ShadowIn["traffic-in auth_user=mirror-shadow"]
     SingBox["sing-box"]
     KubeOut["kubernetes-out"]
     LocalOut["local-out"]
@@ -410,7 +409,7 @@ The following Shadow failures must not affect Primary:
 - the local service responds slowly;
 - the Shadow buffer is full;
 - the local service disconnects while active;
-- the sing-box `mirror-shadow-in` is temporarily unavailable.
+- the sing-box `traffic-in` path for `auth_user=mirror-shadow` is temporarily unavailable.
 
 A Primary connection or transmission failure must terminate the client connection,
 because Primary is the source of the business response.
@@ -622,7 +621,7 @@ only total TUN traffic.
 ### Phase 2: Port Forward
 
 - When the primary Session is connected, use
-  `portfwd-in → kubernetes-out`.
+  `traffic-in` (`auth_user=port-forward`) → `kubernetes-out`.
 - Retain the Kubernetes API port-forward when disconnected.
 - Compare TCP, UDP, latency, and error semantics between the two paths.
 - Decide explicitly whether to retain compatibility mode in the long term.
@@ -630,20 +629,21 @@ only total TUN traffic.
 ### Phase 3: Exchange and Preview
 
 - Replace direct local connections with the corresponding Traffic Adapter.
+- Dye Exchange/Preview with distinct `auth_user` values on shared `traffic-in`.
 - Verify TCP half-close and UDP association behavior.
 - Ensure that creating and stopping mappings does not restart sing-box.
 - Add security restrictions for local targets.
 
 ### Phase 4: Mirror
 
-- Connect Primary to `mirror-primary-in`.
-- Connect Shadow to `mirror-shadow-in`.
+- Connect Primary with `auth_user=mirror-primary`.
+- Connect Shadow with `auth_user=mirror-shadow`.
 - Introduce a bounded asynchronous Shadow buffer.
 - Verify that Shadow failures have no effect on Primary.
 
 ### Phase 5: Consolidation
 
-- Present all five inbound traffic types uniformly in the UI.
+- Present all five feature dyes uniformly in the UI.
 - Remove unnecessary business direct-connection branches.
 - Improve diagnostic bundles, route-match information, and error stages.
 - Decide whether to remove the legacy Port Forward data path based on compatibility.
@@ -665,7 +665,7 @@ only total TUN traffic.
 - TCP forwarding succeeds for Pods and Services.
 - UDP forwarding succeeds for Pods and Services.
 - Both specified and automatically assigned local ports work.
-- Business data uses `portfwd-in` when the primary Session is connected.
+- Business data uses `traffic-in` (`auth_user=port-forward`) when the primary Session is connected.
 - When disconnected, the compatibility path behaves as it does currently.
 
 ### 17.3 Exchange

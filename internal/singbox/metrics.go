@@ -21,6 +21,7 @@ type Connection struct {
 	DownloadSpeed int64  `json:"downloadSpeed,omitempty"`
 	StartedAt     string `json:"startedAt"`
 	Inbound       string `json:"inbound"`
+	Feature       string `json:"feature,omitempty"` // SOCKS auth_user dye on traffic-in
 	Outbound      string `json:"outbound"`
 	Rule          string `json:"rule"`
 }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Activity } from "lucide-react";
 import { EmptyState } from "@/components/shared/empty-state";
 import { PageShell } from "@/components/shared/page-shell";
@@ -10,11 +10,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useI18n } from "@/i18n";
 import {
   executableName,
@@ -33,14 +28,35 @@ const columns = [
   { key: "inbound", align: "left" as const },
   { key: "destination", align: "left" as const },
   { key: "source", align: "left" as const },
-  { key: "download", align: "right" as const },
-  { key: "upload", align: "right" as const },
-  { key: "downloadSpeed", align: "right" as const },
-  { key: "uploadSpeed", align: "right" as const },
+  { key: "traffic", align: "right" as const },
+  { key: "speed", align: "right" as const },
   { key: "outbound", align: "left" as const },
   { key: "rule", align: "left" as const },
   { key: "duration", align: "left" as const },
 ] as const;
+
+function StackedMetric({
+  upload,
+  download,
+}: {
+  upload: string;
+  download: string;
+}) {
+  return (
+    <div className="flex flex-col items-end gap-0.5 font-mono text-[11px] leading-4 text-muted-foreground">
+      <span>↑ {upload}</span>
+      <span>↓ {download}</span>
+    </div>
+  );
+}
+
+/** Split clash/sing-box rule strings onto readable lines. */
+function formatRuleLines(rule: string): string {
+  const [match, action] = rule.split(/\s*=>\s*/, 2);
+  const lines = match.split(/\s+/).filter(Boolean);
+  if (action) lines.push(`=> ${action}`);
+  return lines.join("\n");
+}
 
 export function ConnectionsView({
   ready,
@@ -53,21 +69,28 @@ export function ConnectionsView({
   const live = Array.isArray(metrics?.connections) ? metrics.connections : [];
   const liveCount = live.length;
   const [sticky, setSticky] = useState<Connection[]>([]);
+  const stickyUntil = useRef(0);
   const now = Date.now();
 
   useEffect(() => {
     if (!ready) {
       setSticky([]);
+      stickyUntil.current = 0;
       return;
     }
     if (liveCount > 0) {
       setSticky(live.slice(0, maxTableRows));
+      stickyUntil.current = Date.now() + stickyForMs;
       return;
     }
-    if (sticky.length === 0) return;
-    const timer = window.setTimeout(() => setSticky([]), stickyForMs);
+    if (sticky.length === 0 || stickyUntil.current === 0) return;
+    const remaining = Math.max(0, stickyUntil.current - Date.now());
+    const timer = window.setTimeout(() => {
+      setSticky([]);
+      stickyUntil.current = 0;
+    }, remaining);
     return () => window.clearTimeout(timer);
-  }, [live, liveCount, ready, sticky.length]);
+  }, [ready, live, liveCount, sticky.length]);
 
   const connections = (liveCount > 0 ? live : sticky).slice(0, maxTableRows);
 
@@ -134,7 +157,7 @@ export function ConnectionsView({
                       {connection.network?.toUpperCase() || "—"}
                     </TableCell>
                     <TableCell className="max-w-[130px] truncate text-[11px] text-muted-foreground">
-                      {connection.inbound || "—"}
+                      {connection.feature || connection.inbound || "—"}
                     </TableCell>
                     <TableCell className="max-w-[220px] truncate font-mono text-[11px] text-primary">
                       {connection.destination || "—"}
@@ -142,34 +165,26 @@ export function ConnectionsView({
                     <TableCell className="font-mono text-[11px] text-muted-foreground">
                       {connection.source || "—"}
                     </TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">
-                      {formatBytes(connection.download ?? 0)}
+                    <TableCell className="align-middle">
+                      <StackedMetric
+                        upload={formatBytes(connection.upload ?? 0)}
+                        download={formatBytes(connection.download ?? 0)}
+                      />
                     </TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">
-                      {formatBytes(connection.upload ?? 0)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">
-                      {formatSpeed(connection.downloadSpeed ?? 0)}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-muted-foreground">
-                      {formatSpeed(connection.uploadSpeed ?? 0)}
+                    <TableCell className="align-middle">
+                      <StackedMetric
+                        upload={formatSpeed(connection.uploadSpeed ?? 0)}
+                        download={formatSpeed(connection.downloadSpeed ?? 0)}
+                      />
                     </TableCell>
                     <TableCell className="max-w-[120px] truncate text-[11px] text-muted-foreground">
                       {connection.outbound || "—"}
                     </TableCell>
-                    <TableCell className="max-w-[180px] truncate text-[11px] text-muted-foreground">
+                    <TableCell className="min-w-[160px] max-w-[260px] align-top font-mono text-[11px] leading-4 text-muted-foreground">
                       {connection.rule ? (
-                        <Tooltip>
-                          <TooltipTrigger asChild>
-                            <span className="block truncate">{connection.rule}</span>
-                          </TooltipTrigger>
-                          <TooltipContent
-                            side="top"
-                            className="max-w-[min(28rem,calc(100vw-2rem))] break-all font-mono text-[11px]"
-                          >
-                            {connection.rule}
-                          </TooltipContent>
-                        </Tooltip>
+                        <span className="block whitespace-pre-wrap break-all">
+                          {formatRuleLines(connection.rule)}
+                        </span>
                       ) : (
                         "—"
                       )}

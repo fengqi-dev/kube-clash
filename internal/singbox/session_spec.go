@@ -35,7 +35,6 @@ type SessionSpec struct {
 	DNSNamespace     string              `json:"dnsNamespace,omitempty"`
 	Hosts            []HostAlias         `json:"hosts,omitempty"`
 	TrafficPorts     TrafficInboundPorts `json:"trafficPorts"`
-	TrafficUsername  string              `json:"trafficUsername"`
 	TrafficPassword  string              `json:"trafficPassword"`
 }
 
@@ -73,24 +72,16 @@ func (s SessionSpec) Validate() error {
 	if len(s.ControllerSecret) < 32 || len(s.ControllerSecret) > 256 {
 		return errors.New("controller secret must be between 32 and 256 characters")
 	}
-	if len(s.TrafficUsername) < 16 || len(s.TrafficUsername) > 255 {
-		return errors.New("traffic username must be between 16 and 255 characters")
-	}
 	if len(s.TrafficPassword) < 32 || len(s.TrafficPassword) > 255 {
 		return errors.New("traffic password must be between 32 and 255 characters")
 	}
-	seenTrafficPorts := make(map[int]struct{}, len(s.TrafficPorts.items()))
-	for _, port := range []int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort} {
-		seenTrafficPorts[port] = struct{}{}
+	if err := validatePort(s.TrafficPorts.Listen, TrafficInbound); err != nil {
+		return err
 	}
-	for _, item := range s.TrafficPorts.items() {
-		if err := validatePort(item.port, item.tag); err != nil {
-			return err
+	for _, port := range []int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort} {
+		if s.TrafficPorts.Listen == port {
+			return errors.New("traffic inbound port must not overlap internal ports")
 		}
-		if _, exists := seenTrafficPorts[item.port]; exists {
-			return errors.New("traffic inbound ports must be unique and not overlap internal ports")
-		}
-		seenTrafficPorts[item.port] = struct{}{}
 	}
 	if len(s.PodCIDRs)+len(s.ServiceCIDRs)+len(s.ServiceIPs)+len(s.Hosts) > maxSessionItems {
 		return errors.New("session contains too many routes or host aliases")
@@ -150,7 +141,6 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		ClusterDomains:   domains,
 		Hosts:            hosts,
 		TrafficPorts:     s.TrafficPorts,
-		TrafficUsername:  s.TrafficUsername,
 		TrafficPassword:  s.TrafficPassword,
 	})
 }

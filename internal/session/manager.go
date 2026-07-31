@@ -151,18 +151,20 @@ type Manager struct {
 	gatewayImage  string
 	store         *store.Store
 
-	mu        sync.RWMutex
-	state     State
-	cancel    context.CancelFunc
-	done      chan struct{}
-	listeners []func(State)
-	intercept *intercept.Manager
-	portfwd   *portfwd.Manager
+	mu               sync.RWMutex
+	state            State
+	cancel           context.CancelFunc
+	done             chan struct{}
+	listeners        []func(State)
+	metricsListeners []func(*singbox.Metrics)
+	intercept        *intercept.Manager
+	portfwd          *portfwd.Manager
 
 	recentConnections map[string]recentConnection
 	lastTraffic       map[string]connectionTraffic
 	restoring         bool
 	runningCore       singbox.RunningCore
+	trafficTracker    *traffic.Tracker
 }
 
 // Keep short-lived TUN connections visible between core snapshot polls.
@@ -272,6 +274,14 @@ func (m *Manager) Subscribe(listener func(State)) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.listeners = append(m.listeners, listener)
+}
+
+// SubscribeMetrics receives high-frequency connection/traffic snapshots without
+// re-emitting the full session inventory on every poll.
+func (m *Manager) SubscribeMetrics(listener func(*singbox.Metrics)) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.metricsListeners = append(m.metricsListeners, listener)
 }
 
 func (m *Manager) Connect(parent context.Context, request Request) error {
@@ -454,20 +464,28 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "sing-box feature inbounds are unavailable", err)
 		return
 	}
+	tracker := traffic.NewTracker()
+	m.mu.Lock()
+	m.trafficTracker = tracker
+	m.mu.Unlock()
 	m.intercept.SetTrafficDialers(intercept.TrafficDialers{
-		Exchange:      trafficDialer(trafficEndpoints.Exchange),
-		Preview:       trafficDialer(trafficEndpoints.Preview),
-		MirrorPrimary: trafficDialer(trafficEndpoints.MirrorPrimary),
-		MirrorShadow:  trafficDialer(trafficEndpoints.MirrorShadow),
+		Exchange:      trackedTrafficDialer(trafficEndpoints.Exchange, singbox.TrafficUserExchange, tracker),
+		Preview:       trackedTrafficDialer(trafficEndpoints.Preview, singbox.TrafficUserPreview, tracker),
+		MirrorPrimary: trackedTrafficDialer(trafficEndpoints.MirrorPrimary, singbox.TrafficUserMirrorPrimary, tracker),
+		MirrorShadow:  trackedTrafficDialer(trafficEndpoints.MirrorShadow, singbox.TrafficUserMirrorShadow, tracker),
 	})
 	m.portfwd.SetTrafficDialer(
-		request.Context, portForwardTrafficDialer(trafficEndpoints.PortForward),
+		request.Context,
+		trackedPortForwardDialer(trafficEndpoints.PortForward, tracker),
 	)
 	resources = append(resources, closerFunc(func() {
 		m.intercept.SetTrafficDialers(intercept.TrafficDialers{})
 		m.portfwd.StopRouted()
 		m.portfwd.SetTrafficDialer("", nil)
 		m.persistPortForwards()
+		m.mu.Lock()
+		m.trafficTracker = nil
+		m.mu.Unlock()
 	}))
 	resources = append(resources, closeIntercept)
 
@@ -574,35 +592,126 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			if err != nil {
 				continue
 			}
-			retained := m.retainMetrics(metrics)
 			m.mu.RLock()
-			next := m.state
+			tracker := m.trafficTracker
+			phase := m.state.Phase
 			m.mu.RUnlock()
-			if next.Phase != PhaseConnected {
+			if phase != PhaseConnected {
 				continue
 			}
-			next.Metrics = retained
-			m.publish(next)
+			metrics = mergeTrafficTracker(metrics, tracker)
+			retained := m.retainMetrics(metrics)
+			m.mu.Lock()
+			if m.state.Phase != PhaseConnected {
+				m.mu.Unlock()
+				continue
+			}
+			m.state.Metrics = retained
+			m.state.UpdatedAt = time.Now()
+			m.mu.Unlock()
+			m.publishMetrics(retained)
 		}
 	}
 }
 
-func trafficDialer(endpoint singbox.TrafficEndpoint) intercept.TrafficDialer {
-	if endpoint.Address == "" {
-		return nil
-	}
+func trafficDialer(endpoint singbox.TrafficEndpoint) traffic.Dialer {
 	return traffic.Dialer{Endpoint: traffic.Endpoint{
 		Address: endpoint.Address, Username: endpoint.Username, Password: endpoint.Password,
 	}}
 }
 
-func portForwardTrafficDialer(endpoint singbox.TrafficEndpoint) portfwd.TrafficDialer {
+func trackedTrafficDialer(
+	endpoint singbox.TrafficEndpoint, feature string, tracker *traffic.Tracker,
+) intercept.TrafficDialer {
 	if endpoint.Address == "" {
 		return nil
 	}
-	return traffic.Dialer{Endpoint: traffic.Endpoint{
-		Address: endpoint.Address, Username: endpoint.Username, Password: endpoint.Password,
-	}}
+	return traffic.TrackedDialer{
+		Inner:   trafficDialer(endpoint),
+		Feature: feature,
+		Tracker: tracker,
+	}
+}
+
+func trackedPortForwardDialer(
+	endpoint singbox.TrafficEndpoint, tracker *traffic.Tracker,
+) portfwd.TrafficDialer {
+	if endpoint.Address == "" {
+		return nil
+	}
+	return traffic.TrackedDialer{
+		Inner:   trafficDialer(endpoint),
+		Feature: singbox.TrafficUserPortForward,
+		Tracker: tracker,
+	}
+}
+
+// mergeTrafficTracker dyes clash traffic-in rows and injects Adapter-tracked
+// connections that clash_api missed (short-lived or no metadata.user).
+func mergeTrafficTracker(metrics singbox.Metrics, tracker *traffic.Tracker) singbox.Metrics {
+	if tracker == nil {
+		return metrics
+	}
+	live := tracker.Snapshot()
+	if len(live) == 0 && len(metrics.Connections) == 0 {
+		return metrics
+	}
+	seenPorts := make(map[string]struct{}, len(metrics.Connections))
+	for i := range metrics.Connections {
+		conn := &metrics.Connections[i]
+		if conn.Inbound != singbox.TrafficInbound {
+			continue
+		}
+		_, port, err := net.SplitHostPort(conn.Source)
+		if err != nil {
+			continue
+		}
+		seenPorts[port] = struct{}{}
+		if feature := tracker.FeatureBySourcePort(port); feature != "" {
+			conn.Feature = feature
+		}
+	}
+	for _, item := range live {
+		_, port, _ := net.SplitHostPort(item.Source)
+		if port != "" {
+			if _, ok := seenPorts[port]; ok {
+				continue
+			}
+		}
+		network := item.Network
+		if network == "tcp4" || network == "tcp6" {
+			network = "tcp"
+		}
+		if network == "udp4" || network == "udp6" {
+			network = "udp"
+		}
+		metrics.Connections = append(metrics.Connections, singbox.Connection{
+			ID:          "adapter-" + item.ID,
+			Network:     network,
+			Source:      item.Source,
+			Destination: item.Destination,
+			Process:     "KubeLoop",
+			Upload:      item.Upload,
+			Download:    item.Download,
+			StartedAt:   item.StartedAt.Format(time.RFC3339Nano),
+			Inbound:     singbox.TrafficInbound,
+			Feature:     item.Feature,
+			Outbound:    trafficOutboundForFeature(item.Feature),
+		})
+	}
+	metrics.ActiveConnections = len(metrics.Connections)
+	return metrics
+}
+
+func trafficOutboundForFeature(feature string) string {
+	switch feature {
+	case singbox.TrafficUserPortForward, singbox.TrafficUserMirrorPrimary:
+		return singbox.KubernetesOutbound
+	case singbox.TrafficUserExchange, singbox.TrafficUserPreview, singbox.TrafficUserMirrorShadow:
+		return singbox.LocalOutbound
+	default:
+		return singbox.DirectOutbound
+	}
 }
 
 func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
@@ -1107,11 +1216,28 @@ func (m *Manager) publish(state State) {
 	if state.Events == nil {
 		state.Events = m.state.Events
 	}
+	// Keep the latest high-frequency metrics when a slower state publish
+	// (inventory, phase change) does not carry a fresher snapshot.
+	if state.Metrics == nil && m.state.Metrics != nil && state.Phase == PhaseConnected {
+		state.Metrics = m.state.Metrics
+	}
 	m.state = state
 	listeners := append([]func(State){}, m.listeners...)
 	m.mu.Unlock()
 	for _, listener := range listeners {
 		listener(state)
+	}
+}
+
+func (m *Manager) publishMetrics(metrics *singbox.Metrics) {
+	if metrics == nil {
+		return
+	}
+	m.mu.RLock()
+	listeners := append([]func(*singbox.Metrics){}, m.metricsListeners...)
+	m.mu.RUnlock()
+	for _, listener := range listeners {
+		listener(metrics)
 	}
 }
 

@@ -158,7 +158,7 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 		}
 		if cluster.Connected && contextName == snap.UI.LastContext {
 			// Restore these after the Session core is ready so they use the
-			// sing-box portfwd-in path instead of the legacy API forwarder.
+			// sing-box traffic-in (auth_user=port-forward) path instead of the legacy API forwarder.
 			continue
 		}
 		for _, item := range cluster.PortForwards {
