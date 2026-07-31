@@ -498,11 +498,48 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			}
 			return
 		case <-controlLost:
-			m.clearRecentConnections()
-			if ctx.Err() == nil {
-				m.fail(ctx, state, "Gateway control channel closed; reconnect required", errors.New("gateway control channel closed"))
+			if ctx.Err() != nil {
+				m.clearRecentConnections()
+				return
 			}
-			return
+			m.AppendLog("WARN", "gateway control channel closed; reconnecting")
+			var lastErr error
+			recovered := false
+			for attempt := 0; attempt < 5; attempt++ {
+				if attempt > 0 {
+					delay := 500 * time.Millisecond
+					switch {
+					case attempt >= 3:
+						delay = 2 * time.Second
+					case attempt >= 1:
+						delay = time.Second
+					}
+					select {
+					case <-ctx.Done():
+						m.clearRecentConnections()
+						return
+					case <-time.After(delay):
+					}
+				}
+				lastErr = m.intercept.RecoverControl(ctx)
+				if lastErr == nil {
+					recovered = true
+					break
+				}
+				m.AppendLog("WARN", fmt.Sprintf(
+					"gateway control reconnect attempt %d/5 failed: %v", attempt+1, lastErr,
+				))
+			}
+			if !recovered {
+				m.clearRecentConnections()
+				if lastErr == nil {
+					lastErr = errors.New("gateway control channel closed")
+				}
+				m.fail(ctx, state, "Gateway control channel closed; reconnect required", lastErr)
+				return
+			}
+			m.AppendLog("INFO", "gateway control channel restored")
+			controlLost = m.intercept.ControlLost()
 		case <-ticker.C:
 			metrics, err := core.Snapshot(ctx)
 			if err != nil {

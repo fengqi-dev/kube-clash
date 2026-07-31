@@ -74,6 +74,8 @@ type Manager struct {
 
 	mu             sync.Mutex
 	active         bool
+	stopping       bool
+	recovering     bool
 	ctx            context.Context
 	contextName    string
 	gatewayIP      string
@@ -85,6 +87,12 @@ type Manager struct {
 	byKey          map[string]string // namespace/service -> id
 	hostRoutes     map[hostRouteKey]*hostRoute
 	traffic        TrafficDialers
+}
+
+type controlRegistration struct {
+	id         string
+	network    byte
+	listenPort uint16
 }
 
 // SetTrafficDialers installs the fixed sing-box feature inbounds. It is
@@ -142,28 +150,133 @@ func (m *Manager) Start(
 		return err
 	}
 	lost := make(chan struct{})
-	control.onReady = m.handleReady
-	control.onClose = sync.OnceFunc(func() { close(lost) })
+	m.attachControlLocked(control, lost)
 	m.active = true
+	m.stopping = false
+	m.recovering = false
 	m.ctx = ctx
 	m.contextName = contextName
 	m.gatewayIP = gatewayIP
 	m.gatewayAddress = gatewayAddress
-	m.control = control
-	m.controlLost = lost
 	return nil
 }
 
 // ControlLost is closed when the Gateway control channel drops unexpectedly
-// or after StopAll closes it. Session uses this to leave the connected state.
+// or after StopAll closes it. Session uses this to leave the connected state
+// (or to attempt RecoverControl first).
 func (m *Manager) ControlLost() <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.controlLost
 }
 
+// RecoverControl redials the Gateway control channel on the existing
+// port-forward address and re-registers active Exchange/Mirror/Preview ports.
+func (m *Manager) RecoverControl(ctx context.Context) error {
+	m.mu.Lock()
+	if !m.active || m.stopping {
+		m.mu.Unlock()
+		return fmt.Errorf("session is not connected")
+	}
+	if m.recovering {
+		m.mu.Unlock()
+		return fmt.Errorf("control recovery already in progress")
+	}
+	if m.gatewayAddress == "" {
+		m.mu.Unlock()
+		return fmt.Errorf("gateway address is unavailable")
+	}
+	m.recovering = true
+	address := m.gatewayAddress
+	regs := m.controlRegistrationsLocked()
+	old := m.control
+	m.control = nil
+	m.mu.Unlock()
+
+	if old != nil {
+		_ = old.close()
+	}
+
+	control, err := dialControl(ctx, address)
+	if err != nil {
+		m.mu.Lock()
+		m.recovering = false
+		m.mu.Unlock()
+		return err
+	}
+	for _, reg := range regs {
+		if err := control.register(reg.id, reg.network, reg.listenPort); err != nil {
+			_ = control.close()
+			m.mu.Lock()
+			m.recovering = false
+			m.mu.Unlock()
+			return fmt.Errorf("re-register %s: %w", reg.id, err)
+		}
+	}
+
+	lost := make(chan struct{})
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.recovering = false
+	if !m.active || m.stopping {
+		_ = control.close()
+		return fmt.Errorf("session is not connected")
+	}
+	m.attachControlLocked(control, lost)
+	return nil
+}
+
+func (m *Manager) attachControlLocked(control *controlClient, lost chan struct{}) {
+	control.onReady = m.handleReady
+	control.onClose = sync.OnceFunc(func() { close(lost) })
+	m.control = control
+	m.controlLost = lost
+}
+
+func (m *Manager) controlRegistrationsLocked() []controlRegistration {
+	regs := make([]controlRegistration, 0)
+	for _, runtime := range m.byID {
+		for subID := range runtime.portKeys {
+			network, listenPort, ok := registrationFromRuntime(runtime, subID)
+			if !ok {
+				continue
+			}
+			regs = append(regs, controlRegistration{
+				id: subID, network: network, listenPort: listenPort,
+			})
+		}
+	}
+	return regs
+}
+
+func registrationFromRuntime(runtime *runtimeIntercept, subID string) (byte, uint16, bool) {
+	ports := runtime.info.Ports
+	if len(ports) == 0 && runtime.preview != nil {
+		ports = runtime.preview.Ports
+	}
+	if len(ports) == 0 {
+		ports = runtime.snapshot.Ports
+	}
+	for _, port := range ports {
+		network := tunnel.NetworkTCP
+		if port.Protocol == corev1.ProtocolUDP {
+			network = tunnel.NetworkUDP
+		}
+		want := fmt.Sprintf("%s:%s:%d", runtime.info.ID, networkName(network), port.ServicePort)
+		if want != subID {
+			continue
+		}
+		if port.ListenPort <= 0 || port.ListenPort > 65535 {
+			return 0, 0, false
+		}
+		return network, uint16(port.ListenPort), true
+	}
+	return 0, 0, false
+}
+
 func (m *Manager) StopAll(ctx context.Context) error {
 	m.mu.Lock()
+	m.stopping = true
 	ids := make([]string, 0, len(m.byID))
 	for id := range m.byID {
 		ids = append(ids, id)
@@ -171,6 +284,7 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	control := m.control
 	m.control = nil
 	m.active = false
+	m.recovering = false
 	m.mu.Unlock()
 
 	var firstErr error
@@ -251,7 +365,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 
 	m.mu.Lock()
-	if !m.active || m.control == nil {
+	if !m.active || m.control == nil || m.recovering {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("session is not connected")
 	}
@@ -353,7 +467,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 
 	m.mu.Lock()
-	if !m.active || m.control == nil {
+	if !m.active || m.control == nil || m.recovering {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("session is not connected")
 	}

@@ -602,6 +602,104 @@ func TestHostTCPServesExchangeWithoutGatewayHairpin(t *testing.T) {
 	}
 }
 
+func TestRecoverControlRedialsAndReregisters(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = server.Serve(listener) }()
+
+	local, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer local.Close()
+	go func() {
+		for {
+			conn, err := local.Accept()
+			if err != nil {
+				return
+			}
+			go func(c net.Conn) {
+				defer c.Close()
+				buf := make([]byte, 32)
+				n, _ := c.Read(buf)
+				_, _ = fmt.Fprintf(c, "local:%s", buf[:n])
+			}(conn)
+		}
+	}()
+
+	api := &fakeCluster{
+		service: &corev1.Service{
+			ObjectMeta: metav1.ObjectMeta{Name: "api", Namespace: "default"},
+			Spec: corev1.ServiceSpec{
+				ClusterIP: "10.96.1.10",
+				Selector:  map[string]string{"app": "api"},
+				Ports: []corev1.ServicePort{{
+					Name: "http", Port: 80, Protocol: corev1.ProtocolTCP,
+				}},
+			},
+		},
+	}
+	manager := NewManager(api)
+	ctx := context.Background()
+	if err := manager.Start(ctx, "minikube", "10.244.0.8", listener.Addr().String()); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	info, err := manager.StartIntercept(ctx, Mapping{
+		Namespace: "default",
+		Service:   "api",
+		Ports: []PortMapping{{
+			ServicePort: 80, Protocol: "TCP",
+			LocalHost: "127.0.0.1", LocalPort: local.Addr().(*net.TCPAddr).Port,
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	_ = manager.control.close()
+	select {
+	case <-manager.ControlLost():
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for control lost")
+	}
+
+	if err := manager.RecoverControl(ctx); err != nil {
+		t.Fatalf("RecoverControl: %v", err)
+	}
+	select {
+	case <-manager.ControlLost():
+		t.Fatal("new control channel should not be closed")
+	default:
+	}
+
+	client, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", info.Ports[0].ListenPort))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	if _, err := client.Write([]byte("ping")); err != nil {
+		t.Fatal(err)
+	}
+	_ = client.SetReadDeadline(time.Now().Add(3 * time.Second))
+	buf := make([]byte, 64)
+	n, err := client.Read(buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(buf[:n]); got != "local:ping" {
+		t.Fatalf("got %q", got)
+	}
+	if len(manager.List()) != 1 {
+		t.Fatalf("list=%d after recover", len(manager.List()))
+	}
+}
+
 func TestStartMirrorFailsWhenControlChannelDrops(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
