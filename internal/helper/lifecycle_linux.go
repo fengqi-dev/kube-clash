@@ -81,13 +81,11 @@ func restorePlatformDNS(_ string, _ singbox.DNSMeta) error {
 func reloadResolved() {
 	// Drop-in changes require a reload; flush-caches alone does not re-read conf.d.
 	// Bound the wait so a stuck systemctl cannot wedge the helper unix RPC.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	// Do not restart: restart races the next TUN/auto_redirect bring-up on CI and
+	// has caused "timed out waiting for sing-box controller" flakes.
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
 	defer cancel()
-	if err := exec.CommandContext(ctx, "systemctl", "reload", "systemd-resolved").Run(); err != nil {
-		restartCtx, restartCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		_ = exec.CommandContext(restartCtx, "systemctl", "restart", "systemd-resolved").Run()
-		restartCancel()
-	}
+	_ = exec.CommandContext(ctx, "systemctl", "reload", "systemd-resolved").Run()
 	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer flushCancel()
 	_ = exec.CommandContext(flushCtx, "resolvectl", "flush-caches").Run()
