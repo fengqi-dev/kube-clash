@@ -13,6 +13,7 @@ const headerKeys: Record<AppView, TranslationKey> = {
   network: "header.network",
   "host-aliases": "header.hostAliases",
   logs: "header.logs",
+  mcp: "header.mcp",
   settings: "header.settings",
 };
 

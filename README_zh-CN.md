@@ -98,6 +98,18 @@ irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.
 - 特权 Helper 只接受带认证的本机 IPC 和字段受限的 Session 描述，不接受调用方传入的
   命令、可执行文件路径或配置路径。它在系统保护目录内重新生成配置并管理校验后的内核，
   且不访问 Kubernetes API。
+- 可选 MCP 服务仅监听 `127.0.0.1`；Bearer Token 认证可选，默认关闭。
+
+## MCP（Cursor / AI Agent）
+
+KubeLoop 可将桌面控制面以本机 [MCP](https://modelcontextprotocol.io) 服务暴露（`127.0.0.1` 上的 Streamable HTTP）。工具覆盖连接/断开、发现、Port Forward、Exchange、Mirror、Preview 与 Helper 安装。
+
+1. 启动 KubeLoop，打开 **MCP** 页。
+2. 选择客户端（Claude Code / Codex / Cursor / VS Code），点击 **安装 MCP Server**
+   （写入对应用户级配置；如未启用会自动启用本机端点）。
+3. 在对应客户端中重启或刷新 MCP。
+
+也可对所选客户端使用 **复制配置**。MCP **默认关闭**（安装或手动启用后开启），仅监听本机；Bearer Token 认证可选且默认关闭。
 
 ## 平台说明
 

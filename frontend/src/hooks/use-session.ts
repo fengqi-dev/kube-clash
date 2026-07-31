@@ -18,6 +18,7 @@ export type AppView =
   | "network"
   | "host-aliases"
   | "logs"
+  | "mcp"
   | "settings";
 
 const emptySession: SessionState = {

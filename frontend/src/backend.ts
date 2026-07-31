@@ -6,6 +6,8 @@ import type {
   InterceptInfo,
   InterceptMapping,
   ManualNetwork,
+  MCPInstallResult,
+  MCPStatus,
   PodInfo,
   PortForwardInfo,
   PortForwardRequest,
@@ -54,9 +56,16 @@ declare global {
           SessionIntentCounts(): Promise<SessionIntentCounts>;
           CheckForUpdates(): Promise<UpdateInfo>;
           OpenUpdatePage(): Promise<void>;
+          GetSingBoxConfig(): Promise<string>;
           HelperStatus(): Promise<HelperStatus>;
           InstallHelper(): Promise<void>;
           UninstallHelper(): Promise<void>;
+          GetMCPStatus(): Promise<MCPStatus>;
+          SetMCPEnabled(enabled: boolean): Promise<void>;
+          SetMCPPort(port: number): Promise<void>;
+          SetMCPTokenEnabled(enabled: boolean): Promise<void>;
+          RegenerateMCPToken(): Promise<string>;
+          InstallMCPClient(client: string): Promise<MCPInstallResult>;
         };
       };
     };
@@ -123,9 +132,19 @@ export const backend = {
     Promise.resolve().then(() => api().SessionIntentCounts()),
   checkForUpdates: () => Promise.resolve().then(() => api().CheckForUpdates()),
   openUpdatePage: () => Promise.resolve().then(() => api().OpenUpdatePage()),
+  getSingBoxConfig: () => Promise.resolve().then(() => api().GetSingBoxConfig()),
   helperStatus: () => Promise.resolve().then(() => api().HelperStatus()),
   installHelper: () => Promise.resolve().then(() => api().InstallHelper()),
   uninstallHelper: () => Promise.resolve().then(() => api().UninstallHelper()),
+  getMCPStatus: () => Promise.resolve().then(() => api().GetMCPStatus()),
+  setMCPEnabled: (enabled: boolean) =>
+    Promise.resolve().then(() => api().SetMCPEnabled(enabled)),
+  setMCPPort: (port: number) => Promise.resolve().then(() => api().SetMCPPort(port)),
+  setMCPTokenEnabled: (enabled: boolean) =>
+    Promise.resolve().then(() => api().SetMCPTokenEnabled(enabled)),
+  regenerateMCPToken: () => Promise.resolve().then(() => api().RegenerateMCPToken()),
+  installMCPClient: (client: string) =>
+    Promise.resolve().then(() => api().InstallMCPClient(client)),
   onSession: (callback: (state: SessionState) => void) => {
     if (!window.runtime) return () => undefined;
     return window.runtime.EventsOn("session:state", callback as (state: never) => void);

@@ -4,11 +4,14 @@ import {cluster} from '../models';
 import {main} from '../models';
 import {update} from '../models';
 import {store} from '../models';
+import {mcp} from '../models';
 import {helper} from '../models';
 import {intercept} from '../models';
 import {portfwd} from '../models';
 
 export function AddKubeconfig():Promise<cluster.ClusterInventory>;
+
+export function AddKubeconfigPath(arg1:string):Promise<cluster.ClusterInventory>;
 
 export function Bootstrap():Promise<main.BootstrapData>;
 
@@ -22,11 +25,17 @@ export function GatewayInstallManifest():Promise<string>;
 
 export function GetHostAliases(arg1:string):Promise<Array<store.HostAliasSpec>>;
 
+export function GetMCPStatus():Promise<mcp.Status>;
+
 export function GetManualNetwork(arg1:string):Promise<cluster.ManualNetwork>;
+
+export function GetSingBoxConfig():Promise<string>;
 
 export function HelperStatus():Promise<helper.Status>;
 
 export function InstallHelper():Promise<void>;
+
+export function InstallMCPClient(arg1:string):Promise<mcp.InstallResult>;
 
 export function ListIntercepts():Promise<Array<intercept.Info>>;
 
@@ -46,6 +55,8 @@ export function OpenUpdatePage():Promise<void>;
 
 export function ProbeContext(arg1:string):Promise<cluster.ProbeResult>;
 
+export function RegenerateMCPToken():Promise<string>;
+
 export function ReloadContexts():Promise<cluster.ClusterInventory>;
 
 export function RememberSelection(arg1:string,arg2:string):Promise<void>;
@@ -57,6 +68,12 @@ export function ResetSessions():Promise<void>;
 export function SessionIntentCounts():Promise<store.SessionIntentCounts>;
 
 export function SetHostAliases(arg1:string,arg2:Array<store.HostAliasSpec>):Promise<void>;
+
+export function SetMCPEnabled(arg1:boolean):Promise<void>;
+
+export function SetMCPPort(arg1:number):Promise<void>;
+
+export function SetMCPTokenEnabled(arg1:boolean):Promise<void>;
 
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
 

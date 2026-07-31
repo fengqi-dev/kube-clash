@@ -251,3 +251,20 @@ export interface SessionIntentCounts {
   exchanges: number;
   mirrors: number;
 }
+
+export interface MCPStatus {
+  enabled: boolean;
+  listening: boolean;
+  url?: string;
+  port: number;
+  tokenEnabled: boolean;
+  token?: string;
+  error?: string;
+}
+
+export type MCPClient = "claude" | "codex" | "cursor" | "vscode";
+
+export interface MCPInstallResult {
+  client: string;
+  path: string;
+}

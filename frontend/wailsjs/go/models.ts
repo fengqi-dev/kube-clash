@@ -506,6 +506,49 @@ export namespace main {
 
 }
 
+export namespace mcp {
+	
+	export class InstallResult {
+	    client: string;
+	    path: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new InstallResult(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.client = source["client"];
+	        this.path = source["path"];
+	    }
+	}
+	export class Status {
+	    enabled: boolean;
+	    listening: boolean;
+	    url?: string;
+	    port: number;
+	    tokenEnabled: boolean;
+	    token?: string;
+	    error?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new Status(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.enabled = source["enabled"];
+	        this.listening = source["listening"];
+	        this.url = source["url"];
+	        this.port = source["port"];
+	        this.tokenEnabled = source["tokenEnabled"];
+	        this.token = source["token"];
+	        this.error = source["error"];
+	    }
+	}
+
+}
+
 export namespace portfwd {
 	
 	export class Info {

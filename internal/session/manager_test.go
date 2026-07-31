@@ -203,6 +203,9 @@ func (f *fakeProcess) TrafficEndpoints() singbox.TrafficEndpoints {
 		MirrorPrimary: endpoint, MirrorShadow: endpoint,
 	}
 }
+func (f *fakeProcess) Config() []byte {
+	return []byte(`{"log":{"level":"info"}}`)
+}
 func (f *fakeProcess) Close() error {
 	f.once.Do(func() { close(f.done) })
 	return nil
