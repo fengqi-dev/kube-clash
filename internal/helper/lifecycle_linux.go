@@ -38,8 +38,12 @@ func applyPlatformDNS(_ string, dns singbox.DNSMeta) error {
 			domains = append(domains, routeOnly)
 		}
 	}
+	// ResolveUnicastSingleLabel forwards bare names (e.g. "echo") to DNS= so the
+	// local dnsSearchProxy can apply Kubernetes search suffixes. Without it,
+	// some runners return SERVFAIL/"server misbehaving" for single-label lookups
+	// even when FQDN split-DNS works.
 	content := fmt.Sprintf(
-		"%s\n[Resolve]\nDNS=%s:%d\nDomains=%s\nDNSSEC=no\nDNSOverTLS=no\n",
+		"%s\n[Resolve]\nDNS=%s:%d\nDomains=%s\nDNSSEC=no\nDNSOverTLS=no\nResolveUnicastSingleLabel=yes\n",
 		linuxDNSMarker, dns.Listen, dns.Port, strings.Join(domains, " "),
 	)
 	if err := os.MkdirAll(filepath.Dir(resolvedDropIn), 0o755); err != nil {
@@ -76,12 +80,15 @@ func restorePlatformDNS(_ string, _ singbox.DNSMeta) error {
 
 func reloadResolved() {
 	// Drop-in changes require a reload; flush-caches alone does not re-read conf.d.
-	// Bound the wait: reload-or-restart can hang on busy CI runners and block the
-	// helper unix RPC (SetDNSNamespace uses a short client deadline).
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	// Bound the wait so a stuck systemctl cannot wedge the helper unix RPC.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_ = exec.CommandContext(ctx, "systemctl", "reload", "systemd-resolved").Run()
-	flushCtx, flushCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	if err := exec.CommandContext(ctx, "systemctl", "reload", "systemd-resolved").Run(); err != nil {
+		restartCtx, restartCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		_ = exec.CommandContext(restartCtx, "systemctl", "restart", "systemd-resolved").Run()
+		restartCancel()
+	}
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer flushCancel()
 	_ = exec.CommandContext(flushCtx, "resolvectl", "flush-caches").Run()
 }
