@@ -239,7 +239,9 @@ func (r *Runtime) Start(
 }
 
 func (r *Runtime) waitReady(ctx context.Context, process *Process) error {
-	deadline := time.NewTimer(15 * time.Second)
+	// Linux auto_redirect/nftables cleanup after a previous session can delay
+	// clash API readiness beyond a tight 15s budget on busy CI runners.
+	deadline := time.NewTimer(30 * time.Second)
 	defer deadline.Stop()
 	ticker := time.NewTicker(200 * time.Millisecond)
 	defer ticker.Stop()

@@ -54,6 +54,10 @@ func ConnectSession(
 
 	// Clear any leftover privileged session before Connect.
 	StopAllHelperSessions()
+	// Give Linux nftables/auto_redirect a moment to drop the previous TUN path.
+	if runtime.GOOS == "linux" {
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	provider := NewProvider(t)
 	stateStore, err := store.Open(filepath.Join(t.TempDir(), "state.json"))
