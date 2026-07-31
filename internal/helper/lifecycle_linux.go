@@ -3,11 +3,13 @@
 package helper
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
@@ -74,8 +76,14 @@ func restorePlatformDNS(_ string, _ singbox.DNSMeta) error {
 
 func reloadResolved() {
 	// Drop-in changes require a reload; flush-caches alone does not re-read conf.d.
-	_ = exec.Command("systemctl", "reload-or-restart", "systemd-resolved").Run()
-	_ = exec.Command("resolvectl", "flush-caches").Run()
+	// Bound the wait: reload-or-restart can hang on busy CI runners and block the
+	// helper unix RPC (SetDNSNamespace uses a short client deadline).
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "systemctl", "reload", "systemd-resolved").Run()
+	flushCtx, flushCancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer flushCancel()
+	_ = exec.CommandContext(flushCtx, "resolvectl", "flush-caches").Run()
 }
 
 func cleanupPlatformRoutes(routes []string) {

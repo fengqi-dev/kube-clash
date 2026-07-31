@@ -655,11 +655,11 @@ func (m *Manager) dialHostUDP(
 		)
 	}
 
-	localDialer := dialers.Exchange
-	if route.preview {
-		localDialer = dialers.Preview
-	}
-	return dialTraffic(ctx, localDialer, "udp", localTarget)
+	// Dial the local process directly. Re-entering sing-box via exchange/preview
+	// SOCKS UDP ASSOCIATE from the kubernetes outbound path times out on Linux with
+	// auto_redirect, while the same HostTCP CONNECT re-entry works.
+	var dialer net.Dialer
+	return dialer.DialContext(ctx, "udp", localTarget)
 }
 
 func (m *Manager) dialHostMirrorUDP(
@@ -678,7 +678,8 @@ func (m *Manager) dialHostMirrorUDP(
 		return nil, err
 	}
 	localAddr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
-	localConn, err := dialTraffic(ctx, dialers.MirrorShadow, "udp", localAddr)
+	var dialer net.Dialer
+	localConn, err := dialer.DialContext(ctx, "udp", localAddr)
 	if err != nil {
 		localConn = nil
 	}

@@ -1005,7 +1005,7 @@ func (m *Manager) SetDNSNamespace(contextName, namespace string) error {
 	if core == nil || state.Phase != PhaseConnected || state.Context != contextName {
 		return nil
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := core.UpdateDNSNamespace(ctx, namespace); err != nil {
 		return err
