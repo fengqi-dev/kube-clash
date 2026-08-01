@@ -16,7 +16,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 	"github.com/miekg/dns"
 )
 
@@ -116,7 +116,7 @@ type Runtime struct {
 
 func (r *Runtime) Start(
 	ctx context.Context,
-	discovery cluster.Discovery,
+	network NetworkSpec,
 	bridgeAddress string,
 	namespace string,
 	hosts []HostAlias,
@@ -165,17 +165,17 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
-	clusterDomains, _ := cluster.NormalizeClusterDomains(discovery.ClusterDomains)
+	clusterDomains, _ := dnsname.NormalizeClusterDomains(network.ClusterDomains)
 	dnsNamespace := namespace
 	if dnsNamespace == "" {
 		dnsNamespace = "default"
 	}
 	spec := SessionSpec{
 		ID:               "session-" + secret[:16],
-		PodCIDRs:         discovery.PodCIDRs,
-		ServiceCIDRs:     discovery.ServiceCIDRs,
-		ServiceIPs:       discovery.ServiceIPs,
-		ClusterDNSServer: discovery.DNSServer,
+		PodCIDRs:         network.PodCIDRs,
+		ServiceCIDRs:     network.ServiceCIDRs,
+		ServiceIPs:       network.ServiceIPs,
+		ClusterDNSServer: network.DNSServer,
 		ClusterDomains:   clusterDomains,
 		BridgeHost:       host,
 		BridgePort:       bridgePort,
@@ -362,7 +362,7 @@ func (p *Process) ProbeClusterDNS(ctx context.Context) error {
 	port := p.dnsPort
 	p.specMu.Unlock()
 	if len(domains) == 0 {
-		domains = []string{cluster.DefaultClusterDomain}
+		domains = []string{dnsname.DefaultClusterDomain}
 	}
 	name := "kubernetes.default.svc." + domains[0] + "."
 	return probeLocalDNS(ctx, DefaultDNSListen, port, name)

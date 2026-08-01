@@ -13,11 +13,46 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
-// managerBackend implements Backend against session.Manager + cluster.Provider.
-type managerBackend struct {
-	provider *cluster.Provider
-	manager  *session.Manager
+type clusterControl interface {
+	Inventory() (cluster.ClusterInventory, error)
+	Probe(context.Context, string) cluster.ProbeResult
 }
+
+type sessionControl interface {
+	State() session.State
+	SetKubernetesVersion(string)
+	Namespaces(context.Context, string) ([]string, error)
+	ListServices(context.Context, string, string) ([]cluster.ServiceInfo, error)
+	ListPods(context.Context, string, string) ([]cluster.PodInfo, error)
+	RememberSelection(string, string) error
+	Connect(context.Context, session.Request) error
+	Disconnect() error
+	ManualNetwork(string) cluster.ManualNetwork
+	SetManualNetwork(string, cluster.ManualNetwork) error
+	HostAliases(string) []store.HostAliasSpec
+	SetHostAliases(string, []store.HostAliasSpec) error
+	StartIntercept(context.Context, intercept.Mapping) (intercept.Info, error)
+	StartMirror(context.Context, intercept.Mapping) (intercept.Info, error)
+	StopIntercept(context.Context, string) error
+	ListIntercepts() []intercept.Info
+	ListMirrors() []intercept.Info
+	StartPreview(context.Context, intercept.PreviewRequest) (intercept.Info, error)
+	StopPreview(context.Context, string) error
+	ListPreviews() []intercept.Info
+	StartPortForwardSession(context.Context, portfwd.Request) (portfwd.Info, error)
+	StopPortForward(string) error
+	ListPortForwards() []portfwd.Info
+	SingBoxConfig() ([]byte, error)
+}
+
+// managerBackend implements Backend against narrow application and cluster
+// contracts. The MCP transport itself only depends on Backend.
+type managerBackend struct {
+	provider clusterControl
+	manager  sessionControl
+}
+
+var _ Backend = managerBackend{}
 
 func (b managerBackend) SessionState() session.State { return b.manager.State() }
 

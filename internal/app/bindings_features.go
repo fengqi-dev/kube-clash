@@ -1,0 +1,68 @@
+package app
+
+import (
+	"context"
+
+	"github.com/fengqi-dev/kube-loop/internal/intercept"
+	"github.com/fengqi-dev/kube-loop/internal/portfwd"
+	"github.com/fengqi-dev/kube-loop/internal/store"
+)
+
+func (a *App) StartIntercept(mapping intercept.Mapping) (intercept.Info, error) {
+	return a.manager.StartIntercept(a.context(), mapping)
+}
+
+func (a *App) StartMirror(mapping intercept.Mapping) (intercept.Info, error) {
+	return a.manager.StartMirror(a.context(), mapping)
+}
+
+func (a *App) StopIntercept(id string) error {
+	return a.manager.StopIntercept(a.context(), id)
+}
+
+func (a *App) ListIntercepts() []intercept.Info {
+	return a.manager.ListIntercepts()
+}
+
+func (a *App) ListMirrors() []intercept.Info {
+	return a.manager.ListMirrors()
+}
+
+func (a *App) StartPreview(request intercept.PreviewRequest) (intercept.Info, error) {
+	return a.manager.StartPreview(a.context(), request)
+}
+
+func (a *App) StopPreview(id string) error {
+	return a.manager.StopPreview(a.context(), id)
+}
+
+func (a *App) ListPreviews() []intercept.Info {
+	return a.manager.ListPreviews()
+}
+
+func (a *App) StartPortForward(request portfwd.Request) (portfwd.Info, error) {
+	return a.manager.StartPortForwardSession(a.context(), request)
+}
+
+func (a *App) StopPortForward(id string) error {
+	return a.manager.StopPortForward(id)
+}
+
+func (a *App) ListPortForwards() []portfwd.Info {
+	return a.manager.ListPortForwards()
+}
+
+func (a *App) ResetSessions() error {
+	return a.manager.ResetSessions(a.context())
+}
+
+func (a *App) SessionIntentCounts() store.SessionIntentCounts {
+	return a.manager.SessionIntentCounts()
+}
+
+func (a *App) context() context.Context {
+	if a.ctx != nil {
+		return a.ctx
+	}
+	return context.Background()
+}

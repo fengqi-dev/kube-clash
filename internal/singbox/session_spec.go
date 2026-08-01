@@ -8,7 +8,7 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 )
 
 const maxSessionItems = 4096
@@ -105,7 +105,7 @@ func (s SessionSpec) Validate() error {
 			return fmt.Errorf("invalid cluster DNS address: %w", err)
 		}
 	}
-	if _, err := cluster.NormalizeClusterDomains(s.ClusterDomains); err != nil {
+	if _, err := dnsname.NormalizeClusterDomains(s.ClusterDomains); err != nil {
 		return err
 	}
 	if _, err := NormalizeHostAliases(s.Hosts); err != nil {
@@ -127,7 +127,7 @@ func (s SessionSpec) GenerateConfig() ([]byte, error) {
 		return nil, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
-	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
+	domains, _ := dnsname.NormalizeClusterDomains(s.ClusterDomains)
 	return Generate(s.discovery(), Options{
 		BridgeHost:       s.BridgeHost,
 		BridgePort:       s.BridgePort,
@@ -156,7 +156,7 @@ func (s SessionSpec) DNS() (DNSMeta, error) {
 		return DNSMeta{}, err
 	}
 	hosts, _ := NormalizeHostAliases(s.Hosts)
-	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
+	domains, _ := dnsname.NormalizeClusterDomains(s.ClusterDomains)
 	ns := s.dnsNamespace()
 	return DNSMeta{
 		Listen:  s.DNSHost,
@@ -177,9 +177,9 @@ func (s SessionSpec) dnsNamespace() string {
 	return "default"
 }
 
-func (s SessionSpec) discovery() cluster.Discovery {
-	domains, _ := cluster.NormalizeClusterDomains(s.ClusterDomains)
-	return cluster.Discovery{
+func (s SessionSpec) discovery() NetworkSpec {
+	domains, _ := dnsname.NormalizeClusterDomains(s.ClusterDomains)
+	return NetworkSpec{
 		PodCIDRs:       s.PodCIDRs,
 		ServiceCIDRs:   s.ServiceCIDRs,
 		ServiceIPs:     s.ServiceIPs,

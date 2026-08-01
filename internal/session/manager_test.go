@@ -182,7 +182,7 @@ func newFakeCore() *fakeCore {
 }
 
 func (f *fakeCore) Start(
-	context.Context, cluster.Discovery, string, string, []singbox.HostAlias,
+	context.Context, singbox.NetworkSpec, string, string, []singbox.HostAlias,
 ) (singbox.RunningCore, error) {
 	close(f.started)
 	return f.process, nil
@@ -264,7 +264,7 @@ type failingCore struct {
 }
 
 func (f failingCore) Start(
-	context.Context, cluster.Discovery, string, string, []singbox.HostAlias,
+	context.Context, singbox.NetworkSpec, string, string, []singbox.HostAlias,
 ) (singbox.RunningCore, error) {
 	return nil, f.err
 }

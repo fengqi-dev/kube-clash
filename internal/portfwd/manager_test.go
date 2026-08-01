@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"strconv"
 	"testing"
 	"time"
 
@@ -36,9 +37,24 @@ func (f *fakeCluster) ResolveServiceBackend(
 	return f.podName, f.targetPort, nil
 }
 
+func (f *fakeCluster) ResolveRoutedTarget(_ context.Context, request Request) (string, error) {
+	switch request.Kind {
+	case KindPod:
+		return net.JoinHostPort(
+			f.pods[0].IP, strconv.Itoa(int(request.RemotePort)),
+		), nil
+	case KindService:
+		return net.JoinHostPort(
+			f.services[0].ClusterIP, strconv.Itoa(int(request.RemotePort)),
+		), nil
+	default:
+		return "", nil
+	}
+}
+
 func (f *fakeCluster) StartPodPortForward(
 	context.Context, string, string, string, uint16, uint16,
-) (cluster.PortForward, error) {
+) (Forwarder, error) {
 	if f.forwarder == nil {
 		f.forwarder = &fakeForwarder{address: "127.0.0.1:18080"}
 	}
