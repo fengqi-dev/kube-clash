@@ -340,8 +340,28 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		if err := runtime.Close(); err != nil {
 			log.Printf("close session runtime: %v", err)
 		}
+		m.mu.RLock()
+		currentRun := m.done == done
+		m.mu.RUnlock()
+		if currentRun && ctx.Err() != nil {
+			current := m.State()
+			if current.Phase != PhaseIdle {
+				m.clearRecentConnections()
+				m.stateHub.mu.Lock()
+				m.appendLogLocked("INFO", "disconnected")
+				m.stateHub.mu.Unlock()
+				m.publish(State{
+					Phase:             PhaseIdle,
+					Message:           "Disconnected",
+					CoreVersion:       singbox.Version,
+					KubernetesVersion: current.KubernetesVersion,
+					Context:           current.Context,
+					Namespace:         current.Namespace,
+				})
+			}
+		}
 		m.mu.Lock()
-		if m.done == done {
+		if currentRun {
 			m.cancel = nil
 			m.done = nil
 			m.runningCore = nil
@@ -350,6 +370,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		close(done)
 	}()
 
+	if ctx.Err() != nil {
+		return
+	}
 	prev := m.State()
 	state := State{
 		Phase: PhaseChecking, Context: request.Context, Namespace: request.Namespace,
@@ -364,6 +387,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	caps, err := m.connection.ProbeCapabilities(ctx, request.Context)
 	if err != nil {
 		m.fail(ctx, state, "Could not check cluster permissions", err)
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	state.Capabilities = &caps
@@ -404,6 +430,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			return
 		}
 	}
+	if ctx.Err() != nil {
+		return
+	}
 
 	state.Phase = PhaseDiscovering
 	state.Message = "Discovering Pods, Services, and cluster DNS"
@@ -415,6 +444,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	discovery, err := m.connection.Discover(ctx, request.Context, scopeNS)
 	if err != nil {
 		m.fail(ctx, state, "Could not read cluster network information", err)
+		return
+	}
+	if ctx.Err() != nil {
 		return
 	}
 	dnsNamespace := request.Namespace
@@ -446,6 +478,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("Gateway port-forward", forwarder)
+	if ctx.Err() != nil {
+		return
+	}
 
 	if err := m.intercept.Start(ctx, request.Context, gateway.IP, forwarder.Address()); err != nil {
 		m.fail(ctx, state, "Could not start the Service Intercept control channel", err)
@@ -461,6 +496,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	// idempotent closer is appended again after the core so normal teardown
 	// restores Kubernetes resources before closing the data plane.
 	runtime.Add("early Intercept guard", closeIntercept)
+	if ctx.Err() != nil {
+		return
+	}
 
 	bridgeContext, stopBridge := context.WithCancel(ctx)
 	runtime.AddFunc("SOCKS Bridge context", stopBridge)
@@ -470,6 +508,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("SOCKS Bridge", bridge)
+	if ctx.Err() != nil {
+		return
+	}
 	if hostBridge, ok := bridge.(*socksbridge.Bridge); ok {
 		hostBridge.SetHostTCPHandler(m.intercept.HostTCP)
 		hostBridge.SetHostUDPHandler(m.intercept.HostUDP)
@@ -489,6 +530,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("sing-box core", core)
+	if ctx.Err() != nil {
+		return
+	}
 	m.mu.Lock()
 	m.runningCore = core
 	m.mu.Unlock()

@@ -20,9 +20,10 @@ import (
 )
 
 type fakeProvider struct {
-	discovery cluster.Discovery
-	err       error
-	forwarder *fakeForwarder
+	discovery         cluster.Discovery
+	err               error
+	forwarder         *fakeForwarder
+	probeCapabilities func(context.Context, string) (cluster.Capabilities, error)
 }
 
 func (f *fakeProvider) Contexts() ([]cluster.ContextInfo, error) { return nil, nil }
@@ -75,7 +76,10 @@ func (f *fakeProvider) WatchInventory(
 ) (io.Closer, error) {
 	return closerFunc(func() {}), f.err
 }
-func (f *fakeProvider) ProbeCapabilities(context.Context, string) (cluster.Capabilities, error) {
+func (f *fakeProvider) ProbeCapabilities(ctx context.Context, contextName string) (cluster.Capabilities, error) {
+	if f.probeCapabilities != nil {
+		return f.probeCapabilities(ctx, contextName)
+	}
 	return cluster.Capabilities{
 		GatewayInstall: true, GatewayPortForward: true, ClusterNodes: true, InventoryCluster: true,
 		ServiceWrite: true, ServiceCreate: true,
@@ -275,9 +279,19 @@ func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 		provider, WithCore(core), WithBridgeFactory(testBridge), WithGatewayImage("gateway:test"),
 	)
 	connected := make(chan State, 1)
+	idleResourcesClosed := make(chan bool, 1)
 	manager.Subscribe(func(state State) {
 		if state.Phase == PhaseConnected {
 			connected <- state
+		}
+		if state.Phase == PhaseIdle && provider.forwarder != nil {
+			provider.forwarder.mu.Lock()
+			closed := provider.forwarder.closed
+			provider.forwarder.mu.Unlock()
+			select {
+			case idleResourcesClosed <- closed:
+			default:
+			}
 		}
 	})
 	if err := manager.Connect(context.Background(), Request{Context: "dev"}); err != nil {
@@ -306,6 +320,55 @@ func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 	}
 	if manager.State().Phase != PhaseIdle {
 		t.Fatalf("unexpected state after disconnect: %s", manager.State().Phase)
+	}
+	select {
+	case closedAtIdle := <-idleResourcesClosed:
+		if !closedAtIdle {
+			t.Fatal("idle state was published before runtime resources were closed")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for idle state")
+	}
+}
+
+func TestManagerCancelDuringStartupPublishesIdleAndAllowsReconnect(t *testing.T) {
+	probeStarted := make(chan struct{})
+	provider := &fakeProvider{
+		probeCapabilities: func(ctx context.Context, _ string) (cluster.Capabilities, error) {
+			close(probeStarted)
+			<-ctx.Done()
+			return cluster.Capabilities{}, ctx.Err()
+		},
+	}
+	manager := NewManager(
+		provider, WithCore(newFakeCore()), WithBridgeFactory(testBridge),
+	)
+	if err := manager.Connect(context.Background(), Request{Context: "dev"}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case <-probeStarted:
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for startup probe")
+	}
+
+	if err := manager.Disconnect(); err != nil {
+		t.Fatal(err)
+	}
+	state := manager.State()
+	if state.Phase != PhaseIdle {
+		t.Fatalf("phase after startup cancellation = %s, want %s", state.Phase, PhaseIdle)
+	}
+	if state.Context != "dev" {
+		t.Fatalf("context after startup cancellation = %q, want dev", state.Context)
+	}
+
+	provider.probeCapabilities = nil
+	if err := manager.Connect(context.Background(), Request{Context: "dev"}); err != nil {
+		t.Fatalf("reconnect after startup cancellation: %v", err)
+	}
+	if err := manager.Disconnect(); err != nil {
+		t.Fatal(err)
 	}
 }
 
