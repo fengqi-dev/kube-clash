@@ -144,7 +144,7 @@ func (s *Server) registerIntercept(session *controlSession, message tunnel.Contr
 		listener.tcp = tcp
 		go listener.acceptTCP()
 	case tunnel.NetworkUDP:
-		udp, err := net.ListenPacket("udp", address)
+		udp, err := net.ListenPacket("udp4", "0.0.0.0:"+fmt.Sprintf("%d", message.ListenPort))
 		if err != nil {
 			return fmt.Errorf("listen udp: %w", err)
 		}

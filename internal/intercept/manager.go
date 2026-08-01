@@ -762,7 +762,11 @@ func (m *Manager) serveInbound(
 	target := net.JoinHostPort(host, fmt.Sprintf("%d", local.LocalPort))
 	switch network {
 	case tunnel.NetworkUDP:
-		localConn, err := dialTraffic(ctx, localDialer, "udp", target)
+		// Gateway inbound UDP already arrived through the authenticated reverse
+		// tunnel. Re-entering sing-box's feature SOCKS UDP inbound can loop or
+		// time out; the local target is always a host listener, so dial directly.
+		var direct net.Dialer
+		localConn, err := direct.DialContext(ctx, "udp", target)
 		if err != nil {
 			_ = tunnelConn.Close()
 			return
@@ -794,7 +798,7 @@ func (m *Manager) serveMirror(
 	}
 	if network == tunnel.NetworkUDP {
 		m.serveMirrorUDP(
-			ctx, gatewayAddress, client, primaryAddr, localHost, localPort, shadowDialer,
+			ctx, gatewayAddress, client, primaryAddr, localHost, localPort,
 		)
 		return
 	}
@@ -833,7 +837,6 @@ func (m *Manager) serveMirrorUDP(
 	client net.Conn,
 	primaryAddr, localHost string,
 	localPort int,
-	shadowDialer TrafficDialer,
 ) {
 	primary, primaryFramed, err := dialMirrorPrimary(
 		ctx, gatewayAddress, primaryAddr, tunnel.NetworkUDP,
@@ -843,7 +846,10 @@ func (m *Manager) serveMirrorUDP(
 		return
 	}
 	localAddr := net.JoinHostPort(localHost, fmt.Sprintf("%d", localPort))
-	localConn, err := dialTraffic(ctx, shadowDialer, "udp", localAddr)
+	// As with exchange/preview UDP, the shadow target is a host listener and
+	// must not re-enter sing-box's SOCKS UDP inbound.
+	var direct net.Dialer
+	localConn, err := direct.DialContext(ctx, "udp", localAddr)
 	if err != nil {
 		localConn = nil
 	}

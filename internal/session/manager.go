@@ -248,6 +248,23 @@ func (m *Manager) DNSPort() (int, error) {
 	return port, nil
 }
 
+// InternalDNSPort returns sing-box's loopback DNS listener. It bypasses the
+// OS-facing split-DNS port, which may be redirected by another local TUN.
+func (m *Manager) InternalDNSPort() (int, error) {
+	m.mu.RLock()
+	core := m.runningCore
+	phase := m.state.Phase
+	m.mu.RUnlock()
+	if core == nil || phase != PhaseConnected {
+		return 0, errors.New("not connected")
+	}
+	port := core.InternalDNSPort()
+	if port < 1 {
+		return 0, errors.New("internal DNS port is unavailable")
+	}
+	return port, nil
+}
+
 func (m *Manager) State() State {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
