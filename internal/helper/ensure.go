@@ -72,6 +72,10 @@ func GetStatus(ctx context.Context) Status {
 		}
 		return status
 	}
+	// The running service is authoritative. On Windows, a dev/test client may
+	// execute outside the packaged install root, so its local BinaryInstallPath
+	// is not necessarily the service binary path.
+	status.Installed = status.Installed || response.Installed
 	status.Running = true
 	status.CoreReady = response.CoreReady
 	status.Version = response.Version
@@ -120,26 +124,34 @@ func EnsureInstall(ctx context.Context) error {
 	if err := ElevateInstall(ctx, source, sourceSHA256, token, currentUID(), home, singBoxPath); err != nil {
 		return err
 	}
-	deadline := time.Now().Add(20 * time.Second)
+	client := &Client{Token: token, Dial: dialHelper}
+	return waitForHelperReady(ctx, 20*time.Second, 100*time.Millisecond, func(pingCtx context.Context) (Response, error) {
+		requestCtx, cancel := context.WithTimeout(pingCtx, 2*time.Second)
+		defer cancel()
+		return client.Ping(requestCtx)
+	})
+}
+
+func waitForHelperReady(
+	ctx context.Context,
+	timeout time.Duration,
+	interval time.Duration,
+	ping func(context.Context) (Response, error),
+) error {
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
 	var lastErr error
-	for time.Now().Before(deadline) {
-		select {
-		case <-ctx.Done():
-			return ctx.Err()
-		default:
+	for {
+		if err := ctx.Err(); err != nil {
+			return err
 		}
-		client := &Client{Token: token, Dial: dialHelper}
-		pingCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		response, err := client.Ping(pingCtx)
-		cancel()
+		response, err := ping(waitCtx)
 		if err == nil && response.Protocol == ProtocolVersion && response.CoreReady {
 			return nil
 		}
 		if err == nil && response.Protocol == ProtocolVersion && !response.CoreReady {
 			lastErr = fmt.Errorf("helper is running but bundled sing-box is not configured")
-			continue
-		}
-		if err != nil {
+		} else if err != nil {
 			lastErr = err
 		} else {
 			lastErr = fmt.Errorf(
@@ -148,12 +160,24 @@ func EnsureInstall(ctx context.Context) error {
 				ProtocolVersion,
 			)
 		}
-		time.Sleep(100 * time.Millisecond)
+
+		timer := time.NewTimer(interval)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-waitCtx.Done():
+			timer.Stop()
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if lastErr != nil {
+				return fmt.Errorf("helper did not become ready after install: %w", lastErr)
+			}
+			return fmt.Errorf("helper did not become ready after install")
+		case <-timer.C:
+		}
 	}
-	if lastErr != nil {
-		return fmt.Errorf("helper did not become ready after install: %w", lastErr)
-	}
-	return fmt.Errorf("helper did not become ready after install")
 }
 
 // Uninstall removes the helper service (requires elevation).
@@ -238,7 +262,11 @@ func findBundledToolOnDisk(name string) (string, error) {
 	for _, candidate := range candidates {
 		info, statErr := os.Stat(candidate)
 		if statErr == nil && !info.IsDir() {
-			return candidate, nil
+			absolute, absErr := filepath.Abs(candidate)
+			if absErr != nil {
+				return "", fmt.Errorf("resolve bundled %s path: %w", name, absErr)
+			}
+			return filepath.Clean(absolute), nil
 		}
 	}
 	return "", fmt.Errorf("%s not found on disk", name)

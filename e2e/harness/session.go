@@ -285,9 +285,53 @@ func lookupHostRoute(host string) (hostRoute, error) {
 	switch runtime.GOOS {
 	case "linux":
 		return lookupHostRouteLinux(host)
-	default:
+	case "darwin":
 		return lookupHostRouteDarwin(host)
+	default:
+		return lookupHostRouteWindows(host)
 	}
+}
+
+func lookupHostRouteWindows(host string) (hostRoute, error) {
+	output, err := exec.Command("route.exe", "PRINT", "-4").CombinedOutput()
+	if err != nil {
+		return hostRoute{}, fmt.Errorf("route print: %w (%s)", err, strings.TrimSpace(string(output)))
+	}
+	return parseWindowsRoute(string(output), host)
+}
+
+func parseWindowsRoute(output, host string) (hostRoute, error) {
+	want := net.ParseIP(host).To4()
+	if want == nil {
+		return hostRoute{}, fmt.Errorf("invalid IPv4 route destination %q", host)
+	}
+	bestBits := -1
+	var best hostRoute
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Fields(line)
+		if len(fields) != 5 {
+			continue
+		}
+		destination := net.ParseIP(fields[0]).To4()
+		maskIP := net.ParseIP(fields[1]).To4()
+		if destination == nil || maskIP == nil {
+			continue
+		}
+		mask := net.IPMask(maskIP)
+		bits, total := mask.Size()
+		if total != 32 || bits <= bestBits {
+			continue
+		}
+		network := &net.IPNet{IP: destination.Mask(mask), Mask: mask}
+		if network.Contains(want) {
+			bestBits = bits
+			best = hostRoute{Gateway: fields[2], Interface: fields[3]}
+		}
+	}
+	if bestBits < 0 {
+		return hostRoute{}, fmt.Errorf("no IPv4 route for %s", host)
+	}
+	return best, nil
 }
 
 func lookupHostRouteDarwin(host string) (hostRoute, error) {
@@ -336,6 +380,13 @@ func lookupHostRouteLinux(host string) (hostRoute, error) {
 }
 
 func isKubeLoopTUN(iface string) bool {
+	if runtime.GOOS == "windows" {
+		benchmark := &net.IPNet{
+			IP:   net.IPv4(198, 18, 0, 0),
+			Mask: net.CIDRMask(15, 32),
+		}
+		return benchmark.Contains(net.ParseIP(iface))
+	}
 	return strings.HasPrefix(iface, "utun") || strings.HasPrefix(iface, "tun")
 }
 

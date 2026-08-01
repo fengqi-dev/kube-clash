@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/helper"
@@ -20,18 +21,36 @@ func main() {
 	if err != nil {
 		fatal(err)
 	}
-	src := filepath.Join(root, "build", "embedded", "kubeloop-helper")
-	if _, err := os.Stat(src); err != nil {
-		fatal(fmt.Errorf("helper binary missing at %s; run ./build/bundle-helper.sh", src))
+	helperName := "kubeloop-helper"
+	if runtime.GOOS == "windows" {
+		helperName += ".exe"
 	}
-	dest := filepath.Join(root, "build", "bin", "kubeloop-helper")
-	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
-		fatal(err)
+	toolNames := []string{helperName}
+	if runtime.GOOS == "windows" {
+		toolNames = append(toolNames,
+			"kubeloop-helper-install.exe",
+			"kubeloop-helper-uninstall.exe",
+		)
 	}
-	if err := copyFile(src, dest); err != nil {
-		fatal(err)
+	toolDir := filepath.Join(root, "build", "bin")
+	if runtime.GOOS == "windows" {
+		// Windows package resources take precedence in LocateBundled*.
+		toolDir = filepath.Join(toolDir, "resources")
 	}
-	_ = os.Chmod(dest, 0o755)
+	for _, name := range toolNames {
+		src := filepath.Join(root, "build", "embedded", name)
+		if _, err := os.Stat(src); err != nil {
+			fatal(fmt.Errorf("helper binary missing at %s; run ./build/bundle-helper.sh", src))
+		}
+		dest := filepath.Join(toolDir, name)
+		if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
+			fatal(err)
+		}
+		if err := copyFile(src, dest); err != nil {
+			fatal(err)
+		}
+		_ = os.Chmod(dest, 0o755)
+	}
 
 	singBox := filepath.Join(root, "build", "bin", "sing-box")
 	if _, err := os.Stat(singBox); err != nil {

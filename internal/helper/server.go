@@ -30,6 +30,9 @@ type Server struct {
 }
 
 type session struct {
+	lifecycleMu sync.Mutex
+	stopping    bool
+
 	workDir    string
 	cmd        *exec.Cmd
 	done       chan struct{}
@@ -102,10 +105,11 @@ func (s *Server) dispatch(request Request) Response {
 	switch request.Op {
 	case OpPing, OpStatus:
 		_, coreErr := resolveSingBoxPath(s.Auth)
+		activeSessions, pid := s.activeSessionState()
 		return Response{
 			OK: true, Version: Version, Protocol: ProtocolVersion,
 			Installed: true, Running: true, CoreReady: coreErr == nil,
-			ActiveSessions: s.activeSessionIDs(),
+			ActiveSessions: activeSessions, PID: pid,
 		}
 	case OpStart:
 		if request.Session == nil {
@@ -143,13 +147,22 @@ func (s *Server) dispatch(request Request) Response {
 }
 
 func (s *Server) activeSessionIDs() []string {
+	ids, _ := s.activeSessionState()
+	return ids
+}
+
+func (s *Server) activeSessionState() ([]string, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	ids := make([]string, 0, len(s.sessions))
-	for id := range s.sessions {
+	pid := 0
+	for id, current := range s.sessions {
 		ids = append(ids, id)
+		if current.cmd != nil && current.cmd.Process != nil {
+			pid = current.cmd.Process.Pid
+		}
 	}
-	return ids
+	return ids, pid
 }
 
 func (s *Server) startSession(spec singbox.SessionSpec) error {
@@ -274,15 +287,20 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		if waitErr != nil {
 			s.Log.Printf("sing-box session %s exited: %v", spec.ID, waitErr)
 		}
+		current.lifecycleMu.Lock()
+		current.stopping = true
 		_ = restoreLinkDNS(current.tunAddress)
 		_ = restorePlatformDNS(current.workDir, current.dns)
 		cleanupPlatformRoutes(current.routes)
 		_ = logFile.Close()
 		_ = os.RemoveAll(current.workDir)
 		s.mu.Lock()
-		delete(s.sessions, spec.ID)
+		if s.sessions[spec.ID] == current {
+			delete(s.sessions, spec.ID)
+		}
 		s.mu.Unlock()
 		close(current.done)
+		current.lifecycleMu.Unlock()
 	}()
 	controller := net.JoinHostPort("127.0.0.1", strconv.Itoa(spec.ControllerPort))
 	deadline := time.Now().Add(2 * time.Second)
@@ -359,14 +377,23 @@ func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
 	if current == nil {
 		return fmt.Errorf("session %s is not active", sessionID)
 	}
+	current.lifecycleMu.Lock()
+	defer current.lifecycleMu.Unlock()
+	s.mu.Lock()
+	active := s.sessions[sessionID] == current
+	s.mu.Unlock()
+	if !active || current.stopping {
+		return fmt.Errorf("session %s is not active", sessionID)
+	}
 	if current.workDir == "" {
 		return fmt.Errorf("session work directory is unavailable")
 	}
+	previous := current.dns
 	_ = restoreLinkDNS(current.tunAddress)
-	_ = restorePlatformDNS(current.workDir, current.dns)
+	_ = restorePlatformDNS(current.workDir, previous)
 	if err := applyPlatformDNS(current.workDir, dns); err != nil {
-		_ = applyPlatformDNS(current.workDir, current.dns)
-		_ = applyLinkDNS(current.tunAddress, current.dns)
+		_ = applyPlatformDNS(current.workDir, previous)
+		_ = applyLinkDNS(current.tunAddress, previous)
 		return fmt.Errorf("install split DNS: %w", err)
 	}
 	if err := applyLinkDNS(current.tunAddress, dns); err != nil {
@@ -374,13 +401,20 @@ func (s *Server) updateSessionDNS(sessionID string, dns singbox.DNSMeta) error {
 		// is not blocked by a transient missing TUN iface.
 		s.Log.Printf("link DNS update for %s: %v", sessionID, err)
 	}
-	meta, _ := json.Marshal(dns)
-	_ = os.WriteFile(filepath.Join(current.workDir, "dns-meta.json"), meta, 0o600)
-	s.mu.Lock()
-	if active := s.sessions[sessionID]; active != nil {
-		active.dns = dns
+	meta, err := json.Marshal(dns)
+	if err != nil {
+		_ = restorePlatformDNS(current.workDir, dns)
+		_ = applyPlatformDNS(current.workDir, previous)
+		_ = applyLinkDNS(current.tunAddress, previous)
+		return fmt.Errorf("encode DNS metadata: %w", err)
 	}
-	s.mu.Unlock()
+	if err := os.WriteFile(filepath.Join(current.workDir, "dns-meta.json"), meta, 0o600); err != nil {
+		_ = restorePlatformDNS(current.workDir, dns)
+		_ = applyPlatformDNS(current.workDir, previous)
+		_ = applyLinkDNS(current.tunAddress, previous)
+		return fmt.Errorf("write DNS metadata: %w", err)
+	}
+	current.dns = dns
 	return nil
 }
 
