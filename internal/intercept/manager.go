@@ -83,8 +83,7 @@ type Manager struct {
 	control        *controlClient
 	controlLost    chan struct{}
 	nextPort       uint32
-	byID           map[string]*runtimeIntercept
-	byKey          map[string]string // namespace/service -> id
+	registry       *runtimeRegistry
 	hostRoutes     map[hostRouteKey]*hostRoute
 	traffic        TrafficDialers
 }
@@ -131,8 +130,7 @@ func NewManager(api ClusterAPI) *Manager {
 	return &Manager{
 		cluster:    api,
 		nextPort:   20000,
-		byID:       make(map[string]*runtimeIntercept),
-		byKey:      make(map[string]string),
+		registry:   newRuntimeRegistry(),
 		hostRoutes: make(map[hostRouteKey]*hostRoute),
 	}
 }
@@ -234,19 +232,7 @@ func (m *Manager) attachControlLocked(control *controlClient, lost chan struct{}
 }
 
 func (m *Manager) controlRegistrationsLocked() []controlRegistration {
-	regs := make([]controlRegistration, 0)
-	for _, runtime := range m.byID {
-		for subID := range runtime.portKeys {
-			network, listenPort, ok := registrationFromRuntime(runtime, subID)
-			if !ok {
-				continue
-			}
-			regs = append(regs, controlRegistration{
-				id: subID, network: network, listenPort: listenPort,
-			})
-		}
-	}
-	return regs
+	return m.registry.registrations()
 }
 
 func registrationFromRuntime(runtime *runtimeIntercept, subID string) (byte, uint16, bool) {
@@ -277,10 +263,7 @@ func registrationFromRuntime(runtime *runtimeIntercept, subID string) (byte, uin
 func (m *Manager) StopAll(ctx context.Context) error {
 	m.mu.Lock()
 	m.stopping = true
-	ids := make([]string, 0, len(m.byID))
-	for id := range m.byID {
-		ids = append(ids, id)
-	}
+	ids := m.registry.ids()
 	control := m.control
 	m.control = nil
 	m.active = false
@@ -310,33 +293,13 @@ func (m *Manager) ListMirrors() []Info {
 func (m *Manager) ListPreviews() []Info {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	items := make([]Info, 0, len(m.byID))
-	for _, item := range m.byID {
-		if item.info.Preview {
-			items = append(items, item.info)
-		}
-	}
-	return items
+	return m.registry.listPreviews()
 }
 
 func (m *Manager) listByMode(mode string) []Info {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	items := make([]Info, 0, len(m.byID))
-	for _, item := range m.byID {
-		if item.info.Preview {
-			continue
-		}
-		itemMode := item.info.Mode
-		if itemMode == "" {
-			itemMode = ModeExchange
-		}
-		if itemMode != mode {
-			continue
-		}
-		items = append(items, item.info)
-	}
-	return items
+	return m.registry.listByMode(mode)
 }
 
 func (m *Manager) StartIntercept(ctx context.Context, mapping Mapping) (Info, error) {
@@ -370,8 +333,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		return Info{}, fmt.Errorf("session is not connected")
 	}
 	key := mapping.Namespace + "/" + mapping.Service
-	if existingID, exists := m.byKey[key]; exists {
-		existing := m.byID[existingID]
+	if existing := m.registry.getByKey(key); existing != nil {
 		m.mu.Unlock()
 		return Info{}, conflictError(key, mode, existing)
 	}
@@ -444,10 +406,9 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 	hostKeys := m.installHostRoutes(service, ports, portKeys, primaryAddrs, mode, false, interceptID)
 	m.mu.Lock()
-	m.byID[interceptID] = &runtimeIntercept{
+	m.registry.add(&runtimeIntercept{
 		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
-	}
-	m.byKey[key] = interceptID
+	})
 	m.mu.Unlock()
 	return info, nil
 }
@@ -470,7 +431,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 		return Info{}, fmt.Errorf("session is not connected")
 	}
 	key := request.Namespace + "/" + request.Name
-	if _, exists := m.byKey[key]; exists {
+	if m.registry.containsKey(key) {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("service %s is already in use", key)
 	}
@@ -523,23 +484,20 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 	hostKeys := m.installHostRoutes(service, ports, portKeys, nil, ModeExchange, true, previewID)
 	m.mu.Lock()
-	m.byID[previewID] = &runtimeIntercept{
+	m.registry.add(&runtimeIntercept{
 		info: info, preview: &snapshot, portKeys: portKeys, hostKeys: hostKeys,
-	}
-	m.byKey[key] = previewID
+	})
 	m.mu.Unlock()
 	return info, nil
 }
 
 func (m *Manager) Stop(ctx context.Context, id string) error {
 	m.mu.Lock()
-	runtime := m.byID[id]
+	runtime := m.registry.remove(id)
 	if runtime == nil {
 		m.mu.Unlock()
 		return fmt.Errorf("intercept %q not found", id)
 	}
-	delete(m.byID, id)
-	delete(m.byKey, runtime.info.Namespace+"/"+runtime.info.Service)
 	for _, key := range runtime.hostKeys {
 		delete(m.hostRoutes, key)
 	}
@@ -697,26 +655,7 @@ func (m *Manager) rollbackRegisters(control *controlClient, portKeys map[string]
 func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint64) {
 	m.mu.Lock()
 	gatewayAddress := m.gatewayAddress
-	var local PortMapping
-	var primaryAddr string
-	mode := ModeExchange
-	preview := false
-	found := false
-	for _, runtime := range m.byID {
-		if mapping, ok := runtime.portKeys[interceptSubID]; ok {
-			local = mapping
-			mode = runtime.info.Mode
-			if mode == "" {
-				mode = ModeExchange
-			}
-			if runtime.primaryAddrs != nil {
-				primaryAddr = runtime.primaryAddrs[interceptSubID]
-			}
-			preview = runtime.info.Preview
-			found = true
-			break
-		}
-	}
+	local, primaryAddr, mode, preview, found := m.registry.findPort(interceptSubID)
 	ctx := m.ctx
 	dialers := m.traffic
 	m.mu.Unlock()
