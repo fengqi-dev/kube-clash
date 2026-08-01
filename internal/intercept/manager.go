@@ -152,6 +152,24 @@ func (m *Manager) ControlLost() <-chan struct{} {
 // port-forward address and re-registers active Exchange/Mirror/Preview ports.
 func (m *Manager) RecoverControl(ctx context.Context) error {
 	m.mu.Lock()
+	gatewayIP := m.gatewayIP
+	gatewayAddress := m.gatewayAddress
+	m.mu.Unlock()
+	return m.recoverControlAt(ctx, gatewayIP, gatewayAddress)
+}
+
+// RecoverControlAt replaces a failed API-server port-forward, reconnects the
+// Gateway control channel, and makes new feature streams use the new address.
+func (m *Manager) RecoverControlAt(
+	ctx context.Context, gatewayIP, gatewayAddress string,
+) error {
+	return m.recoverControlAt(ctx, gatewayIP, gatewayAddress)
+}
+
+func (m *Manager) recoverControlAt(
+	ctx context.Context, gatewayIP, gatewayAddress string,
+) error {
+	m.mu.Lock()
 	if !m.active || m.stopping {
 		m.mu.Unlock()
 		return fmt.Errorf("session is not connected")
@@ -160,11 +178,10 @@ func (m *Manager) RecoverControl(ctx context.Context) error {
 		m.mu.Unlock()
 		return fmt.Errorf("control recovery already in progress")
 	}
-	if m.gatewayAddress == "" {
+	if gatewayAddress == "" {
 		m.mu.Unlock()
 		return fmt.Errorf("gateway address is unavailable")
 	}
-	address := m.gatewayAddress
 	registrations := m.registry.registrations()
 	old, generation := m.control.beginRecovery()
 	m.mu.Unlock()
@@ -173,7 +190,7 @@ func (m *Manager) RecoverControl(ctx context.Context) error {
 		_ = old.close()
 	}
 
-	control, lost, err := m.control.redial(ctx, address, registrations)
+	control, lost, err := m.control.redial(ctx, gatewayAddress, registrations)
 	if err != nil {
 		m.mu.Lock()
 		m.control.recoveryFailed(generation)
@@ -187,6 +204,8 @@ func (m *Manager) RecoverControl(ctx context.Context) error {
 		_ = control.close()
 		return fmt.Errorf("session is not connected")
 	}
+	m.gatewayIP = gatewayIP
+	m.gatewayAddress = gatewayAddress
 	return nil
 }
 
