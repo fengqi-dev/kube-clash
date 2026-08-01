@@ -82,19 +82,25 @@ func (p *Provider) ProbeCapabilities(ctx context.Context, contextName string) (C
 	caps.ServiceWrite = canAccess(ctx, client, authorizationv1.ResourceAttributes{
 		Namespace: probeNS, Resource: "services", Verb: "update",
 	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "list",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "get",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
 		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "create",
 	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
-		Namespace: probeNS, Resource: "endpoints", Verb: "get",
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "update",
 	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
-		Namespace: probeNS, Resource: "endpoints", Verb: "delete",
-	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
-		Namespace: probeNS, Resource: "endpoints", Verb: "create",
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "delete",
 	})
 
 	caps.ServiceCreate = canAccess(ctx, client, authorizationv1.ResourceAttributes{
 		Namespace: probeNS, Resource: "services", Verb: "create",
 	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Resource: "services", Verb: "delete",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
 		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "create",
+	}) && canAccess(ctx, client, authorizationv1.ResourceAttributes{
+		Namespace: probeNS, Group: "discovery.k8s.io", Resource: "endpointslices", Verb: "delete",
 	})
 
 	if !caps.GatewayPortForward {

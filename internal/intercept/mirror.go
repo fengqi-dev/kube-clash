@@ -10,6 +10,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	discoveryv1 "k8s.io/api/discovery/v1"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
@@ -80,13 +81,79 @@ func matchEndpointPort(
 	return 0, false
 }
 
+func primaryAddressFromSlices(
+	slices []discoveryv1.EndpointSlice,
+	port cluster.InterceptPort,
+) (string, error) {
+	protocol := port.Protocol
+	if protocol == "" {
+		protocol = corev1.ProtocolTCP
+	}
+	for _, slice := range slices {
+		portNum, ok := matchEndpointSlicePort(slice.Ports, port, protocol)
+		if !ok {
+			continue
+		}
+		for _, endpoint := range slice.Endpoints {
+			if endpoint.Conditions.Ready != nil && !*endpoint.Conditions.Ready {
+				continue
+			}
+			for _, address := range endpoint.Addresses {
+				if address != "" {
+					return net.JoinHostPort(address, strconv.Itoa(int(portNum))), nil
+				}
+			}
+		}
+	}
+	return "", fmt.Errorf(
+		"no ready backend for service port %s/%d", port.Name, port.ServicePort,
+	)
+}
+
+func matchEndpointSlicePort(
+	ports []discoveryv1.EndpointPort,
+	want cluster.InterceptPort,
+	protocol corev1.Protocol,
+) (int32, bool) {
+	for _, port := range ports {
+		if port.Port == nil {
+			continue
+		}
+		portProtocol := corev1.ProtocolTCP
+		if port.Protocol != nil && *port.Protocol != "" {
+			portProtocol = *port.Protocol
+		}
+		if portProtocol != protocol {
+			continue
+		}
+		if want.Name != "" && port.Name != nil && *port.Name == want.Name {
+			return *port.Port, true
+		}
+		if *port.Port == want.ServicePort {
+			return *port.Port, true
+		}
+	}
+	if len(ports) == 1 && ports[0].Port != nil {
+		portProtocol := corev1.ProtocolTCP
+		if ports[0].Protocol != nil && *ports[0].Protocol != "" {
+			portProtocol = *ports[0].Protocol
+		}
+		if portProtocol == protocol {
+			return *ports[0].Port, true
+		}
+	}
+	return 0, false
+}
+
 func buildPrimaryAddrs(
 	snapshot cluster.ServiceInterceptSnapshot,
 	ports []cluster.InterceptPort,
 	portKeys map[string]PortMapping,
 	interceptID string,
 ) (map[string]string, error) {
-	if !snapshot.HasEndpoints || len(snapshot.EndpointsSubsets) == 0 {
+	hasSlices := snapshot.HasEndpointSlices && len(snapshot.EndpointSlices) > 0
+	hasLegacyEndpoints := snapshot.HasEndpoints && len(snapshot.EndpointsSubsets) > 0
+	if !hasSlices && !hasLegacyEndpoints {
 		return nil, fmt.Errorf("service has no endpoints to mirror")
 	}
 	out := make(map[string]string, len(portKeys))
@@ -96,7 +163,13 @@ func buildPrimaryAddrs(
 		if _, ok := portKeys[subID]; !ok {
 			continue
 		}
-		addr, err := primaryAddress(snapshot.EndpointsSubsets, port)
+		var addr string
+		var err error
+		if hasSlices {
+			addr, err = primaryAddressFromSlices(snapshot.EndpointSlices, port)
+		} else {
+			addr, err = primaryAddress(snapshot.EndpointsSubsets, port)
+		}
 		if err != nil {
 			return nil, err
 		}
