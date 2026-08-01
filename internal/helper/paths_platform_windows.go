@@ -18,7 +18,23 @@ func platformSystemStateDir() string {
 }
 
 func platformBinaryInstallPath() string {
-	return filepath.Join(platformInstallRoot(), "resources", HelperBinaryBaseName()+".exe")
+	executable, err := os.Executable()
+	if err != nil {
+		return filepath.Join(
+			windowsProgramFilesProductRoot(),
+			"resources",
+			HelperBinaryBaseName()+".exe",
+		)
+	}
+	return platformBinaryInstallPathForExecutable(executable)
+}
+
+func platformBinaryInstallPathForExecutable(executable string) string {
+	return filepath.Join(
+		platformInstallRootForExecutable(executable),
+		"resources",
+		HelperBinaryBaseName()+".exe",
+	)
 }
 
 // platformLegacyBinaryInstallPath is the pre-resources helper location under Program Files.
@@ -36,13 +52,19 @@ func platformBundledSingBoxPath() string {
 //	{root}\KubeLoop.exe
 //	{root}\resources\kubeloop-helper.exe
 func platformInstallRoot() string {
-	if exe, err := os.Executable(); err == nil {
-		if resolved, err := filepath.EvalSymlinks(exe); err == nil {
-			exe = resolved
-		}
-		if root := installRootFromWindowsExe(exe); root != "" {
-			return root
-		}
+	executable, err := os.Executable()
+	if err != nil {
+		return windowsProgramFilesProductRoot()
+	}
+	return platformInstallRootForExecutable(executable)
+}
+
+func platformInstallRootForExecutable(executable string) string {
+	if resolved, err := filepath.EvalSymlinks(executable); err == nil {
+		executable = resolved
+	}
+	if root := installRootFromWindowsExe(executable); root != "" {
+		return root
 	}
 	return windowsProgramFilesProductRoot()
 }

@@ -184,8 +184,11 @@ func TestDNSSearchCandidates(t *testing.T) {
 	if !strings.Contains(joined, "static-web.default.svc.cluster.local.") {
 		t.Fatalf("missing FQDN candidate: %v", got)
 	}
-	if got[0] != "static-web.default.svc." {
-		t.Fatalf("original name should be first: %v", got)
+	if got[0] != "static-web.default.svc.default.svc.cluster.local." {
+		t.Fatalf("Kubernetes search expansion should be first: %v", got)
+	}
+	if got[len(got)-1] != "static-web.default.svc." {
+		t.Fatalf("original name should be the final fallback: %v", got)
 	}
 	fqdn := dnsSearchCandidates("api.default.svc.cluster.local.", SearchDomains("default"))
 	if len(fqdn) != 1 || fqdn[0] != "api.default.svc.cluster.local." {

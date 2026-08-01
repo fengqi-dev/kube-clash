@@ -337,15 +337,19 @@ func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) erro
 	dns, err := p.spec.DNS()
 	domains := append([]string{}, p.spec.ClusterDomains...)
 	sessionID := p.spec.ID
+	proxy := p.dnsProxy
+	if err == nil {
+		p.resolverDomains = dns.Domains
+	}
 	p.specMu.Unlock()
 	if err != nil {
 		return err
 	}
-	if p.dnsProxy != nil {
-		p.dnsProxy.SetSearch(dns.Search)
-		p.dnsProxy.SetClusterDomains(domains)
+	// Capture proxy under specMu so Close cannot nil it mid-update.
+	if proxy != nil {
+		proxy.SetSearch(dns.Search)
+		proxy.SetClusterDomains(domains)
 	}
-	p.resolverDomains = dns.Domains
 	if p.updateDNS == nil {
 		return errors.New("privileged DNS update is unavailable; reconnect to apply")
 	}
@@ -532,9 +536,12 @@ func (p *Process) Close() error {
 				}
 			}
 		}
-		if p.dnsProxy != nil {
-			_ = p.dnsProxy.Close()
-			p.dnsProxy = nil
+		p.specMu.Lock()
+		proxy := p.dnsProxy
+		p.dnsProxy = nil
+		p.specMu.Unlock()
+		if proxy != nil {
+			_ = proxy.Close()
 		}
 	})
 	err := p.Err()

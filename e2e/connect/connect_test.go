@@ -16,7 +16,7 @@ func TestMain(m *testing.M) { harness.RunMain(m) }
 
 func TestTUNConnectClusterIP(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 5*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)
@@ -49,7 +49,7 @@ func TestTUNConnectClusterIP(t *testing.T) {
 
 func TestTUNConnectPodIP(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 5*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)
@@ -72,7 +72,7 @@ func TestTUNConnectPodIP(t *testing.T) {
 
 func TestTUNConnectManualNetwork(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 5*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)
@@ -119,7 +119,7 @@ func TestTUNConnectManualNetwork(t *testing.T) {
 
 func TestTUNDisconnectTearsDown(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 5*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)

@@ -55,6 +55,14 @@ func BinaryInstallPath() string {
 	return platformBinaryInstallPath()
 }
 
+// BinaryInstallPathForExecutable returns the helper install path selected by a
+// packaged executable. On Windows the package can live outside Program Files,
+// so callers that launch a separate install tool must derive the destination
+// from that tool rather than from their own executable.
+func BinaryInstallPathForExecutable(executable string) string {
+	return platformBinaryInstallPathForExecutable(executable)
+}
+
 // LegacyBinaryInstallPath returns the previous Windows helper location, if any.
 func LegacyBinaryInstallPath() string {
 	return platformLegacyBinaryInstallPath()
