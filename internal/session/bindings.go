@@ -9,6 +9,18 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
+const (
+	TestLayerGatewayControl = "gateway-control"
+	TestLayerLocalListener  = "local-listener"
+	TestLayerLocalTarget    = "local-target"
+)
+
+type ConnectivityTestResult struct {
+	Passed      bool   `json:"passed"`
+	FailedLayer string `json:"failedLayer,omitempty"`
+	Error       string `json:"error,omitempty"`
+}
+
 func (m *Manager) StartIntercept(ctx context.Context, mapping intercept.Mapping) (intercept.Info, error) {
 	info, err := m.intercept.StartIntercept(ctx, mapping)
 	if err == nil && !m.isRestoring() {
@@ -37,12 +49,21 @@ func (m *Manager) StopIntercept(ctx context.Context, id string) error {
 	return err
 }
 
-func (m *Manager) TestIntercept(ctx context.Context, id string) error {
+func (m *Manager) TestIntercept(ctx context.Context, id string) ConnectivityTestResult {
+	if err := m.intercept.TestControl(id); err != nil {
+		return ConnectivityTestResult{
+			FailedLayer: TestLayerGatewayControl,
+			Error:       err.Error(),
+		}
+	}
 	if err := m.intercept.Test(ctx, id); err != nil {
-		return err
+		return ConnectivityTestResult{
+			FailedLayer: TestLayerLocalTarget,
+			Error:       err.Error(),
+		}
 	}
 	m.AppendLog("INFO", fmt.Sprintf("session connectivity test passed: %s", id))
-	return nil
+	return ConnectivityTestResult{Passed: true}
 }
 
 func (m *Manager) ListIntercepts() []intercept.Info {
@@ -99,12 +120,15 @@ func (m *Manager) StopPortForward(id string) error {
 	return err
 }
 
-func (m *Manager) TestPortForward(ctx context.Context, id string) error {
+func (m *Manager) TestPortForward(ctx context.Context, id string) ConnectivityTestResult {
 	if err := m.portfwd.Test(ctx, id); err != nil {
-		return err
+		return ConnectivityTestResult{
+			FailedLayer: TestLayerLocalListener,
+			Error:       err.Error(),
+		}
 	}
 	m.AppendLog("INFO", fmt.Sprintf("port-forward connectivity test passed: %s", id))
-	return nil
+	return ConnectivityTestResult{Passed: true}
 }
 
 func (m *Manager) ListPortForwards() []portfwd.Info {

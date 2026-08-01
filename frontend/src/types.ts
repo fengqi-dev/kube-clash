@@ -151,6 +151,12 @@ export interface SessionState {
   updatedAt: string;
 }
 
+export interface ConnectivityTestResult {
+  passed: boolean;
+  failedLayer?: "gateway-control" | "local-listener" | "local-target";
+  error?: string;
+}
+
 export interface BootstrapData {
   contexts: ContextInfo[];
   namespaces: string[];

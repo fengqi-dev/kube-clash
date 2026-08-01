@@ -51,6 +51,17 @@ func TestConnectivityRejectsMissingIntercept(t *testing.T) {
 	}
 }
 
+func TestControlConnectivityReportsUnavailableGateway(t *testing.T) {
+	manager := NewManager(nil)
+	manager.registry.add(&runtimeIntercept{
+		info:     Info{ID: "intercept-1"},
+		portKeys: map[string]PortMapping{"intercept-1/tcp/80": {}},
+	})
+	if err := manager.TestControl("intercept-1"); err == nil {
+		t.Fatal("expected unavailable Gateway control error")
+	}
+}
+
 func TestConnectivityRejectsUDPIntercept(t *testing.T) {
 	manager := NewManager(nil)
 	manager.registry.add(&runtimeIntercept{info: Info{
