@@ -84,7 +84,7 @@ type Manager struct {
 	controlLost    chan struct{}
 	nextPort       uint32
 	registry       *runtimeRegistry
-	hostRoutes     map[hostRouteKey]*hostRoute
+	routes         *hostRouteRegistry
 	traffic        TrafficDialers
 }
 
@@ -103,20 +103,6 @@ func (m *Manager) SetTrafficDialers(dialers TrafficDialers) {
 	m.mu.Unlock()
 }
 
-type hostRouteKey struct {
-	host string
-	port uint16
-}
-
-// hostRoute serves host TUN traffic to an intercepted Service locally, so the
-// desktop does not depend on kube-proxy hairpin through the Gateway.
-type hostRoute struct {
-	mode        string
-	preview     bool
-	local       PortMapping
-	primaryAddr string
-}
-
 type runtimeIntercept struct {
 	info         Info
 	snapshot     cluster.ServiceInterceptSnapshot
@@ -128,10 +114,10 @@ type runtimeIntercept struct {
 
 func NewManager(api ClusterAPI) *Manager {
 	return &Manager{
-		cluster:    api,
-		nextPort:   20000,
-		registry:   newRuntimeRegistry(),
-		hostRoutes: make(map[hostRouteKey]*hostRoute),
+		cluster:  api,
+		nextPort: 20000,
+		registry: newRuntimeRegistry(),
+		routes:   newHostRouteRegistry(),
 	}
 }
 
@@ -404,8 +390,8 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		Ports:     ports,
 		Locals:    locals,
 	}
-	hostKeys := m.installHostRoutes(service, ports, portKeys, primaryAddrs, mode, false, interceptID)
 	m.mu.Lock()
+	hostKeys := m.routes.install(service, ports, portKeys, primaryAddrs, mode, false, interceptID)
 	m.registry.add(&runtimeIntercept{
 		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
 	})
@@ -482,8 +468,8 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 		Ports:     ports,
 		Locals:    locals,
 	}
-	hostKeys := m.installHostRoutes(service, ports, portKeys, nil, ModeExchange, true, previewID)
 	m.mu.Lock()
+	hostKeys := m.routes.install(service, ports, portKeys, nil, ModeExchange, true, previewID)
 	m.registry.add(&runtimeIntercept{
 		info: info, preview: &snapshot, portKeys: portKeys, hostKeys: hostKeys,
 	})
@@ -498,9 +484,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 		m.mu.Unlock()
 		return fmt.Errorf("intercept %q not found", id)
 	}
-	for _, key := range runtime.hostKeys {
-		delete(m.hostRoutes, key)
-	}
+	m.routes.remove(runtime.hostKeys)
 	control := m.control
 	contextName := m.contextName
 	portKeys := runtime.portKeys
@@ -523,19 +507,18 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 // preview target. Used by the local SOCKS bridge for TUN traffic.
 func (m *Manager) HostTCP(host string, port uint16) (func(net.Conn), bool) {
 	m.mu.Lock()
-	route := m.hostRoutes[hostRouteKey{host: strings.ToLower(strings.TrimSpace(host)), port: port}]
-	if route == nil {
+	route, ok := m.routes.lookup(host, port)
+	if !ok {
 		m.mu.Unlock()
 		return nil, false
 	}
-	copyRoute := *route
 	ctx := m.ctx
 	gatewayAddress := m.gatewayAddress
 	dialers := m.traffic
 	m.mu.Unlock()
 
 	return func(client net.Conn) {
-		m.serveHostTCP(ctx, gatewayAddress, client, copyRoute, dialers)
+		m.serveHostTCP(ctx, gatewayAddress, client, route, dialers)
 	}, true
 }
 
@@ -544,18 +527,17 @@ func (m *Manager) HostTCP(host string, port uint16) (func(net.Conn), bool) {
 // through the Gateway ClusterIP.
 func (m *Manager) HostUDP(host string, port uint16) (func(context.Context) (net.Conn, error), bool) {
 	m.mu.Lock()
-	route := m.hostRoutes[hostRouteKey{host: strings.ToLower(strings.TrimSpace(host)), port: port}]
-	if route == nil {
+	route, ok := m.routes.lookup(host, port)
+	if !ok {
 		m.mu.Unlock()
 		return nil, false
 	}
-	copyRoute := *route
 	gatewayAddress := m.gatewayAddress
 	dialers := m.traffic
 	m.mu.Unlock()
 
 	return func(ctx context.Context) (net.Conn, error) {
-		return m.dialHostUDP(ctx, gatewayAddress, copyRoute, dialers)
+		return m.dialHostUDP(ctx, gatewayAddress, route, dialers)
 	}, true
 }
 
@@ -989,81 +971,6 @@ func conflictError(key, wantMode string, existing *runtimeIntercept) error {
 		return fmt.Errorf("exchange and mirror are mutually exclusive; stop %s on %s first", have, key)
 	}
 	return fmt.Errorf("service %s is already in %s", key, have)
-}
-
-func (m *Manager) installHostRoutes(
-	service *corev1.Service,
-	ports []cluster.InterceptPort,
-	portKeys map[string]PortMapping,
-	primaryAddrs map[string]string,
-	mode string,
-	preview bool,
-	interceptID string,
-) []hostRouteKey {
-	if service == nil {
-		return nil
-	}
-	hosts := serviceRewriteHosts(service)
-	if len(hosts) == 0 {
-		return nil
-	}
-	if mode == "" {
-		mode = ModeExchange
-	}
-	keys := make([]hostRouteKey, 0, len(hosts)*len(ports))
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.hostRoutes == nil {
-		m.hostRoutes = make(map[hostRouteKey]*hostRoute)
-	}
-	for _, port := range ports {
-		network := protocolToNetwork(port.Protocol)
-		subID := fmt.Sprintf("%s:%s:%d", interceptID, networkName(network), port.ServicePort)
-		local := localFor(port, nil)
-		if mapped, ok := portKeys[subID]; ok {
-			local = mapped
-		}
-		primary := ""
-		if primaryAddrs != nil {
-			primary = primaryAddrs[subID]
-		}
-		for _, host := range hosts {
-			key := hostRouteKey{host: host, port: uint16(port.ServicePort)}
-			m.hostRoutes[key] = &hostRoute{
-				mode: mode, preview: preview, local: local, primaryAddr: primary,
-			}
-			keys = append(keys, key)
-		}
-	}
-	return keys
-}
-
-func serviceRewriteHosts(service *corev1.Service) []string {
-	if service == nil {
-		return nil
-	}
-	hosts := make([]string, 0, 4)
-	seen := map[string]struct{}{}
-	add := func(host string) {
-		host = strings.ToLower(strings.TrimSpace(host))
-		if host == "" || host == corev1.ClusterIPNone {
-			return
-		}
-		if _, ok := seen[host]; ok {
-			return
-		}
-		seen[host] = struct{}{}
-		hosts = append(hosts, host)
-	}
-	add(service.Spec.ClusterIP)
-	name := service.Name
-	ns := service.Namespace
-	if name != "" && ns != "" {
-		add(name + "." + ns + ".svc.cluster.local")
-		add(name + "." + ns + ".svc")
-		add(name + "." + ns)
-	}
-	return hosts
 }
 
 func (m Mapping) resolveLocals(service *corev1.Service) ([]PortMapping, error) {
