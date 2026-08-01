@@ -90,7 +90,7 @@ func (c *Controller) onReady() {
 	c.recentEmpty = c.recentRoot.AddSubMenuItem(c.strings.NoRecent, "")
 	c.recentEmpty.Disable()
 	c.recentItems = make([]*systray.MenuItem, 0, maxRecentClusters)
-	for i := 0; i < maxRecentClusters; i++ {
+	for range maxRecentClusters {
 		item := c.recentRoot.AddSubMenuItem("", "")
 		item.Hide()
 		c.recentItems = append(c.recentItems, item)

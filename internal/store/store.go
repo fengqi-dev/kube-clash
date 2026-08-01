@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"sync"
 )
 
@@ -15,7 +16,7 @@ const currentVersion = 1
 type State struct {
 	Version  int                      `json:"version"`
 	UI       UIState                  `json:"ui"`
-	MCP      MCPConfig                `json:"mcp,omitempty"`
+	MCP      MCPConfig                `json:"mcp,omitzero"`
 	Clusters map[string]*ClusterState `json:"clusters"`
 }
 
@@ -24,10 +25,10 @@ const DefaultMCPPort = 30808
 
 // MCPConfig persists the embedded MCP server settings.
 type MCPConfig struct {
-	Enabled      bool   `json:"enabled,omitempty"`
-	Port         int    `json:"port,omitempty"`         // default DefaultMCPPort
-	TokenEnabled bool   `json:"tokenEnabled,omitempty"` // default false; require Bearer token
-	Token        string `json:"token,omitempty"`        // opaque bearer (used when TokenEnabled)
+	Enabled      bool   `json:"enabled,omitzero"`
+	Port         int    `json:"port,omitzero"`         // default DefaultMCPPort
+	TokenEnabled bool   `json:"tokenEnabled,omitzero"` // default false; require Bearer token
+	Token        string `json:"token,omitempty"`       // opaque bearer (used when TokenEnabled)
 }
 
 // UIState remembers the last selected context in the desktop UI.
@@ -40,7 +41,7 @@ type UIState struct {
 // ClusterState stores restore intents for one kubeconfig context.
 type ClusterState struct {
 	Namespace     string            `json:"namespace,omitempty"`
-	Connected     bool              `json:"connected,omitempty"`
+	Connected     bool              `json:"connected,omitzero"`
 	PortForwards  []PortForwardSpec `json:"portForwards,omitempty"`
 	Exchanges     []ExchangeSpec    `json:"exchanges,omitempty"`
 	Mirrors       []MirrorSpec      `json:"mirrors,omitempty"`
@@ -71,7 +72,7 @@ type PortForwardSpec struct {
 	Name       string `json:"name"`
 	Protocol   string `json:"protocol,omitempty"`
 	RemotePort uint16 `json:"remotePort"`
-	LocalPort  uint16 `json:"localPort,omitempty"`
+	LocalPort  uint16 `json:"localPort,omitzero"`
 }
 
 // PortMapping maps a service/local port pair.
@@ -220,10 +221,8 @@ func (s *Store) AddKubeconfigFile(path string) error {
 	if err != nil {
 		return err
 	}
-	for _, existing := range s.state.UI.KubeconfigFiles {
-		if existing == path {
-			return nil
-		}
+	if slices.Contains(s.state.UI.KubeconfigFiles, path) {
+		return nil
 	}
 	s.state.UI.KubeconfigFiles = append(s.state.UI.KubeconfigFiles, path)
 	return s.saveLocked()

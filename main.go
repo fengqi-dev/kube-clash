@@ -4,23 +4,29 @@ import (
 	"embed"
 	"log"
 
-	"github.com/fengqi-dev/kube-loop/internal/tray"
+	desktopapp "github.com/fengqi-dev/kube-loop/internal/app"
 	"github.com/wailsapp/wails/v2"
 	"github.com/wailsapp/wails/v2/pkg/options"
 	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	wailsruntime "github.com/wailsapp/wails/v2/pkg/runtime"
 )
 
 //go:embed all:frontend/dist
 var assets embed.FS
 
+// The README keeps the pattern valid for ordinary source builds. Release and
+// IDE builds generate the platform helper in this directory before compiling
+// the desktop application.
+//
+//go:embed build/embedded/*
+var embeddedHelperFiles embed.FS
+
 var version = "dev"
 
 func main() {
-	app := NewApp()
+	app := desktopapp.NewApp(version, embeddedHelperFiles)
 	// Windows/Linux: tray owns a background message loop. macOS: tray is a no-op
 	// for now (see internal/tray/tray_darwin.go).
-	app.tray = tray.Start(&trayHost{app: app})
+	desktopapp.StartTray(app)
 	if err := wails.Run(&options.App{
 		Title:         "KubeLoop",
 		Width:         1080,
@@ -34,17 +40,14 @@ func main() {
 		SingleInstanceLock: &options.SingleInstanceLock{
 			UniqueId: "dev.fengqi.kube-loop",
 			OnSecondInstanceLaunch: func(options.SecondInstanceData) {
-				if app.ctx != nil {
-					wailsruntime.WindowUnminimise(app.ctx)
-					wailsruntime.WindowShow(app.ctx)
-				}
+				desktopapp.ShowWindow(app)
 			},
 		},
 		AssetServer:      &assetserver.Options{Assets: assets},
-		OnStartup:        app.startup,
-		OnBeforeClose:    app.beforeClose,
-		OnShutdown:       app.shutdown,
-		Bind:             []interface{}{app},
+		OnStartup:        desktopapp.StartupHandler(app),
+		OnBeforeClose:    desktopapp.BeforeCloseHandler(app),
+		OnShutdown:       desktopapp.ShutdownHandler(app),
+		Bind:             []any{app},
 		BackgroundColour: &options.RGBA{R: 15, G: 23, B: 42, A: 1},
 	}); err != nil {
 		log.Fatal(err)

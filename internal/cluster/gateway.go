@@ -208,7 +208,7 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: gatewayLabels},
 				Spec: corev1.PodSpec{
-					AutomountServiceAccountToken: boolPointer(false),
+					AutomountServiceAccountToken: new(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot:   &runAsNonRoot,
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
@@ -362,7 +362,8 @@ func podReady(pod corev1.Pod) bool {
 	return false
 }
 
-func boolPointer(value bool) *bool { return &value }
+//go:fix inline
+func boolPointer(value bool) *bool { return new(value) }
 
 type lockedBuffer struct {
 	mu sync.Mutex

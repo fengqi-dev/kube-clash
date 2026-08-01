@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/netip"
 	"regexp"
+	"slices"
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
@@ -78,10 +79,8 @@ func (s SessionSpec) Validate() error {
 	if err := validatePort(s.TrafficPorts.Listen, TrafficInbound); err != nil {
 		return err
 	}
-	for _, port := range []int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort} {
-		if s.TrafficPorts.Listen == port {
-			return errors.New("traffic inbound port must not overlap internal ports")
-		}
+	if slices.Contains([]int{s.BridgePort, s.ControllerPort, s.DNSPort, s.PublicDNSPort}, s.TrafficPorts.Listen) {
+		return errors.New("traffic inbound port must not overlap internal ports")
 	}
 	if len(s.PodCIDRs)+len(s.ServiceCIDRs)+len(s.ServiceIPs)+len(s.Hosts) > maxSessionItems {
 		return errors.New("session contains too many routes or host aliases")

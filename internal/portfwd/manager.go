@@ -379,12 +379,10 @@ func (f *routedForwarder) serve() {
 		if !f.track(client) {
 			continue
 		}
-		f.wg.Add(1)
-		go func() {
-			defer f.wg.Done()
+		f.wg.Go(func() {
 			defer f.untrack(client)
 			f.forward(client)
-		}()
+		})
 	}
 }
 

@@ -440,7 +440,7 @@ func safeDNSName(value string) bool {
 		strings.HasSuffix(value, ".") {
 		return false
 	}
-	for _, label := range strings.Split(value, ".") {
+	for label := range strings.SplitSeq(value, ".") {
 		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
 			return false
 		}

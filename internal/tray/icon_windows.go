@@ -76,9 +76,9 @@ func scaleNearest(dst *image.RGBA, src image.Image) {
 	sh := sb.Dy()
 	dw := db.Dx()
 	dh := db.Dy()
-	for y := 0; y < dh; y++ {
+	for y := range dh {
 		sy := sb.Min.Y + y*sh/dh
-		for x := 0; x < dw; x++ {
+		for x := range dw {
 			sx := sb.Min.X + x*sw/dw
 			dst.Set(db.Min.X+x, db.Min.Y+y, src.At(sx, sy))
 		}

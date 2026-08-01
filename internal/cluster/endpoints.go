@@ -324,7 +324,7 @@ func managedEndpointSlice(snapshot ServiceInterceptSnapshot, interceptID string)
 			Conditions: discoveryv1.EndpointConditions{
 				Ready:       &ready,
 				Serving:     &ready,
-				Terminating: boolPointer(false),
+				Terminating: new(false),
 			},
 		}},
 		Ports: ports,
