@@ -63,6 +63,7 @@ type State struct {
 	Message         string                `json:"message"`
 	Error           string                `json:"error,omitempty"`
 	DNSWarning      string                `json:"dnsWarning,omitempty"`
+	Network         *NetworkDiagnostics   `json:"network,omitempty"`
 	Discovery       *cluster.Discovery    `json:"discovery,omitempty"`
 	Capabilities    *cluster.Capabilities `json:"capabilities,omitempty"`
 	ScopeNamespaces []string              `json:"scopeNamespaces,omitempty"`
@@ -421,6 +422,11 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	state.Discovery = &discovery
 	state.DNSNamespace = dnsNamespace
+	state.Network = inspectNetwork(discovery)
+	m.publish(state)
+	for _, issue := range state.Network.Issues {
+		m.AppendLog("WARN", issue.Message)
+	}
 
 	forwarder, err := m.provider.StartPortForward(
 		ctx, request.Context, gateway.Name, cluster.GatewayPort,

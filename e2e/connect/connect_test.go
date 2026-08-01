@@ -3,6 +3,7 @@
 package connect
 
 import (
+	"runtime"
 	"testing"
 	"time"
 
@@ -25,9 +26,22 @@ func TestTUNConnectClusterIP(t *testing.T) {
 	}
 	clusterIP := harness.EchoServiceIP(t, ctx, client)
 
-	_ = harness.ConnectSession(t, ctx, session.Request{
+	live := harness.ConnectSession(t, ctx, session.Request{
 		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
 	}, nil)
+	if live.State.Network == nil {
+		t.Fatal("connected session is missing network diagnostics")
+	}
+	if live.State.Network.RoutingMode != "native" {
+		t.Fatalf("routing mode = %q, want native", live.State.Network.RoutingMode)
+	}
+	wantStrictRoute := runtime.GOOS != "windows"
+	if live.State.Network.StrictRoute != wantStrictRoute {
+		t.Fatalf(
+			"strict route = %v, want %v on %s",
+			live.State.Network.StrictRoute, wantStrictRoute, runtime.GOOS,
+		)
+	}
 
 	harness.WaitHostTCP(t, clusterIP, 8080, "ping", "cluster-tcp:")
 	harness.WaitHostUDP(t, clusterIP, 9090, "ping", "cluster-udp:")

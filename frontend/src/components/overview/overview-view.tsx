@@ -124,6 +124,7 @@ export function OverviewView({
   }
 
   const issues = session.capabilities?.issues ?? [];
+  const networkIssues = session.network?.issues ?? [];
   const gatewayManifest = session.gatewayManifest ?? "";
 
   return (
@@ -235,6 +236,19 @@ export function OverviewView({
           {session.dnsWarning ? (
             <Alert className="mt-4 w-full text-left">
               <AlertDescription className="break-words">{session.dnsWarning}</AlertDescription>
+            </Alert>
+          ) : null}
+          {networkIssues.length > 0 ? (
+            <Alert className="mt-4 w-full text-left">
+              <AlertDescription>
+                <ul className="list-disc space-y-1 pl-4 text-[12px]">
+                  {networkIssues.map((item) => (
+                    <li key={`${item.code}:${item.target}:${item.conflict}:${item.interface}`}>
+                      {item.message}
+                    </li>
+                  ))}
+                </ul>
+              </AlertDescription>
             </Alert>
           ) : null}
 

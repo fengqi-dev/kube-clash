@@ -26,7 +26,6 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 	required := []string{
 		`"type": "tun"`,
 		`"auto_route": true`,
-		`"strict_route": true`,
 		`"10.244.0.0/16"`,
 		`"10.96.0.0/12"`,
 		`"cluster.local"`,
@@ -77,6 +76,10 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		item, _ := inbound.(map[string]any)
 		if item["type"] == "tun" {
 			routeAddress, _ = item["route_address"].([]any)
+			wantStrictRoute := runtime.GOOS != "windows"
+			if got, _ := item["strict_route"].(bool); got != wantStrictRoute {
+				t.Fatalf("strict_route = %v, want %v on %s", got, wantStrictRoute, runtime.GOOS)
+			}
 		}
 	}
 	if len(routeAddress) == 0 {
@@ -87,6 +90,24 @@ func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
 		if value == "0.0.0.0/1" || value == "128.0.0.0/1" {
 			t.Fatalf("global route leaked into tun route_address: %v", routeAddress)
 		}
+	}
+}
+
+func TestStrictRouteForPlatform(t *testing.T) {
+	tests := []struct {
+		goos string
+		want bool
+	}{
+		{goos: "windows", want: false},
+		{goos: "linux", want: true},
+		{goos: "darwin", want: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.goos, func(t *testing.T) {
+			if got := strictRouteForPlatform(tt.goos); got != tt.want {
+				t.Fatalf("strictRouteForPlatform(%q) = %v, want %v", tt.goos, got, tt.want)
+			}
+		})
 	}
 }
 
