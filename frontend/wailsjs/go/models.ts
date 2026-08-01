@@ -1,3 +1,50 @@
+export namespace app {
+
+	export class BootstrapData {
+	    contexts: cluster.ContextInfo[];
+	    namespaces: string[];
+	    session: session.State;
+	    update: update.Info;
+	    preferredContext?: string;
+	    preferredNamespace?: string;
+	    kubeconfigFiles?: cluster.KubeconfigFileInfo[];
+
+	    static createFrom(source: any = {}) {
+	        return new BootstrapData(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.contexts = this.convertValues(source["contexts"], cluster.ContextInfo);
+	        this.namespaces = source["namespaces"];
+	        this.session = this.convertValues(source["session"], session.State);
+	        this.update = this.convertValues(source["update"], update.Info);
+	        this.preferredContext = source["preferredContext"];
+	        this.preferredNamespace = source["preferredNamespace"];
+	        this.kubeconfigFiles = this.convertValues(source["kubeconfigFiles"], cluster.KubeconfigFileInfo);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
+
+}
+
 export namespace cluster {
 	
 	export class Capabilities {
@@ -296,7 +343,7 @@ export namespace cluster {
 
 }
 
-export namespace helper {
+export namespace helperapi {
 	
 	export class Status {
 	    installed: boolean;
@@ -465,53 +512,6 @@ export namespace intercept {
 
 }
 
-export namespace main {
-	
-	export class BootstrapData {
-	    contexts: cluster.ContextInfo[];
-	    namespaces: string[];
-	    session: session.State;
-	    update: update.Info;
-	    preferredContext?: string;
-	    preferredNamespace?: string;
-	    kubeconfigFiles?: cluster.KubeconfigFileInfo[];
-	
-	    static createFrom(source: any = {}) {
-	        return new BootstrapData(source);
-	    }
-	
-	    constructor(source: any = {}) {
-	        if ('string' === typeof source) source = JSON.parse(source);
-	        this.contexts = this.convertValues(source["contexts"], cluster.ContextInfo);
-	        this.namespaces = source["namespaces"];
-	        this.session = this.convertValues(source["session"], session.State);
-	        this.update = this.convertValues(source["update"], update.Info);
-	        this.preferredContext = source["preferredContext"];
-	        this.preferredNamespace = source["preferredNamespace"];
-	        this.kubeconfigFiles = this.convertValues(source["kubeconfigFiles"], cluster.KubeconfigFileInfo);
-	    }
-	
-		convertValues(a: any, classs: any, asMap: boolean = false): any {
-		    if (!a) {
-		        return a;
-		    }
-		    if (a.slice && a.map) {
-		        return (a as any[]).map(elem => this.convertValues(elem, classs));
-		    } else if ("object" === typeof a) {
-		        if (asMap) {
-		            for (const key of Object.keys(a)) {
-		                a[key] = new classs(a[key]);
-		            }
-		            return a;
-		        }
-		        return new classs(a);
-		    }
-		    return a;
-		}
-	}
-
-}
-
 export namespace mcp {
 	
 	export class InstallResult {
@@ -651,6 +651,62 @@ export namespace session {
 		    return a;
 		}
 	}
+	export class NetworkDiagnostic {
+	    code: string;
+	    severity: string;
+	    message: string;
+	    target?: string;
+	    conflict?: string;
+	    interface?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkDiagnostic(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.severity = source["severity"];
+	        this.message = source["message"];
+	        this.target = source["target"];
+	        this.conflict = source["conflict"];
+	        this.interface = source["interface"];
+	    }
+	}
+	export class NetworkDiagnostics {
+	    routingMode: string;
+	    strictRoute: boolean;
+	    issues?: NetworkDiagnostic[];
+
+	    static createFrom(source: any = {}) {
+	        return new NetworkDiagnostics(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.routingMode = source["routingMode"];
+	        this.strictRoute = source["strictRoute"];
+	        this.issues = this.convertValues(source["issues"], NetworkDiagnostic);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class State {
 	    phase: string;
 	    context: string;
@@ -659,6 +715,7 @@ export namespace session {
 	    message: string;
 	    error?: string;
 	    dnsWarning?: string;
+	    network?: NetworkDiagnostics;
 	    discovery?: cluster.Discovery;
 	    capabilities?: cluster.Capabilities;
 	    scopeNamespaces?: string[];
@@ -688,6 +745,7 @@ export namespace session {
 	        this.message = source["message"];
 	        this.error = source["error"];
 	        this.dnsWarning = source["dnsWarning"];
+	        this.network = this.convertValues(source["network"], NetworkDiagnostics);
 	        this.discovery = this.convertValues(source["discovery"], cluster.Discovery);
 	        this.capabilities = this.convertValues(source["capabilities"], cluster.Capabilities);
 	        this.scopeNamespaces = source["scopeNamespaces"];
@@ -850,7 +908,7 @@ export namespace update {
 	    available: boolean;
 	    url: string;
 	    // Go type: time
-	    publishedAt?: any;
+	    publishedAt: any;
 	    // Go type: time
 	    checkedAt: any;
 	    error?: string;
@@ -890,4 +948,3 @@ export namespace update {
 	}
 
 }
-

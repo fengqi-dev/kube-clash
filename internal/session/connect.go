@@ -298,5 +298,5 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	}
 	runtime.Add("inventory watcher", inventory)
 
-	m.serveConnected(ctx, state, core)
+	m.serveConnected(ctx, state, core, request.Context, bridge, runtime)
 }

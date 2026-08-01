@@ -40,6 +40,8 @@ type Server struct {
 	DialTimeout    time.Duration
 	HostTCP        HostTCPHandler
 	HostUDP        HostUDPHandler
+
+	gatewayMu sync.RWMutex
 }
 
 // Bridge is the local SOCKS listener used by sing-box's kubernetes outbound.
@@ -54,6 +56,14 @@ func (b *Bridge) SetHostTCPHandler(handler HostTCPHandler) {
 
 func (b *Bridge) SetHostUDPHandler(handler HostUDPHandler) {
 	b.server.HostUDP = handler
+}
+
+// SetGatewayAddress switches new SOCKS requests to a replacement Kubernetes
+// API port-forward without interrupting the local sing-box listener.
+func (b *Bridge) SetGatewayAddress(address string) {
+	b.server.gatewayMu.Lock()
+	b.server.GatewayAddress = address
+	b.server.gatewayMu.Unlock()
 }
 
 func (s *Server) Serve(listener net.Listener) error {
@@ -135,7 +145,10 @@ func (s *Server) openGateway(command byte, host string, port uint16) (net.Conn, 
 	if timeout == 0 {
 		timeout = 10 * time.Second
 	}
-	connection, err := net.DialTimeout("tcp", s.GatewayAddress, timeout)
+	s.gatewayMu.RLock()
+	gatewayAddress := s.GatewayAddress
+	s.gatewayMu.RUnlock()
+	connection, err := net.DialTimeout("tcp", gatewayAddress, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect gateway: %w", err)
 	}

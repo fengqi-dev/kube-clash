@@ -176,6 +176,48 @@ func TestStartStopInterceptRegistersAndRestores(t *testing.T) {
 	}
 }
 
+func TestRecoverControlAtUsesReplacementGateway(t *testing.T) {
+	first, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Close()
+	firstServer := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = firstServer.Serve(first) }()
+
+	second, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Close()
+	secondServer := gateway.NewServer(log.New(io.Discard, "", 0), time.Second)
+	go func() { _ = secondServer.Serve(second) }()
+
+	manager := NewManager(&fakeCluster{})
+	if err := manager.Start(
+		context.Background(), "minikube", "10.244.0.8", first.Addr().String(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = manager.StopAll(context.Background()) }()
+
+	if err := manager.RecoverControlAt(
+		context.Background(), "10.244.0.9", second.Addr().String(),
+	); err != nil {
+		t.Fatal(err)
+	}
+	manager.mu.Lock()
+	defer manager.mu.Unlock()
+	if manager.gatewayIP != "10.244.0.9" ||
+		manager.gatewayAddress != second.Addr().String() ||
+		!manager.control.ready() {
+		t.Fatalf(
+			"replacement gateway not active: ip=%q address=%q ready=%v",
+			manager.gatewayIP, manager.gatewayAddress, manager.control.ready(),
+		)
+	}
+}
+
 func TestStartMirrorTeesToLocalKeepsPrimaryResponse(t *testing.T) {
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {

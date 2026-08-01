@@ -24,7 +24,7 @@ import type {
 declare global {
   interface Window {
     go?: {
-      main?: {
+      app?: {
         App?: {
           Bootstrap(): Promise<BootstrapData>;
           ReloadContexts(): Promise<ClusterInventory>;
@@ -78,7 +78,7 @@ declare global {
 }
 
 function api() {
-  const app = window.go?.main?.App;
+  const app = window.go?.app?.App;
   if (!app) {
     throw new Error("Wails backend is unavailable. Run this interface with `wails dev`.");
   }

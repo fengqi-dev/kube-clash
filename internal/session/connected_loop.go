@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
@@ -18,6 +19,9 @@ func (m *Manager) serveConnected(
 	ctx context.Context,
 	state State,
 	core singbox.RunningCore,
+	contextName string,
+	bridge any,
+	runtime *sessionRuntime,
 ) {
 	ticker := time.NewTicker(singbox.DefaultMetricsInterval)
 	defer ticker.Stop()
@@ -45,7 +49,9 @@ func (m *Manager) serveConnected(
 				return
 			}
 			m.AppendLog("WARN", "gateway control channel closed; reconnecting")
-			if err := m.recoverGatewayControl(ctx); err != nil {
+			if err := m.recoverGatewayControl(
+				ctx, contextName, bridge, runtime,
+			); err != nil {
 				m.clearRecentConnections()
 				if ctx.Err() == nil {
 					m.fail(ctx, state, "Gateway control channel closed; reconnect required", err)
@@ -61,7 +67,12 @@ func (m *Manager) serveConnected(
 	}
 }
 
-func (m *Manager) recoverGatewayControl(ctx context.Context) error {
+func (m *Manager) recoverGatewayControl(
+	ctx context.Context,
+	contextName string,
+	bridge any,
+	runtime *sessionRuntime,
+) error {
 	var lastErr error
 	for attempt := range controlRecoveryAttempts {
 		if delay := controlRecoveryDelay(attempt); delay > 0 {
@@ -71,7 +82,11 @@ func (m *Manager) recoverGatewayControl(ctx context.Context) error {
 			case <-time.After(delay):
 			}
 		}
-		lastErr = m.intercept.RecoverControl(ctx)
+		if attempt == 0 {
+			lastErr = m.intercept.RecoverControl(ctx)
+		} else {
+			lastErr = m.replaceGatewayPortForward(ctx, contextName, bridge, runtime)
+		}
 		if lastErr == nil {
 			return nil
 		}
@@ -86,6 +101,38 @@ func (m *Manager) recoverGatewayControl(ctx context.Context) error {
 		lastErr = errors.New("gateway control channel closed")
 	}
 	return lastErr
+}
+
+func (m *Manager) replaceGatewayPortForward(
+	ctx context.Context,
+	contextName string,
+	bridge any,
+	runtime *sessionRuntime,
+) error {
+	gateway, err := m.gateway.GetGateway(ctx, contextName)
+	if err != nil {
+		return fmt.Errorf("find replacement Gateway: %w", err)
+	}
+	forwarder, err := m.gateway.StartPortForward(
+		ctx, contextName, gateway.Name, cluster.GatewayPort,
+	)
+	if err != nil {
+		return fmt.Errorf("replace Gateway port-forward: %w", err)
+	}
+	if err := m.intercept.RecoverControlAt(
+		ctx, gateway.IP, forwarder.Address(),
+	); err != nil {
+		_ = forwarder.Close()
+		return err
+	}
+	updater, ok := bridge.(interface{ SetGatewayAddress(string) })
+	if !ok {
+		_ = forwarder.Close()
+		return errors.New("SOCKS bridge cannot replace its Gateway address")
+	}
+	updater.SetGatewayAddress(forwarder.Address())
+	runtime.Add("replacement Gateway port-forward", forwarder)
+	return nil
 }
 
 func controlRecoveryDelay(attempt int) time.Duration {
