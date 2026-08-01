@@ -75,13 +75,11 @@ type Manager struct {
 	mu             sync.Mutex
 	active         bool
 	stopping       bool
-	recovering     bool
 	ctx            context.Context
 	contextName    string
 	gatewayIP      string
 	gatewayAddress string
-	control        *controlClient
-	controlLost    chan struct{}
+	control        *controlSession
 	nextPort       uint32
 	registry       *runtimeRegistry
 	routes         *hostRouteRegistry
@@ -113,12 +111,14 @@ type runtimeIntercept struct {
 }
 
 func NewManager(api ClusterAPI) *Manager {
-	return &Manager{
+	manager := &Manager{
 		cluster:  api,
 		nextPort: 20000,
 		registry: newRuntimeRegistry(),
 		routes:   newHostRouteRegistry(),
 	}
+	manager.control = newControlSession(manager.handleReady)
+	return manager
 }
 
 func (m *Manager) Start(
@@ -129,15 +129,11 @@ func (m *Manager) Start(
 	if m.active {
 		return fmt.Errorf("intercept manager already started")
 	}
-	control, err := dialControl(ctx, gatewayAddress)
-	if err != nil {
+	if err := m.control.connect(ctx, gatewayAddress); err != nil {
 		return err
 	}
-	lost := make(chan struct{})
-	m.attachControlLocked(control, lost)
 	m.active = true
 	m.stopping = false
-	m.recovering = false
 	m.ctx = ctx
 	m.contextName = contextName
 	m.gatewayIP = gatewayIP
@@ -151,7 +147,7 @@ func (m *Manager) Start(
 func (m *Manager) ControlLost() <-chan struct{} {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.controlLost
+	return m.control.lostSignal()
 }
 
 // RecoverControl redials the Gateway control channel on the existing
@@ -162,7 +158,7 @@ func (m *Manager) RecoverControl(ctx context.Context) error {
 		m.mu.Unlock()
 		return fmt.Errorf("session is not connected")
 	}
-	if m.recovering {
+	if m.control.recovering {
 		m.mu.Unlock()
 		return fmt.Errorf("control recovery already in progress")
 	}
@@ -170,55 +166,30 @@ func (m *Manager) RecoverControl(ctx context.Context) error {
 		m.mu.Unlock()
 		return fmt.Errorf("gateway address is unavailable")
 	}
-	m.recovering = true
 	address := m.gatewayAddress
-	regs := m.controlRegistrationsLocked()
-	old := m.control
-	m.control = nil
+	registrations := m.registry.registrations()
+	old, generation := m.control.beginRecovery()
 	m.mu.Unlock()
 
 	if old != nil {
 		_ = old.close()
 	}
 
-	control, err := dialControl(ctx, address)
+	control, lost, err := m.control.redial(ctx, address, registrations)
 	if err != nil {
 		m.mu.Lock()
-		m.recovering = false
+		m.control.recoveryFailed(generation)
 		m.mu.Unlock()
 		return err
 	}
-	for _, reg := range regs {
-		if err := control.register(reg.id, reg.network, reg.listenPort); err != nil {
-			_ = control.close()
-			m.mu.Lock()
-			m.recovering = false
-			m.mu.Unlock()
-			return fmt.Errorf("re-register %s: %w", reg.id, err)
-		}
-	}
 
-	lost := make(chan struct{})
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.recovering = false
-	if !m.active || m.stopping {
+	if !m.active || m.stopping || !m.control.finishRecovery(generation, control, lost) {
 		_ = control.close()
 		return fmt.Errorf("session is not connected")
 	}
-	m.attachControlLocked(control, lost)
 	return nil
-}
-
-func (m *Manager) attachControlLocked(control *controlClient, lost chan struct{}) {
-	control.onReady = m.handleReady
-	control.onClose = sync.OnceFunc(func() { close(lost) })
-	m.control = control
-	m.controlLost = lost
-}
-
-func (m *Manager) controlRegistrationsLocked() []controlRegistration {
-	return m.registry.registrations()
 }
 
 func registrationFromRuntime(runtime *runtimeIntercept, subID string) (byte, uint16, bool) {
@@ -250,10 +221,8 @@ func (m *Manager) StopAll(ctx context.Context) error {
 	m.mu.Lock()
 	m.stopping = true
 	ids := m.registry.ids()
-	control := m.control
-	m.control = nil
+	control := m.control.stop()
 	m.active = false
-	m.recovering = false
 	m.mu.Unlock()
 
 	var firstErr error
@@ -314,7 +283,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 
 	m.mu.Lock()
-	if !m.active || m.control == nil || m.recovering {
+	if !m.active || !m.control.ready() {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("session is not connected")
 	}
@@ -325,7 +294,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 	contextName := m.contextName
 	gatewayIP := m.gatewayIP
-	control := m.control
+	control := m.control.current()
 	m.mu.Unlock()
 
 	service, err := m.cluster.GetService(ctx, contextName, mapping.Namespace, mapping.Service)
@@ -412,7 +381,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 
 	m.mu.Lock()
-	if !m.active || m.control == nil || m.recovering {
+	if !m.active || !m.control.ready() {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("session is not connected")
 	}
@@ -423,7 +392,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 	contextName := m.contextName
 	gatewayIP := m.gatewayIP
-	control := m.control
+	control := m.control.current()
 	m.mu.Unlock()
 
 	ports, err := buildPreviewPorts(locals, m.allocateListenPort)
@@ -485,7 +454,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 		return fmt.Errorf("intercept %q not found", id)
 	}
 	m.routes.remove(runtime.hostKeys)
-	control := m.control
+	control := m.control.current()
 	contextName := m.contextName
 	portKeys := runtime.portKeys
 	snapshot := runtime.snapshot
