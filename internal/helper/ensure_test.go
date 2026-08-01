@@ -1,13 +1,17 @@
 package helper
 
 import (
+	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestMaterializeBundledHelper(t *testing.T) {
@@ -50,9 +54,7 @@ func TestMaterializeBundledHelper(t *testing.T) {
 	var wait sync.WaitGroup
 	errors := make(chan error, 16)
 	for i := 0; i < cap(errors); i++ {
-		wait.Add(1)
-		go func() {
-			defer wait.Done()
+		wait.Go(func() {
 			concurrentPath, concurrentOK, concurrentErr := materializeBundledHelper()
 			if concurrentErr != nil {
 				errors <- concurrentErr
@@ -61,7 +63,7 @@ func TestMaterializeBundledHelper(t *testing.T) {
 			if !concurrentOK || concurrentPath != path {
 				errors <- fmt.Errorf("materialized helper = (%q, %v), want (%q, true)", concurrentPath, concurrentOK, path)
 			}
-		}()
+		})
 	}
 	wait.Wait()
 	close(errors)
@@ -104,5 +106,66 @@ func assertFileContent(t *testing.T, path, want string) {
 	}
 	if got := string(content); got != want {
 		t.Fatalf("%s content = %q, want %q", path, got, want)
+	}
+}
+
+func TestWaitForHelperReadyRetriesAtInterval(t *testing.T) {
+	started := time.Now()
+	calls := 0
+	err := waitForHelperReady(
+		context.Background(),
+		time.Second,
+		40*time.Millisecond,
+		func(context.Context) (Response, error) {
+			calls++
+			return Response{
+				Protocol:  ProtocolVersion,
+				CoreReady: calls >= 3,
+			}, nil
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if calls != 3 {
+		t.Fatalf("ping calls=%d want 3", calls)
+	}
+	if elapsed := time.Since(started); elapsed < 70*time.Millisecond {
+		t.Fatalf("helper readiness retries were not rate limited: %v", elapsed)
+	}
+}
+
+func TestWaitForHelperReadyCoreNotReadyTimesOut(t *testing.T) {
+	calls := 0
+	err := waitForHelperReady(
+		context.Background(),
+		180*time.Millisecond,
+		50*time.Millisecond,
+		func(context.Context) (Response, error) {
+			calls++
+			return Response{Protocol: ProtocolVersion, CoreReady: false}, nil
+		},
+	)
+	if err == nil || !strings.Contains(err.Error(), "bundled sing-box is not configured") {
+		t.Fatalf("error=%v, want CoreReady diagnostic", err)
+	}
+	if calls < 3 || calls > 5 {
+		t.Fatalf("ping calls=%d, want rate-limited retries", calls)
+	}
+}
+
+func TestWaitForHelperReadyReturnsParentCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := waitForHelperReady(
+		ctx,
+		time.Second,
+		50*time.Millisecond,
+		func(context.Context) (Response, error) {
+			return Response{}, errors.New("not ready")
+		},
+	)
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v want context.Canceled", err)
 	}
 }

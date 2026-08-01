@@ -9,8 +9,12 @@ import (
 )
 
 var version = "dev"
+var buildMarker = ""
 
 func main() {
+	// buildMarker lets E2E produce a byte-distinct binary without changing the
+	// dev service identity used for isolated test installs.
+	_ = buildMarker
 	if version != "" && version != "dev" {
 		helper.Version = version
 	}

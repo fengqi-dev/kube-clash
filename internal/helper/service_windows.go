@@ -29,6 +29,16 @@ func enableService(binaryPath string) error {
 		defer service.Close()
 		cfg, configErr := service.Config()
 		if configErr != nil {
+			if errors.Is(configErr, windows.ERROR_FILE_NOT_FOUND) {
+				// A partially deleted/corrupt SCM entry can still be opened while
+				// its configuration is missing. Close our handle before deletion,
+				// then recreate it through the normal install path.
+				_ = service.Close()
+				if err := disableService(); err != nil {
+					return fmt.Errorf("remove broken windows service: %w", err)
+				}
+				return enableService(binaryPath)
+			}
 			return fmt.Errorf("read windows service config: %w", configErr)
 		}
 		status, queryErr := service.Query()
