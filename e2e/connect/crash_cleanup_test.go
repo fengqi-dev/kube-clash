@@ -14,7 +14,7 @@ import (
 
 func TestTUNCoreCrashCleansUpSessionAndDNS(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 6*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)

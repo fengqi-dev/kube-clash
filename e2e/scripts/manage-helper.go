@@ -93,13 +93,20 @@ func install(source, installTool, singBox string, elevate bool) error {
 		return fmt.Errorf("install helper: %w", err)
 	}
 
+	installedPath := helper.BinaryInstallPath()
+	if installTool != "" {
+		// manage-helper is run via "go run", so its own executable lives in a
+		// temporary directory. The Windows install tool selects its destination
+		// relative to the packaged tool instead.
+		installedPath = helper.BinaryInstallPathForExecutable(installTool)
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	for {
 		status := helper.GetStatus(ctx)
 		if status.Installed && status.Running && status.CoreReady &&
 			status.Protocol == helper.ProtocolVersion {
-			if err := verifyInstalledBinary(source); err != nil {
+			if err := verifyInstalledBinary(source, installedPath); err != nil {
 				return err
 			}
 			fmt.Printf("helper ready: version=%s protocol=%d\n", status.Version, status.Protocol)
@@ -112,12 +119,12 @@ func install(source, installTool, singBox string, elevate bool) error {
 	}
 }
 
-func verifyInstalledBinary(source string) error {
+func verifyInstalledBinary(source, installedPath string) error {
 	sourceContent, err := os.ReadFile(source)
 	if err != nil {
 		return fmt.Errorf("read helper source for verification: %w", err)
 	}
-	installedContent, err := os.ReadFile(helper.BinaryInstallPath())
+	installedContent, err := os.ReadFile(installedPath)
 	if err != nil {
 		return fmt.Errorf("read installed helper for verification: %w", err)
 	}

@@ -48,8 +48,12 @@ Options:
   --skip-platform              Skip privileged Helper platform tests
   --keep-resources             Keep Kubernetes resources and Gateway image
   --ignore-network-preflight   Continue when a platform network preflight fails
-  --minikube-profile NAME      Profile used by minikube image load
+  --minikube-profile NAME      Profile used by minikube image build/load
   -h, --help                   Show this help
+
+Notes:
+  When --context is minikube*, host Docker is optional; the Gateway image is
+  built with "minikube image build".
 EOF
 }
 
@@ -153,8 +157,19 @@ refresh_sudo() {
     return 0
   fi
   require_command sudo
-  log "Refreshing sudo credentials for privileged Helper tests"
-  sudo -v
+  if sudo -n true >/dev/null 2>&1; then
+    log "Cached sudo credentials available for privileged Helper tests"
+  else
+    log "Refreshing sudo credentials for privileged Helper tests"
+    # Interactive password prompt when available; otherwise Helper install
+    # falls back to ensure-helper.go (macOS admin dialog).
+    if [[ -t 0 ]]; then
+      sudo -v
+    else
+      log "No TTY for sudo; will use non-interactive Helper install fallback"
+      return 0
+    fi
+  fi
   (
     while sudo -n true >/dev/null 2>&1; do
       sleep 45
@@ -192,15 +207,21 @@ show_network_requirements() {
 }
 
 install_helper() {
-  local elevate=()
-  if [[ "$(id -u)" -ne 0 ]]; then
-    elevate=(--elevate)
+  if [[ "$(id -u)" -eq 0 ]]; then
+    go run ./e2e/scripts/manage-helper.go \
+      --operation install \
+      --source "${HELPER_SOURCE}" \
+      --sing-box "${SINGBOX}"
+  elif sudo -n true >/dev/null 2>&1; then
+    go run ./e2e/scripts/manage-helper.go \
+      --operation install \
+      --source "${HELPER_SOURCE}" \
+      --sing-box "${SINGBOX}" \
+      --elevate
+  else
+    # macOS: osascript admin dialog; Linux: may still require passwordless sudo.
+    go run ./e2e/scripts/ensure-helper.go
   fi
-  go run ./e2e/scripts/manage-helper.go \
-    --operation install \
-    --source "${HELPER_SOURCE}" \
-    --sing-box "${SINGBOX}" \
-    "${elevate[@]}"
   go run ./e2e/scripts/helper-ping.go
   go run ./e2e/scripts/stop-helper.go
 }
@@ -219,12 +240,51 @@ uninstall_temporary_helper() {
     "${elevate[@]}" || true
 }
 
+using_minikube() {
+  [[ "${CONTEXT}" == "minikube" || "${CONTEXT}" == minikube-* ]]
+}
+
+host_docker_ok() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
 load_minikube_image_if_needed() {
-  if [[ "${CONTEXT}" == "minikube" || "${CONTEXT}" == minikube-* ]]; then
+  if using_minikube && host_docker_ok; then
     require_command minikube
     log "Loading Gateway image into minikube profile ${MINIKUBE_PROFILE}"
     minikube -p "${MINIKUBE_PROFILE}" image load "${GATEWAY_IMAGE}"
   fi
+}
+
+build_gateway_image() {
+  log "Building Gateway image ${GATEWAY_IMAGE}"
+  mkdir -p build/bin
+  CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" \
+    go build -trimpath -ldflags="-s -w" \
+      -o "${GATEWAY_BINARY}" ./cmd/kubeloop-gateway
+  chmod 755 "${GATEWAY_BINARY}"
+
+  if using_minikube; then
+    require_command minikube
+    log "Building Gateway image inside minikube (no host Docker required)"
+    # minikube may exit 0 even when buildkit prints ERROR; verify the tag exists.
+    minikube -p "${MINIKUBE_PROFILE}" image build \
+      -t "${GATEWAY_IMAGE}" \
+      -f build/gateway.e2e.Dockerfile \
+      . || true
+    if ! minikube -p "${MINIKUBE_PROFILE}" image ls |
+      grep -F "${GATEWAY_IMAGE}" >/dev/null 2>&1; then
+      echo "error: minikube image build failed for ${GATEWAY_IMAGE}" >&2
+      return 1
+    fi
+  elif host_docker_ok; then
+    docker build -t "${GATEWAY_IMAGE}" -f build/gateway.e2e.Dockerfile .
+  else
+    echo "error: host Docker unavailable and context ${CONTEXT} is not minikube" >&2
+    echo "hint: pass --context minikube, or start Docker Desktop / a Docker daemon" >&2
+    return 1
+  fi
+  IMAGE_BUILT=1
 }
 
 build_artifacts() {
@@ -232,14 +292,7 @@ build_artifacts() {
   bash ./build/bundle-helper.sh
   go run ./e2e/scripts/ensure-singbox.go
   install_helper
-
-  log "Building Gateway image ${GATEWAY_IMAGE}"
-  mkdir -p build/bin
-  CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" \
-    go build -trimpath -ldflags="-s -w" \
-      -o "${GATEWAY_BINARY}" ./cmd/kubeloop-gateway
-  docker build -t "${GATEWAY_IMAGE}" -f build/gateway.e2e.Dockerfile .
-  IMAGE_BUILT=1
+  build_gateway_image
   load_minikube_image_if_needed
 }
 
@@ -328,11 +381,11 @@ cleanup() {
     kube -n kubeloop-system delete service kubeloop-gateway \
       --ignore-not-found=true --wait=false
     if [[ "${IMAGE_BUILT}" -eq 1 ]]; then
-      if [[ "${CONTEXT}" == "minikube" || "${CONTEXT}" == minikube-* ]] &&
-        command -v minikube >/dev/null 2>&1; then
+      if using_minikube && command -v minikube >/dev/null 2>&1; then
         minikube -p "${MINIKUBE_PROFILE}" image rm "${GATEWAY_IMAGE}" || true
+      elif host_docker_ok; then
+        docker image rm "${GATEWAY_IMAGE}" --force || true
       fi
-      docker image rm "${GATEWAY_IMAGE}" --force
     fi
     uninstall_temporary_helper
   fi
@@ -357,15 +410,24 @@ finish() {
 trap finish EXIT
 
 require_command go
-require_command docker
 require_command kubectl
+if using_minikube; then
+  require_command minikube
+elif ! host_docker_ok; then
+  echo "required command is missing: docker (or use --context minikube)" >&2
+  exit 1
+fi
 if [[ "${ACTUAL_OS}" == "darwin" ]]; then
   require_command ifconfig
 else
   require_command ip
 fi
 
-docker version
+if host_docker_ok; then
+  docker version
+elif using_minikube; then
+  log "Host Docker unavailable; Gateway image will be built with minikube"
+fi
 kube cluster-info
 show_network_requirements
 refresh_sudo

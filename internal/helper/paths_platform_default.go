@@ -21,6 +21,10 @@ func platformBinaryInstallPath() string {
 	return "/usr/local/libexec/" + HelperBinaryBaseName()
 }
 
+func platformBinaryInstallPathForExecutable(string) string {
+	return platformBinaryInstallPath()
+}
+
 func platformLegacyBinaryInstallPath() string {
 	return ""
 }

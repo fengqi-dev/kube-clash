@@ -18,7 +18,7 @@ func TestMain(m *testing.M) { harness.RunMain(m) }
 
 func TestTUNDNSResolution(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 6*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)
@@ -107,7 +107,7 @@ func TestTUNDNSResolution(t *testing.T) {
 
 func TestTUNDNSGoneAfterDisconnect(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 5*time.Minute)
+	ctx, cancel := harness.TestContext(t, 1*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)

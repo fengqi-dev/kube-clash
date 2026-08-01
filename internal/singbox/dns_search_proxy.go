@@ -137,7 +137,7 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 		if resp.Rcode != dns.RcodeSuccess {
 			continue
 		}
-		if len(resp.Answer) == 0 && candidate != candidates[0] {
+		if len(resp.Answer) == 0 && !equalDNSName(candidate, original) {
 			// NODATA on an expanded name — keep trying other suffixes for A/AAAA.
 			continue
 		}
@@ -190,8 +190,8 @@ func dnsSearchCandidates(qname string, search []string, clusterDomains ...string
 	if strings.HasSuffix(name, ".in-addr.arpa") || strings.HasSuffix(name, ".ip6.arpa") {
 		return []string{original}
 	}
-	out := []string{original}
-	seen := map[string]struct{}{original: {}}
+	out := make([]string, 0, len(search)+1)
+	seen := make(map[string]struct{}, len(search)+1)
 	for _, suffix := range search {
 		suffix = strings.TrimSuffix(strings.ToLower(strings.TrimSpace(suffix)), ".")
 		if suffix == "" {
@@ -203,6 +203,9 @@ func dnsSearchCandidates(qname string, search []string, clusterDomains ...string
 		}
 		seen[candidate] = struct{}{}
 		out = append(out, candidate)
+	}
+	if _, ok := seen[original]; !ok {
+		out = append(out, original)
 	}
 	return out
 }
