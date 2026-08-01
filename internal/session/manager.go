@@ -335,10 +335,10 @@ func (m *Manager) Connect(parent context.Context, request Request) error {
 }
 
 func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) {
-	var resources []io.Closer
+	runtime := newSessionRuntime()
 	defer func() {
-		for index := len(resources) - 1; index >= 0; index-- {
-			_ = resources[index].Close()
+		if err := runtime.Close(); err != nil {
+			log.Printf("close session runtime: %v", err)
 		}
 		m.mu.Lock()
 		if m.done == done {
@@ -445,7 +445,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "Could not establish a secure Gateway channel", err)
 		return
 	}
-	resources = append(resources, forwarder)
+	runtime.Add("Gateway port-forward", forwarder)
 
 	if err := m.intercept.Start(ctx, request.Context, gateway.IP, forwarder.Address()); err != nil {
 		m.fail(ctx, state, "Could not start the Service Intercept control channel", err)
@@ -460,23 +460,23 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	// Keep an early guard for failures before sing-box starts. The same
 	// idempotent closer is appended again after the core so normal teardown
 	// restores Kubernetes resources before closing the data plane.
-	resources = append(resources, closeIntercept)
+	runtime.Add("early Intercept guard", closeIntercept)
 
 	bridgeContext, stopBridge := context.WithCancel(ctx)
-	resources = append(resources, closerFunc(stopBridge))
+	runtime.AddFunc("SOCKS Bridge context", stopBridge)
 	bridge, err := m.bridgeFactory(bridgeContext, forwarder.Address())
 	if err != nil {
 		m.fail(ctx, state, "Could not start the local SOCKS Bridge", err)
 		return
 	}
-	resources = append(resources, bridge)
+	runtime.Add("SOCKS Bridge", bridge)
 	if hostBridge, ok := bridge.(*socksbridge.Bridge); ok {
 		hostBridge.SetHostTCPHandler(m.intercept.HostTCP)
 		hostBridge.SetHostUDPHandler(m.intercept.HostUDP)
-		resources = append(resources, closerFunc(func() {
+		runtime.AddFunc("SOCKS Bridge host routes", func() {
 			hostBridge.SetHostTCPHandler(nil)
 			hostBridge.SetHostUDPHandler(nil)
-		}))
+		})
 	}
 
 	state.Phase = PhaseStarting
@@ -488,7 +488,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "Could not start sing-box TUN", err)
 		return
 	}
-	resources = append(resources, core)
+	runtime.Add("sing-box core", core)
 	m.mu.Lock()
 	m.runningCore = core
 	m.mu.Unlock()
@@ -510,7 +510,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		request.Context,
 		trackedPortForwardDialer(trafficEndpoints.PortForward, tracker),
 	)
-	resources = append(resources, closerFunc(func() {
+	runtime.AddFunc("feature traffic bindings", func() {
 		m.intercept.SetTrafficDialers(intercept.TrafficDialers{})
 		m.portfwd.StopRouted()
 		m.portfwd.SetTrafficDialer("", nil)
@@ -518,8 +518,8 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.mu.Lock()
 		m.trafficTracker = nil
 		m.mu.Unlock()
-	}))
-	resources = append(resources, closeIntercept)
+	})
+	runtime.Add("Intercept restore", closeIntercept)
 
 	connectedAt := time.Now()
 	state.Phase = PhaseConnected
@@ -547,7 +547,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "Could not watch cluster resource changes", err)
 		return
 	}
-	resources = append(resources, inventory)
+	runtime.Add("inventory watcher", inventory)
 
 	ticker := time.NewTicker(singbox.DefaultMetricsInterval)
 	defer ticker.Stop()
@@ -1248,13 +1248,6 @@ func (m *Manager) publish(state State) {
 
 func (m *Manager) publishMetrics(metrics *singbox.Metrics) {
 	m.stateHub.publishMetrics(metrics)
-}
-
-type closerFunc func()
-
-func (function closerFunc) Close() error {
-	function()
-	return nil
 }
 
 func (state State) String() string {
