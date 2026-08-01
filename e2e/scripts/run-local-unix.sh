@@ -377,12 +377,23 @@ cleanup() {
     kube delete namespace kubeloop-e2e \
       --ignore-not-found=true --wait=false
     kube -n kubeloop-system delete deployment kubeloop-gateway \
-      --ignore-not-found=true --wait=false
+      --ignore-not-found=true --wait=true --timeout=60s
+    kube -n kubeloop-system wait \
+      --for=delete pod \
+      -l app.kubernetes.io/name=kubeloop-gateway \
+      --timeout=60s >/dev/null 2>&1 || true
     kube -n kubeloop-system delete service kubeloop-gateway \
       --ignore-not-found=true --wait=false
     if [[ "${IMAGE_BUILT}" -eq 1 ]]; then
       if using_minikube && command -v minikube >/dev/null 2>&1; then
-        minikube -p "${MINIKUBE_PROFILE}" image rm "${GATEWAY_IMAGE}" || true
+        for attempt in 1 2 3; do
+          if minikube -p "${MINIKUBE_PROFILE}" image rm "${GATEWAY_IMAGE}"; then
+            break
+          fi
+          if [[ "${attempt}" -lt 3 ]]; then
+            sleep 2
+          fi
+        done
       elif host_docker_ok; then
         docker image rm "${GATEWAY_IMAGE}" --force || true
       fi
