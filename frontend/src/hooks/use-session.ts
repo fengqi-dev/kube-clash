@@ -60,6 +60,9 @@ export function useSession() {
   const [loading, setLoading] = useState(true);
   const [uiError, setUIError] = useState("");
   const [updateBusy, setUpdateBusy] = useState(false);
+  const [namespacesByContext, setNamespacesByContext] = useState<
+    Record<string, string[]>
+  >({});
   const contextRequest = useRef(0);
   const latestSelection = useRef({ context: "", namespace: "default" });
   const pendingConnectionAction = useRef<{
@@ -87,7 +90,13 @@ export function useSession() {
     let active = true;
     const unsubscribe = backend.onSession((session) => {
       if (!active) return;
-      setData((current) => ({ ...current, session }));
+      setData((current) => ({
+        ...current,
+        session:
+          session.phase === "connected" && current.session.metrics
+            ? { ...session, metrics: current.session.metrics }
+            : session,
+      }));
       const pending = pendingConnectionAction.current;
       if (!pending) return;
       if (
@@ -125,6 +134,9 @@ export function useSession() {
             : (initial.namespaces[0] ?? "default"));
         setContextName(selected);
         setNamespace(nextNamespace);
+        if (selected) {
+          setNamespacesByContext({ [selected]: initial.namespaces });
+        }
         latestSelection.current = {
           context: selected,
           namespace: nextNamespace,
@@ -156,11 +168,32 @@ export function useSession() {
     (connectionActionBusy || sessionBusy || ready) && session.context
       ? session.context
       : contextName;
+  const activeNamespaces =
+    namespacesByContext[activeContextName] ??
+    (activeContextName === contextName ? data.namespaces : []);
   const currentContext = useMemo(
     () => data.contexts.find((item) => item.name === activeContextName),
     [activeContextName, data.contexts],
   );
   const kubeconfigFiles: KubeconfigFileInfo[] = data.kubeconfigFiles ?? [];
+
+  useEffect(() => {
+    if (!activeContextName || namespacesByContext[activeContextName]) return;
+    let active = true;
+    backend
+      .namespaces(activeContextName)
+      .then((items) => {
+        if (!active) return;
+        setNamespacesByContext((current) => ({
+          ...current,
+          [activeContextName]: items,
+        }));
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [activeContextName, namespacesByContext]);
 
   async function changeContext(next: string) {
     const request = ++contextRequest.current;
@@ -170,6 +203,7 @@ export function useSession() {
       const namespaces = await backend.namespaces(next);
       if (request !== contextRequest.current) return;
       setData((current) => ({ ...current, namespaces }));
+      setNamespacesByContext((current) => ({ ...current, [next]: namespaces }));
       const nextNamespace = namespaces.includes("default")
         ? "default"
         : (namespaces[0] ?? "default");
@@ -330,6 +364,7 @@ export function useSession() {
     data,
     contextName,
     activeContextName,
+    activeNamespaces,
     namespace,
     view,
     setView,

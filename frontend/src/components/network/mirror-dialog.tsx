@@ -99,8 +99,13 @@ export function MirrorDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
+      <DialogContent showCloseButton={!busy}>
         <DialogHeader>
           <DialogTitle>{t("mirror.title")}</DialogTitle>
           <DialogDescription>
@@ -150,7 +155,12 @@ export function MirrorDialog({
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+          >
             {t("actions.cancel")}
           </Button>
           <Button

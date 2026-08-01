@@ -291,7 +291,6 @@ export function OverviewView({
       <TrafficStats
         ready={ready}
         metrics={session.metrics}
-        updatedAt={session.updatedAt}
       />
     </div>
   );

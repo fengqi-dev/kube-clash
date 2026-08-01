@@ -19,6 +19,7 @@ function App() {
     data,
     contextName,
     activeContextName,
+    activeNamespaces,
     view,
     setView,
     loading,
@@ -42,8 +43,8 @@ function App() {
 
   const scopedNamespaces = session.scopeNamespaces ?? [];
   const inventoryNamespaces = useMemo(
-    () => (scopedNamespaces.length > 0 ? scopedNamespaces : data.namespaces),
-    [data.namespaces, scopedNamespaces],
+    () => (scopedNamespaces.length > 0 ? scopedNamespaces : activeNamespaces),
+    [activeNamespaces, scopedNamespaces],
   );
   const namespaceScoped = scopedNamespaces.length > 0;
 

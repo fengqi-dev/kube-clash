@@ -7,6 +7,14 @@ import { phaseKeys } from "@/lib/phase";
 import { cn } from "@/lib/utils";
 import type { SessionState } from "@/types";
 
+type DisplayLogLevel = "INFO" | "WARN" | "ERROR";
+
+function displayLogLevel(level: string): DisplayLogLevel {
+  if (level === "ERROR") return "ERROR";
+  if (level === "WARN") return "WARN";
+  return "INFO";
+}
+
 export function LogsView({
   session,
   error,
@@ -18,7 +26,7 @@ export function LogsView({
 
   const lines = (session.events ?? []).map((event) => ({
     time: new Date(event.time).toLocaleTimeString(locale, { hour12: false }),
-    level: (event.level === "ERROR" ? "ERROR" : "INFO") as "INFO" | "ERROR",
+    level: displayLogLevel(event.level),
     text: event.message,
   }));
 
@@ -87,13 +95,23 @@ function LogLine({
   text,
 }: {
   time: string;
-  level: "INFO" | "ERROR";
+  level: DisplayLogLevel;
   text: string;
 }) {
   return (
     <div className="grid grid-cols-[82px_62px_1fr] border-b px-4 py-3 last:border-0">
       <span className="text-muted-foreground">{time}</span>
-      <span className={cn(level === "ERROR" ? "text-destructive" : "text-primary/80")}>{level}</span>
+      <span
+        className={cn(
+          level === "ERROR"
+            ? "text-destructive"
+            : level === "WARN"
+              ? "text-amber-600 dark:text-amber-400"
+              : "text-primary/80",
+        )}
+      >
+        {level}
+      </span>
       <span className="break-words text-muted-foreground">{text}</span>
     </div>
   );
