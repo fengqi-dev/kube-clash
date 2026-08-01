@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { backend } from "@/backend";
 import type {
   BootstrapData,
@@ -60,11 +60,43 @@ export function useSession() {
   const [loading, setLoading] = useState(true);
   const [uiError, setUIError] = useState("");
   const [updateBusy, setUpdateBusy] = useState(false);
+  const contextRequest = useRef(0);
+  const latestSelection = useRef({ context: "", namespace: "default" });
+  const pendingConnectionAction = useRef<{
+    kind: "start" | "stop" | "switch";
+    target: string;
+  } | null>(null);
+  const [connectionActionBusy, setConnectionActionBusy] = useState(false);
+
+  function finishConnectionAction() {
+    pendingConnectionAction.current = null;
+    setConnectionActionBusy(false);
+  }
+
+  function beginConnectionAction(
+    kind: "start" | "stop" | "switch",
+    target: string,
+  ) {
+    if (pendingConnectionAction.current) return false;
+    pendingConnectionAction.current = { kind, target };
+    setConnectionActionBusy(true);
+    return true;
+  }
 
   useEffect(() => {
     let active = true;
     const unsubscribe = backend.onSession((session) => {
-      if (active) setData((current) => ({ ...current, session }));
+      if (!active) return;
+      setData((current) => ({ ...current, session }));
+      const pending = pendingConnectionAction.current;
+      if (!pending) return;
+      if (
+        pending.kind !== "stop" &&
+        session.context === pending.target &&
+        session.phase !== "idle"
+      ) {
+        finishConnectionAction();
+      }
     });
     const unsubscribeMetrics = backend.onSessionMetrics((metrics) => {
       if (!active) return;
@@ -93,6 +125,10 @@ export function useSession() {
             : (initial.namespaces[0] ?? "default"));
         setContextName(selected);
         setNamespace(nextNamespace);
+        latestSelection.current = {
+          context: selected,
+          namespace: nextNamespace,
+        };
         if (selected) {
           void backend.probeContext(selected).catch(() => undefined);
         }
@@ -108,39 +144,59 @@ export function useSession() {
   }, []);
 
   const session = data.session;
-  const busy =
+  const sessionBusy =
     session.phase === "checking" ||
     session.phase === "installing-gateway" ||
     session.phase === "discovering-network" ||
     session.phase === "starting-tunnel";
+  const busy = sessionBusy || connectionActionBusy;
   const ready = session.phase === "connected";
   const discovery = session.discovery;
+  const activeContextName =
+    (connectionActionBusy || sessionBusy || ready) && session.context
+      ? session.context
+      : contextName;
   const currentContext = useMemo(
-    () => data.contexts.find((item) => item.name === contextName),
-    [contextName, data.contexts],
+    () => data.contexts.find((item) => item.name === activeContextName),
+    [activeContextName, data.contexts],
   );
   const kubeconfigFiles: KubeconfigFileInfo[] = data.kubeconfigFiles ?? [];
 
   async function changeContext(next: string) {
+    const request = ++contextRequest.current;
     setContextName(next);
     setUIError("");
     try {
       const namespaces = await backend.namespaces(next);
+      if (request !== contextRequest.current) return;
       setData((current) => ({ ...current, namespaces }));
       const nextNamespace = namespaces.includes("default")
         ? "default"
         : (namespaces[0] ?? "default");
       setNamespace(nextNamespace);
+      latestSelection.current = { context: next, namespace: nextNamespace };
       await backend.rememberSelection(next, nextNamespace);
+      if (request !== contextRequest.current) {
+        const latest = latestSelection.current;
+        if (latest.context && latest.context !== next) {
+          await backend
+            .rememberSelection(latest.context, latest.namespace)
+            .catch(() => undefined);
+        }
+        return;
+      }
       void backend.probeContext(next).catch(() => undefined);
     } catch (error) {
-      setUIError((error as Error).message);
+      if (request === contextRequest.current) {
+        setUIError((error as Error).message);
+      }
     }
   }
 
   async function changeNamespace(next: string) {
     setNamespace(next);
     if (!contextName) return;
+    latestSelection.current = { context: contextName, namespace: next };
     try {
       await backend.rememberSelection(contextName, next);
     } catch (error) {
@@ -149,31 +205,48 @@ export function useSession() {
   }
 
   async function toggleConnection() {
+    const stopping = sessionBusy || ready;
+    const target = stopping ? session.context : contextName;
+    if (!beginConnectionAction(stopping ? "stop" : "start", target)) return;
     setUIError("");
     try {
-      if (busy || ready) {
+      if (stopping) {
         await backend.disconnect();
+        finishConnectionAction();
       } else {
+        if (session.phase === "error") {
+          await backend.disconnect();
+        }
         // Namespace seeds DNS short-name search (default.svc.cluster.local…).
         await backend.connect(contextName, "default");
       }
     } catch (error) {
+      finishConnectionAction();
       setUIError((error as Error).message);
     }
   }
 
   async function connectContext(next: string) {
+    const stopping = sessionBusy || (ready && session.context === next);
+    const switching = ready && session.context !== next;
+    const kind = stopping ? "stop" : switching ? "switch" : "start";
+    if (!beginConnectionAction(kind, stopping ? session.context : next)) return;
     setUIError("");
     try {
-      if (busy) {
+      if (sessionBusy) {
         await backend.disconnect();
+        finishConnectionAction();
         return;
       }
       if (ready && session.context === next) {
         await backend.disconnect();
+        finishConnectionAction();
         return;
       }
       if (ready && session.context !== next) {
+        await backend.disconnect();
+      }
+      if (session.phase === "error") {
         await backend.disconnect();
       }
       if (next !== contextName) {
@@ -181,6 +254,7 @@ export function useSession() {
       }
       await backend.connect(next, "default");
     } catch (error) {
+      finishConnectionAction();
       setUIError((error as Error).message);
     }
   }
@@ -255,6 +329,7 @@ export function useSession() {
   return {
     data,
     contextName,
+    activeContextName,
     namespace,
     view,
     setView,

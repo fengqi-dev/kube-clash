@@ -18,6 +18,7 @@ function App() {
   const {
     data,
     contextName,
+    activeContextName,
     view,
     setView,
     loading,
@@ -91,7 +92,7 @@ function App() {
         >
           {view === "overview" && (
             <OverviewView
-              contextName={contextName}
+              contextName={activeContextName}
               clusterName={currentContext?.cluster ?? ""}
               session={session}
               loading={loading}
@@ -125,7 +126,7 @@ function App() {
           )}
           {view === "workload" && (
             <WorkloadView
-              contextName={contextName}
+              contextName={activeContextName}
               namespaces={inventoryNamespaces}
               namespaceScoped={namespaceScoped}
               ready={ready}
@@ -134,7 +135,7 @@ function App() {
           )}
           {view === "network" && (
             <NetworkView
-              contextName={contextName}
+              contextName={activeContextName}
               namespaces={inventoryNamespaces}
               namespaceScoped={namespaceScoped}
               ready={ready}

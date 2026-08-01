@@ -26,16 +26,6 @@ func (m *Manager) serveConnected(
 	for {
 		select {
 		case <-ctx.Done():
-			m.clearRecentConnections()
-			m.publish(State{
-				Phase:             PhaseIdle,
-				Message:           "Disconnected",
-				CoreVersion:       singbox.Version,
-				KubernetesVersion: state.KubernetesVersion,
-				Context:           state.Context,
-				Namespace:         state.Namespace,
-			})
-			m.AppendLog("INFO", "disconnected")
 			return
 
 		case <-core.Done():
