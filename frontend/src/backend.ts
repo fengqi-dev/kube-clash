@@ -1,6 +1,7 @@
 import type {
   BootstrapData,
   ClusterInventory,
+  ConnectivityTestResult,
   HelperStatus,
   HostAlias,
   InterceptInfo,
@@ -37,7 +38,7 @@ declare global {
           ListPods(contextName: string, namespace: string): Promise<PodInfo[]>;
           Connect(contextName: string, namespace: string): Promise<void>;
           Disconnect(): Promise<void>;
-          TestPortForward(id: string): Promise<void>;
+          TestPortForward(id: string): Promise<ConnectivityTestResult>;
           GetManualNetwork(contextName: string): Promise<ManualNetwork>;
           SetManualNetwork(contextName: string, network: ManualNetwork): Promise<void>;
           SetDNSNamespace(contextName: string, namespace: string): Promise<void>;
@@ -47,7 +48,7 @@ declare global {
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
           StartMirror(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
-          TestIntercept(id: string): Promise<void>;
+          TestIntercept(id: string): Promise<ConnectivityTestResult>;
           ListIntercepts(): Promise<InterceptInfo[]>;
           ListMirrors(): Promise<InterceptInfo[]>;
           StartPreview(request: PreviewRequest): Promise<PreviewInfo>;

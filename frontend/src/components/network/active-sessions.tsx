@@ -24,7 +24,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
-import type { InterceptInfo, PortForwardInfo, PreviewInfo } from "@/types";
+import type {
+  ConnectivityTestResult,
+  InterceptInfo,
+  PortForwardInfo,
+  PreviewInfo,
+} from "@/types";
 
 export function ActiveSessions({
   contextName,
@@ -51,6 +56,9 @@ export function ActiveSessions({
   const [testFlow, setTestFlow] = useState<SessionTestFlow | null>(null);
   const [testStatus, setTestStatus] = useState<SessionTestStatus>("running");
   const [testError, setTestError] = useState("");
+  const [testFailure, setTestFailure] = useState<
+    { route: number; segment: number } | undefined
+  >();
   const reloadGeneration = useRef(0);
   const podOnly = scope === "podPortForward";
 
@@ -184,10 +192,13 @@ export function ActiveSessions({
     });
     setTestStatus("running");
     setTestError("");
+    setTestFailure(undefined);
     try {
-      await backend.testPortForward(item.id);
+      const result = await backend.testPortForward(item.id);
       await waitForTestAnimation(startedAt);
-      setTestStatus("success");
+      applyTestResult(result, {
+        "local-listener": { route: 0, segment: 0 },
+      });
     } catch (error) {
       await waitForTestAnimation(startedAt);
       setTestStatus("error");
@@ -255,10 +266,22 @@ export function ActiveSessions({
     });
     setTestStatus("running");
     setTestError("");
+    setTestFailure(undefined);
     try {
-      await backend.testIntercept(item.id);
+      const result = await backend.testIntercept(item.id);
       await waitForTestAnimation(startedAt);
-      setTestStatus("success");
+      applyTestResult(
+        result,
+        kind === "mirror"
+          ? {
+              "gateway-control": { route: 1, segment: 0 },
+              "local-target": { route: 1, segment: 1 },
+            }
+          : {
+              "gateway-control": { route: 0, segment: 1 },
+              "local-target": { route: 0, segment: 2 },
+            },
+      );
     } catch (error) {
       await waitForTestAnimation(startedAt);
       setTestStatus("error");
@@ -273,6 +296,24 @@ export function ActiveSessions({
     exchanges.length === 0 &&
     mirrors.length === 0 &&
     previews.length === 0;
+
+  function applyTestResult(
+    result: ConnectivityTestResult,
+    layers: Partial<
+      Record<
+        NonNullable<ConnectivityTestResult["failedLayer"]>,
+        { route: number; segment: number }
+      >
+    >,
+  ) {
+    if (result.passed) {
+      setTestStatus("success");
+      return;
+    }
+    setTestStatus("error");
+    setTestError(result.error || t("network.sessionTestFailed"));
+    setTestFailure(result.failedLayer ? layers[result.failedLayer] : undefined);
+  }
 
   return (
     <section className="mt-5 overflow-hidden rounded-lg border bg-card">
@@ -519,6 +560,7 @@ export function ActiveSessions({
         flow={testFlow}
         status={testStatus}
         error={testError}
+        failure={testFailure}
         onClose={() => setTestFlow(null)}
       />
     </section>

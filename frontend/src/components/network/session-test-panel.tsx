@@ -24,11 +24,13 @@ export function SessionTestPanel({
   flow,
   status,
   error,
+  failure,
   onClose,
 }: {
   flow: SessionTestFlow | null;
   status: SessionTestStatus;
   error?: string;
+  failure?: { route: number; segment: number };
   onClose(): void;
 }) {
   const { t } = useI18n();
@@ -76,22 +78,30 @@ export function SessionTestPanel({
                           "break-words font-mono text-[11px] shadow-xs transition-colors",
                           status === "running" && "border-primary/40",
                           status === "success" && "border-success/45",
-                          status === "error" && "border-destructive/45",
                         )}
                       >
                         {node}
                       </div>
                       {nodeIndex < route.nodes.length - 1 ? (
                         <div className="relative mx-2 h-8 w-14 shrink-0 overflow-hidden">
-                          <span className="absolute top-1/2 right-0 left-0 h-px -translate-y-1/2 bg-border" />
+                          <span
+                            className={cn(
+                              "absolute top-1/2 right-0 left-0 h-px -translate-y-1/2",
+                              segmentColor(status, failure, routeIndex, nodeIndex, true),
+                            )}
+                          />
                           <span
                             className={cn(
                               "absolute top-1/2 left-0 size-2 -translate-y-1/2 rounded-full",
                               status === "running"
                                 ? "animate-session-flow bg-primary shadow-[0_0_8px_var(--primary)]"
-                                : status === "success"
-                                  ? "left-[calc(100%-0.5rem)] bg-success"
-                                  : "bg-destructive",
+                                : segmentColor(
+                                    status,
+                                    failure,
+                                    routeIndex,
+                                    nodeIndex,
+                                    false,
+                                  ),
                             )}
                             style={{ animationDelay: `${(routeIndex + nodeIndex) * 140}ms` }}
                           />
@@ -136,4 +146,27 @@ export function SessionTestPanel({
       </DialogContent>
     </Dialog>
   );
+}
+
+function segmentColor(
+  status: SessionTestStatus,
+  failure: { route: number; segment: number } | undefined,
+  route: number,
+  segment: number,
+  track: boolean,
+) {
+  if (status === "running") return track ? "bg-primary/25" : "bg-primary";
+  if (status === "success") {
+    return track ? "bg-success/45" : "left-[calc(100%-0.5rem)] bg-success";
+  }
+  if (!failure) return track ? "bg-border" : "bg-muted-foreground";
+  if (route < failure.route || (route === failure.route && segment < failure.segment)) {
+    return track ? "bg-success/45" : "left-[calc(100%-0.5rem)] bg-success";
+  }
+  if (route === failure.route && segment === failure.segment) {
+    return track
+      ? "bg-destructive/55"
+      : "left-1/2 -translate-x-1/2 bg-destructive";
+  }
+  return track ? "bg-border" : "hidden";
 }

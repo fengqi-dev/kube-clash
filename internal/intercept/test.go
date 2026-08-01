@@ -12,6 +12,24 @@ import (
 
 const connectivityTestTimeout = 3 * time.Second
 
+// TestControl verifies that the session still has an active Gateway control
+// channel before testing its local application target.
+func (m *Manager) TestControl(id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	runtime := m.registry.get(id)
+	if runtime == nil {
+		return fmt.Errorf("session %q not found", id)
+	}
+	if !m.active || m.stopping || !m.control.ready() {
+		return errors.New("Gateway control channel is unavailable")
+	}
+	if len(runtime.portKeys) == 0 {
+		return errors.New("Gateway session has no registered ports")
+	}
+	return nil
+}
+
 // Test verifies that every TCP local target in an Exchange, Mirror, or Preview
 // session accepts a connection.
 func (m *Manager) Test(parent context.Context, id string) error {

@@ -5,6 +5,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
+	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
 
@@ -20,7 +21,7 @@ func (a *App) StopIntercept(id string) error {
 	return a.manager.StopIntercept(a.context(), id)
 }
 
-func (a *App) TestIntercept(id string) error {
+func (a *App) TestIntercept(id string) session.ConnectivityTestResult {
 	return a.manager.TestIntercept(a.context(), id)
 }
 
@@ -52,7 +53,7 @@ func (a *App) StopPortForward(id string) error {
 	return a.manager.StopPortForward(id)
 }
 
-func (a *App) TestPortForward(id string) error {
+func (a *App) TestPortForward(id string) session.ConnectivityTestResult {
 	return a.manager.TestPortForward(a.context(), id)
 }
 

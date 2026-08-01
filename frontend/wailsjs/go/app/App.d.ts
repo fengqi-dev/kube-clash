@@ -8,6 +8,7 @@ import {mcp} from '../models';
 import {helperapi} from '../models';
 import {intercept} from '../models';
 import {portfwd} from '../models';
+import {session} from '../models';
 
 export function AddKubeconfig():Promise<cluster.ClusterInventory>;
 
@@ -93,8 +94,8 @@ export function StopPortForward(arg1:string):Promise<void>;
 
 export function StopPreview(arg1:string):Promise<void>;
 
-export function TestIntercept(arg1:string):Promise<void>;
+export function TestIntercept(arg1:string):Promise<session.ConnectivityTestResult>;
 
-export function TestPortForward(arg1:string):Promise<void>;
+export function TestPortForward(arg1:string):Promise<session.ConnectivityTestResult>;
 
 export function UninstallHelper():Promise<void>;
