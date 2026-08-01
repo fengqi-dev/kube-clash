@@ -1,4 +1,4 @@
-package main
+package app
 
 import (
 	"context"
@@ -9,6 +9,10 @@ import (
 )
 
 const maxTrayRecentClusters = 5
+
+func StartTray(app *App) {
+	app.tray = tray.Start(&trayHost{app: app})
+}
 
 // trayHost adapts App to tray.Host without exporting those methods on App
 // (Wails binds all exported App methods to the frontend).

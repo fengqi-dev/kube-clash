@@ -298,7 +298,7 @@ func TestStartMirrorUDPTeesToLocalKeepsPrimaryResponse(t *testing.T) {
 		if err != nil {
 			return
 		}
-		_, _ = primary.WriteTo([]byte(fmt.Sprintf("primary:%s", buf[:n])), addr)
+		_, _ = primary.WriteTo(fmt.Appendf(nil, "primary:%s", buf[:n]), addr)
 	}()
 
 	mirrored := make(chan string, 1)
@@ -623,7 +623,7 @@ func TestHostUDPServesExchangeWithoutGatewayHairpin(t *testing.T) {
 			if err != nil {
 				return
 			}
-			_, _ = local.WriteTo([]byte(fmt.Sprintf("local-udp:%s", buf[:n])), addr)
+			_, _ = local.WriteTo(fmt.Appendf(nil, "local-udp:%s", buf[:n]), addr)
 		}
 	}()
 

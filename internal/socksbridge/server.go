@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"slices"
 	"strconv"
 	"sync"
 	"time"
@@ -334,11 +335,9 @@ func negotiate(reader *bufio.Reader, writer io.Writer) error {
 	if _, err := io.ReadFull(reader, methods); err != nil {
 		return err
 	}
-	for _, method := range methods {
-		if method == methodNone {
-			_, err := writer.Write([]byte{socksVersion, methodNone})
-			return err
-		}
+	if slices.Contains(methods, methodNone) {
+		_, err := writer.Write([]byte{socksVersion, methodNone})
+		return err
 	}
 	_, _ = writer.Write([]byte{socksVersion, 0xff})
 	return errors.New("SOCKS client does not support no-auth")

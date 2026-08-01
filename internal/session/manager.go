@@ -551,7 +551,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			m.AppendLog("WARN", "gateway control channel closed; reconnecting")
 			var lastErr error
 			recovered := false
-			for attempt := 0; attempt < 5; attempt++ {
+			for attempt := range 5 {
 				if attempt > 0 {
 					delay := 500 * time.Millisecond
 					switch {

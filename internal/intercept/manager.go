@@ -3,6 +3,7 @@ package intercept
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
 	"strconv"
 	"strings"
@@ -409,9 +410,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 
 	selector := map[string]string{}
-	for k, v := range service.Spec.Selector {
-		selector[k] = v
-	}
+	maps.Copy(selector, service.Spec.Selector)
 	snapshot := &cluster.ServiceInterceptSnapshot{
 		Namespace: mapping.Namespace,
 		Service:   mapping.Service,

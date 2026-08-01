@@ -1,11 +1,13 @@
-package main
+package app
 
 import (
 	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"log"
+	"slices"
 	"sync"
 	"time"
 
@@ -47,7 +49,8 @@ type BootstrapData struct {
 	KubeconfigFiles    []cluster.KubeconfigFileInfo `json:"kubeconfigFiles,omitempty"`
 }
 
-func NewApp() *App {
+func NewApp(version string, embeddedHelperFiles fs.FS) *App {
+	registerEmbeddedHelpers(embeddedHelperFiles)
 	if version != "" {
 		helper.Version = version
 	}
@@ -80,6 +83,26 @@ func NewApp() *App {
 		mcp: loopmcp.NewController(provider, manager, stateStore, version),
 	}
 	return app
+}
+
+func StartupHandler(a *App) func(context.Context) {
+	return a.startup
+}
+
+func BeforeCloseHandler(a *App) func(context.Context) bool {
+	return a.beforeClose
+}
+
+func ShutdownHandler(a *App) func(context.Context) {
+	return a.shutdown
+}
+
+func ShowWindow(a *App) {
+	if a.ctx == nil {
+		return
+	}
+	runtime.WindowUnminimise(a.ctx)
+	runtime.WindowShow(a.ctx)
 }
 
 func (a *App) startup(ctx context.Context) {
@@ -550,10 +573,5 @@ func contextExists(contexts []cluster.ContextInfo, name string) bool {
 }
 
 func containsString(items []string, want string) bool {
-	for _, item := range items {
-		if item == want {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, want)
 }
