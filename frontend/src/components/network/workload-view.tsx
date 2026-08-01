@@ -56,10 +56,25 @@ export function WorkloadView({
   const livePods = session.pods;
 
   useEffect(() => {
-    if (!namespaceScoped) return;
-    if (namespaces.length === 0) return;
-    if (namespace === ALL_NAMESPACES || !namespaces.includes(namespace)) {
-      setNamespace(namespaces[0]);
+    setNamespace(
+      namespaceScoped && namespaces[0] ? namespaces[0] : ALL_NAMESPACES,
+    );
+    setQuery("");
+    setSelected(null);
+    setDialogOpen(false);
+  }, [contextName]);
+
+  useEffect(() => {
+    const fallback =
+      namespaceScoped && namespaces[0] ? namespaces[0] : ALL_NAMESPACES;
+    if (
+      (namespaceScoped &&
+        (namespace === ALL_NAMESPACES || !namespaces.includes(namespace))) ||
+      (!namespaceScoped &&
+        namespace !== ALL_NAMESPACES &&
+        !namespaces.includes(namespace))
+    ) {
+      setNamespace(fallback);
     }
   }, [namespace, namespaceScoped, namespaces]);
 

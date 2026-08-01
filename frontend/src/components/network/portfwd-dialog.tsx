@@ -124,8 +124,13 @@ export function PortForwardDialog({
   }
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent>
+    <Dialog
+      open={open}
+      onOpenChange={(next) => {
+        if (!busy) onOpenChange(next);
+      }}
+    >
+      <DialogContent showCloseButton={!busy}>
         <DialogHeader>
           <DialogTitle>{t("portfwd.title")}</DialogTitle>
           <DialogDescription>
@@ -173,7 +178,12 @@ export function PortForwardDialog({
         </div>
 
         <DialogFooter>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => onOpenChange(false)}
+          >
             {t("actions.cancel")}
           </Button>
           <Button

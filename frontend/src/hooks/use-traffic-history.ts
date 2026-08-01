@@ -12,7 +12,6 @@ const windowMs = 10 * 60 * 1000;
 export function useTrafficHistory(
   ready: boolean,
   metrics: Metrics | undefined,
-  updatedAt?: string,
 ) {
   const [history, setHistory] = useState<TrafficPoint[]>([]);
   const [uploadSpeed, setUploadSpeed] = useState(0);
@@ -63,7 +62,7 @@ export function useTrafficHistory(
       while (start < next.length && next[start].at < cutoff) start += 1;
       return start === 0 ? next : next.slice(start);
     });
-  }, [ready, metrics, updatedAt]);
+  }, [ready, metrics]);
 
   return {
     history,

@@ -19,14 +19,12 @@ const downloadColor = "#3b82f6";
 export function TrafficStats({
   ready,
   metrics,
-  updatedAt,
 }: {
   ready: boolean;
   metrics?: Metrics;
-  updatedAt?: string;
 }) {
   const { t, language } = useI18n();
-  const traffic = useTrafficHistory(ready, metrics, updatedAt);
+  const traffic = useTrafficHistory(ready, metrics);
 
   return (
     <section>

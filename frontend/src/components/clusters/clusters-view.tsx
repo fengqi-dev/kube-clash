@@ -66,11 +66,28 @@ export function ClustersView({
   onProbe(name: string): Promise<ProbeResult>;
 }) {
   const { t } = useI18n();
-  const [refreshing, setRefreshing] = useState(false);
-  const [adding, setAdding] = useState(false);
-  const [removing, setRemoving] = useState("");
+  const [operation, setOperation] = useState<
+    { kind: "reload" | "add" | "remove"; target?: string } | undefined
+  >();
+  const operationActive = useRef(false);
   const [probes, setProbes] = useState<Record<string, ProbeState>>({});
   const probeGen = useRef(0);
+  const probeRequests = useRef<Record<string, number>>({});
+  const refreshing = operation?.kind === "reload";
+  const adding = operation?.kind === "add";
+  const removing = operation?.kind === "remove" ? operation.target ?? "" : "";
+
+  function beginOperation(kind: "reload" | "add" | "remove", target?: string) {
+    if (operationActive.current) return false;
+    operationActive.current = true;
+    setOperation({ kind, target });
+    return true;
+  }
+
+  function finishOperation() {
+    operationActive.current = false;
+    setOperation(undefined);
+  }
 
   async function runProbes(items: ContextInfo[]) {
     const gen = ++probeGen.current;
@@ -119,7 +136,7 @@ export function ClustersView({
   }, [contexts, loading]);
 
   async function handleReload() {
-    setRefreshing(true);
+    if (!beginOperation("reload")) return;
     try {
       const inventory = await onReload();
       await runProbes(inventory.contexts);
@@ -128,12 +145,12 @@ export function ClustersView({
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      setRefreshing(false);
+      finishOperation();
     }
   }
 
   async function handleAdd() {
-    setAdding(true);
+    if (!beginOperation("add")) return;
     try {
       const inventory = await onAddFile();
       await runProbes(inventory.contexts);
@@ -142,12 +159,12 @@ export function ClustersView({
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      setAdding(false);
+      finishOperation();
     }
   }
 
   async function handleRemove(path: string) {
-    setRemoving(path);
+    if (!beginOperation("remove", path)) return;
     try {
       const inventory = await onRemoveFile(path);
       await runProbes(inventory.contexts);
@@ -156,19 +173,34 @@ export function ClustersView({
         description: error instanceof Error ? error.message : String(error),
       });
     } finally {
-      setRemoving("");
+      finishOperation();
     }
   }
 
   async function handleProbeOne(name: string) {
+    const generation = probeGen.current;
+    const request = (probeRequests.current[name] ?? 0) + 1;
+    probeRequests.current[name] = request;
     setProbes((current) => ({
       ...current,
       [name]: { ...(current[name] ?? { context: name, ok: false }), probing: true },
     }));
     try {
       const result = await onProbe(name);
+      if (
+        generation !== probeGen.current ||
+        probeRequests.current[name] !== request
+      ) {
+        return;
+      }
       setProbes((current) => ({ ...current, [name]: { ...result, probing: false } }));
     } catch (error) {
+      if (
+        generation !== probeGen.current ||
+        probeRequests.current[name] !== request
+      ) {
+        return;
+      }
       setProbes((current) => ({
         ...current,
         [name]: {
@@ -198,7 +230,7 @@ export function ClustersView({
             type="button"
             variant="outline"
             size="sm"
-            disabled={refreshing || loading}
+            disabled={Boolean(operation) || loading}
             onClick={() => void handleReload()}
           >
             {refreshing ? (
@@ -211,7 +243,7 @@ export function ClustersView({
           <Button
             type="button"
             size="sm"
-            disabled={adding || loading}
+            disabled={Boolean(operation) || loading}
             onClick={() => void handleAdd()}
           >
             {adding ? (
@@ -252,7 +284,7 @@ export function ClustersView({
                       variant="ghost"
                       size="icon"
                       className="size-7"
-                      disabled={removing === file.path}
+                      disabled={Boolean(operation)}
                       onClick={() => void handleRemove(file.path)}
                       aria-label={t("clusters.removeFile")}
                     >
