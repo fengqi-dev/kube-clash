@@ -345,3 +345,23 @@ jobs:
           # [skip ci] prevents the bump commit from re-running CI/Pages.
           git commit -m "chore(homebrew): bump kubeloop cask to ${GITHUB_REF_NAME} [skip ci]"
           git push
+
+  pages:
+    name: Deploy Pages
+    needs: publish
+    # github-pages env only allows main; dispatch Pages from the default branch
+    # instead of deploying from the release tag ref.
+    if: ${{ !contains(github.ref_name, '-') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+      contents: read
+    steps:
+      - name: Dispatch Pages on default branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run pages.yml \
+            --repo "${{ github.repository }}" \
+            --ref "${{ github.event.repository.default_branch }}"
