@@ -5,8 +5,6 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 func TestGeneratedConfigAcceptedBySingBox(t *testing.T) {
@@ -14,7 +12,7 @@ func TestGeneratedConfigAcceptedBySingBox(t *testing.T) {
 	if binary == "" {
 		t.Skip("KUBELOOP_SINGBOX_PATH is not set")
 	}
-	content, err := Generate(cluster.Discovery{
+	content, err := Generate(NetworkSpec{
 		PodCIDRs:     []string{"10.244.0.0/16"},
 		ServiceCIDRs: []string{"10.96.0.0/12"},
 		DNSServer:    "10.96.0.10",

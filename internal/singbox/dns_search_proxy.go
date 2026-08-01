@@ -7,7 +7,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 	"github.com/miekg/dns"
 )
 
@@ -41,9 +41,9 @@ func startDNSSearchProxy(
 	if upstreamHost == "" {
 		upstreamHost = DefaultDNSListen
 	}
-	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
 	if err != nil {
-		domains = []string{cluster.DefaultClusterDomain}
+		domains = []string{dnsname.DefaultClusterDomain}
 	}
 	proxy := &dnsSearchProxy{
 		upstream:  net.JoinHostPort(upstreamHost, fmt.Sprintf("%d", upstreamPort)),
@@ -78,9 +78,9 @@ func (p *dnsSearchProxy) SetSearch(search []string) {
 }
 
 func (p *dnsSearchProxy) SetClusterDomains(domains []string) {
-	normalized, err := cluster.NormalizeClusterDomains(domains)
+	normalized, err := dnsname.NormalizeClusterDomains(domains)
 	if err != nil {
-		normalized = []string{cluster.DefaultClusterDomain}
+		normalized = []string{dnsname.DefaultClusterDomain}
 	}
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -178,9 +178,9 @@ func dnsSearchCandidates(qname string, search []string, clusterDomains ...string
 		return nil
 	}
 	original := name + "."
-	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
-		domains = []string{cluster.DefaultClusterDomain}
+		domains = []string{dnsname.DefaultClusterDomain}
 	}
 	for _, domain := range domains {
 		if name == domain || strings.HasSuffix(name, "."+domain) {

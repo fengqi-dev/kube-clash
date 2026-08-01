@@ -10,8 +10,6 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 const (
@@ -46,12 +44,13 @@ type Info struct {
 
 type ClusterAPI interface {
 	ResolveServiceBackend(context.Context, string, string, string, int32) (string, uint16, error)
-	StartPodPortForward(context.Context, string, string, string, uint16, uint16) (cluster.PortForward, error)
+	ResolveRoutedTarget(context.Context, Request) (string, error)
+	StartPodPortForward(context.Context, string, string, string, uint16, uint16) (Forwarder, error)
 }
 
-type routedTargetAPI interface {
-	ListPods(context.Context, string, string) ([]cluster.PodInfo, error)
-	ListServices(context.Context, string, string) ([]cluster.ServiceInfo, error)
+type Forwarder interface {
+	Address() string
+	Close() error
 }
 
 type TrafficDialer interface {
@@ -77,7 +76,7 @@ func (m *Manager) SetTrafficDialer(contextName string, dialer TrafficDialer) {
 
 type runtimeForward struct {
 	info      Info
-	forwarder cluster.PortForward
+	forwarder Forwarder
 	routed    bool
 }
 
@@ -190,51 +189,14 @@ func (m *Manager) Start(ctx context.Context, request Request) (Info, error) {
 }
 
 func (m *Manager) resolveRoutedTarget(ctx context.Context, request Request) (string, error) {
-	api, ok := m.cluster.(routedTargetAPI)
-	if !ok {
-		return "", fmt.Errorf("cluster provider does not support routed port-forward targets")
-	}
-	switch request.Kind {
-	case KindPod:
-		pods, err := api.ListPods(ctx, request.Context, request.Namespace)
-		if err != nil {
-			return "", err
-		}
-		for _, pod := range pods {
-			if pod.Namespace == request.Namespace && pod.Name == request.Name {
-				if pod.IP == "" {
-					return "", fmt.Errorf("pod %s/%s has no IP", request.Namespace, request.Name)
-				}
-				return net.JoinHostPort(pod.IP, strconv.Itoa(int(request.RemotePort))), nil
-			}
-		}
-		return "", fmt.Errorf("pod %s/%s not found", request.Namespace, request.Name)
-	case KindService:
-		services, err := api.ListServices(ctx, request.Context, request.Namespace)
-		if err != nil {
-			return "", err
-		}
-		for _, service := range services {
-			if service.Namespace == request.Namespace && service.Name == request.Name {
-				if service.ClusterIP == "" {
-					return "", fmt.Errorf("service %s/%s has no ClusterIP", request.Namespace, request.Name)
-				}
-				return net.JoinHostPort(
-					service.ClusterIP, strconv.Itoa(int(request.RemotePort)),
-				), nil
-			}
-		}
-		return "", fmt.Errorf("service %s/%s not found", request.Namespace, request.Name)
-	default:
-		return "", fmt.Errorf("unsupported kind %q", request.Kind)
-	}
+	return m.cluster.ResolveRoutedTarget(ctx, request)
 }
 
 func (m *Manager) startRouted(
 	request Request, target string, dialer TrafficDialer,
 ) (Info, error) {
 	listenAddress := net.JoinHostPort("127.0.0.1", strconv.Itoa(int(request.LocalPort)))
-	var forwarder cluster.PortForward
+	var forwarder Forwarder
 	if request.Protocol == "udp" {
 		address, err := net.ResolveUDPAddr("udp", listenAddress)
 		if err != nil {

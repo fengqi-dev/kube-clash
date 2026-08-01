@@ -68,6 +68,11 @@ load_gateway_image() {
 }
 
 restart_gateway() {
+  if ! k -n "${GATEWAY_NS}" get deployment kubeloop-gateway >/dev/null 2>&1; then
+    log "Gateway Deployment is not installed yet; the e2e harness will create it"
+    return 0
+  fi
+
   log "Restarting Gateway Pods to pick up image"
   k -n "${GATEWAY_NS}" delete pod \
     -l "${GATEWAY_LABEL}" \

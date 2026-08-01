@@ -11,7 +11,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
+	"github.com/fengqi-dev/kube-loop/internal/dnsname"
 )
 
 const (
@@ -63,6 +63,16 @@ type HostAlias struct {
 	IP     string `json:"ip"`
 }
 
+// NetworkSpec is the data-plane view of a discovered cluster network.
+// Session translates Kubernetes discovery into this type at the adapter boundary.
+type NetworkSpec struct {
+	PodCIDRs       []string
+	ServiceCIDRs   []string
+	ServiceIPs     []string
+	DNSServer      string
+	ClusterDomains []string
+}
+
 type Options struct {
 	BridgeHost       string
 	BridgePort       int
@@ -79,7 +89,7 @@ type Options struct {
 	TrafficPassword  string
 }
 
-func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
+func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	if options.BridgeHost == "" {
 		options.BridgeHost = "127.0.0.1"
 	}
@@ -111,7 +121,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		return nil, fmt.Errorf("invalid TUN address %q: %w", options.TUNAddress, err)
 	}
 
-	routes, err := clusterRoutes(discovery)
+	routes, err := clusterRoutes(network)
 	if err != nil {
 		return nil, err
 	}
@@ -121,12 +131,12 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		return nil, err
 	}
 
-	clusterDomains, err := cluster.NormalizeClusterDomains(options.ClusterDomains)
+	clusterDomains, err := dnsname.NormalizeClusterDomains(options.ClusterDomains)
 	if err != nil {
 		return nil, err
 	}
-	if len(discovery.ClusterDomains) > 0 {
-		merged, mergeErr := cluster.NormalizeClusterDomains(append(append([]string{}, clusterDomains...), discovery.ClusterDomains...))
+	if len(network.ClusterDomains) > 0 {
+		merged, mergeErr := dnsname.NormalizeClusterDomains(append(append([]string{}, clusterDomains...), network.ClusterDomains...))
 		if mergeErr != nil {
 			return nil, mergeErr
 		}
@@ -151,10 +161,10 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 			"server": "hosts",
 		})
 	}
-	if discovery.DNSServer != "" {
-		dnsIP, parseErr := netip.ParseAddr(discovery.DNSServer)
+	if network.DNSServer != "" {
+		dnsIP, parseErr := netip.ParseAddr(network.DNSServer)
 		if parseErr != nil {
-			return nil, fmt.Errorf("invalid cluster DNS address %q: %w", discovery.DNSServer, parseErr)
+			return nil, fmt.Errorf("invalid cluster DNS address %q: %w", network.DNSServer, parseErr)
 		}
 		dnsServers = append(dnsServers, map[string]any{
 			"type":   "udp",
@@ -327,16 +337,16 @@ func strictRouteForPlatform(goos string) bool {
 	return goos != "windows"
 }
 
-func clusterRoutes(discovery cluster.Discovery) ([]string, error) {
+func clusterRoutes(network NetworkSpec) ([]string, error) {
 	routeSet := make(map[string]struct{})
-	for _, raw := range discovery.PodCIDRs {
+	for _, raw := range network.PodCIDRs {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil {
 			return nil, fmt.Errorf("invalid pod CIDR %q: %w", raw, err)
 		}
 		routeSet[prefix.Masked().String()] = struct{}{}
 	}
-	for _, raw := range discovery.ServiceCIDRs {
+	for _, raw := range network.ServiceCIDRs {
 		prefix, err := netip.ParsePrefix(raw)
 		if err != nil {
 			return nil, fmt.Errorf("invalid service CIDR %q: %w", raw, err)
@@ -344,8 +354,8 @@ func clusterRoutes(discovery cluster.Discovery) ([]string, error) {
 		routeSet[prefix.Masked().String()] = struct{}{}
 	}
 	// Fall back to per-Service /32s when the cluster Service CIDR is unknown.
-	if len(discovery.ServiceCIDRs) == 0 {
-		for _, raw := range discovery.ServiceIPs {
+	if len(network.ServiceCIDRs) == 0 {
+		for _, raw := range network.ServiceIPs {
 			ip, err := netip.ParseAddr(raw)
 			if err != nil {
 				return nil, fmt.Errorf("invalid service IP %q: %w", raw, err)
@@ -377,9 +387,9 @@ func errLabel(label string) string { return label }
 // "svc" is included so macOS /etc/resolver/svc catches short names like
 // static-web.default.svc (search domains alone query the primary resolver).
 func ResolverDomains(namespace string, clusterDomains []string, hosts []HostAlias, extra ...string) []string {
-	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
-		domains = []string{cluster.DefaultClusterDomain}
+		domains = []string{dnsname.DefaultClusterDomain}
 	}
 	out := make([]string, 0, len(domains)*3+len(hosts)+len(extra)+1)
 	seen := make(map[string]struct{}, len(domains)*3+len(hosts)+len(extra)+1)
@@ -468,9 +478,9 @@ func SearchDomains(namespace string, clusterDomains ...string) []string {
 	if namespace == "" {
 		namespace = "default"
 	}
-	domains, err := cluster.NormalizeClusterDomains(clusterDomains)
+	domains, err := dnsname.NormalizeClusterDomains(clusterDomains)
 	if err != nil || len(domains) == 0 {
-		domains = []string{cluster.DefaultClusterDomain}
+		domains = []string{dnsname.DefaultClusterDomain}
 	}
 	out := make([]string, 0, len(domains)*3)
 	seen := make(map[string]struct{}, len(domains)*3)

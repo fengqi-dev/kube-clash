@@ -5,12 +5,10 @@ import (
 	"runtime"
 	"strings"
 	"testing"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 func TestGenerateRoutesOnlyClusterTraffic(t *testing.T) {
-	content, err := Generate(cluster.Discovery{
+	content, err := Generate(NetworkSpec{
 		PodCIDRs:     []string{"10.244.0.0/16"},
 		ServiceCIDRs: []string{"10.96.0.0/12"},
 		ServiceIPs:   []string{"10.96.0.10", "10.96.0.1", "10.105.153.132"},
@@ -112,7 +110,7 @@ func TestStrictRouteForPlatform(t *testing.T) {
 }
 
 func TestGenerateRejectsInvalidDiscovery(t *testing.T) {
-	_, err := Generate(cluster.Discovery{PodCIDRs: []string{"not-a-cidr"}}, Options{
+	_, err := Generate(NetworkSpec{PodCIDRs: []string{"not-a-cidr"}}, Options{
 		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "secret",
 	})
 	if err == nil {
@@ -121,7 +119,7 @@ func TestGenerateRejectsInvalidDiscovery(t *testing.T) {
 }
 
 func TestGenerateFixedTrafficInbounds(t *testing.T) {
-	content, err := Generate(cluster.Discovery{
+	content, err := Generate(NetworkSpec{
 		PodCIDRs: []string{"10.244.0.0/16"},
 	}, Options{
 		BridgePort: 17890, ControllerPort: 19090, ControllerSecret: "test-secret",
@@ -197,7 +195,7 @@ func TestDNSSearchCandidates(t *testing.T) {
 }
 
 func TestGenerateHostAliases(t *testing.T) {
-	content, err := Generate(cluster.Discovery{
+	content, err := Generate(NetworkSpec{
 		PodCIDRs:     []string{"10.244.0.0/16"},
 		ServiceCIDRs: []string{"10.96.0.0/12"},
 		DNSServer:    "10.96.0.10",
