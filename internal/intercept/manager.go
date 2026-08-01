@@ -283,7 +283,8 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 
 	m.mu.Lock()
-	if !m.active || !m.control.ready() {
+	control, controlGeneration, controlReady := m.control.snapshot()
+	if !m.active || !controlReady {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("session is not connected")
 	}
@@ -292,10 +293,15 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		m.mu.Unlock()
 		return Info{}, conflictError(key, mode, existing)
 	}
+	reservation, reserved := m.registry.reserve(key)
+	if !reserved {
+		m.mu.Unlock()
+		return Info{}, fmt.Errorf("service %s start is already in progress", key)
+	}
 	contextName := m.contextName
 	gatewayIP := m.gatewayIP
-	control := m.control.current()
 	m.mu.Unlock()
+	defer m.releaseStartReservation(key, reservation)
 
 	service, err := m.cluster.GetService(ctx, contextName, mapping.Namespace, mapping.Service)
 	if err != nil {
@@ -352,10 +358,17 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		Locals:    locals,
 	}
 	m.mu.Lock()
+	if !m.active ||
+		!m.control.matches(control, controlGeneration) ||
+		!m.registry.reserved(key, reservation) {
+		m.mu.Unlock()
+		return Info{}, fmt.Errorf("session changed while starting service %s", key)
+	}
 	hostKeys := m.routes.install(service, ports, portKeys, primaryAddrs, mode, false, interceptID)
 	m.registry.add(&runtimeIntercept{
 		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
 	})
+	m.registry.release(key, reservation)
 	m.mu.Unlock()
 	transaction.commit()
 	return info, nil
@@ -374,7 +387,8 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 
 	m.mu.Lock()
-	if !m.active || !m.control.ready() {
+	control, controlGeneration, controlReady := m.control.snapshot()
+	if !m.active || !controlReady {
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("session is not connected")
 	}
@@ -383,10 +397,15 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 		m.mu.Unlock()
 		return Info{}, fmt.Errorf("service %s is already in use", key)
 	}
+	reservation, reserved := m.registry.reserve(key)
+	if !reserved {
+		m.mu.Unlock()
+		return Info{}, fmt.Errorf("service %s start is already in progress", key)
+	}
 	contextName := m.contextName
 	gatewayIP := m.gatewayIP
-	control := m.control.current()
 	m.mu.Unlock()
+	defer m.releaseStartReservation(key, reservation)
 
 	ports, err := buildPreviewPorts(locals, m.allocateListenPort)
 	if err != nil {
@@ -425,10 +444,17 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 		Locals:    locals,
 	}
 	m.mu.Lock()
+	if !m.active ||
+		!m.control.matches(control, controlGeneration) ||
+		!m.registry.reserved(key, reservation) {
+		m.mu.Unlock()
+		return Info{}, fmt.Errorf("session changed while starting service %s", key)
+	}
 	hostKeys := m.routes.install(service, ports, portKeys, nil, ModeExchange, true, previewID)
 	m.registry.add(&runtimeIntercept{
 		info: info, preview: &snapshot, portKeys: portKeys, hostKeys: hostKeys,
 	})
+	m.registry.release(key, reservation)
 	m.mu.Unlock()
 	transaction.commit()
 	return info, nil
@@ -581,6 +607,12 @@ func (m *Manager) dialHostMirrorUDP(
 
 func (m *Manager) allocateListenPort() int32 {
 	return int32(atomic.AddUint32(&m.nextPort, 1))
+}
+
+func (m *Manager) releaseStartReservation(key string, reservation uint64) {
+	m.mu.Lock()
+	m.registry.release(key, reservation)
+	m.mu.Unlock()
 }
 
 func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint64) {
