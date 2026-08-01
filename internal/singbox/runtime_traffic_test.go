@@ -1,6 +1,28 @@
 package singbox
 
-import "testing"
+import (
+	"net"
+	"strconv"
+	"testing"
+)
+
+func TestAvailableTCPUDPPortSupportsBothProtocols(t *testing.T) {
+	port, err := availableTCPUDPPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	address := net.JoinHostPort("127.0.0.1", strconv.Itoa(port))
+	tcpListener, err := net.Listen("tcp", address)
+	if err != nil {
+		t.Fatalf("listen TCP on selected port: %v", err)
+	}
+	defer tcpListener.Close()
+	udpListener, err := net.ListenPacket("udp", address)
+	if err != nil {
+		t.Fatalf("listen UDP on selected port: %v", err)
+	}
+	defer udpListener.Close()
+}
 
 func TestTrafficEndpointsShareListenAndDyeUsers(t *testing.T) {
 	endpoints := trafficEndpoints(TrafficInboundPorts{Listen: 18081}, "password-32-chars-minimum-length!!")

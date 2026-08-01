@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 
@@ -74,14 +75,35 @@ func TestTUNServiceMirrorTCPAndUDP(t *testing.T) {
 			len(live.Manager.ListIntercepts()), len(live.Manager.ListMirrors()),
 		)
 	}
+	gateway, err := live.Provider.GetGateway(ctx, harness.KubeContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListenPort := harness.InterceptListenPort(t, info.Ports, 9090, corev1.ProtocolUDP)
 
 	if err := waitMirrorActive(ctx, client, service.Spec.ClusterIP, 8080, "tcp", "cluster-tcp:", tcpMirrored); err != nil {
 		t.Fatal(err)
 	}
-	if err := waitMirrorActive(ctx, client, service.Spec.ClusterIP, 9090, "udp", "cluster-udp:", udpMirrored); err != nil {
+	if err := waitMirrorActive(ctx, client, gateway.IP, udpListenPort, "udp", "cluster-udp:", udpMirrored); err != nil {
 		t.Fatal(err)
 	}
 	harness.WaitHostTCP(t, service.Spec.ClusterIP, 8080, "host-mirror", "cluster-tcp:")
+	drainMirror(udpMirrored)
+	harness.WaitHostUDP(t, service.Spec.ClusterIP, 9090, "host-mirror", "cluster-udp:")
+	select {
+	case copy := <-udpMirrored:
+		if copy != "host-mirror" {
+			t.Fatalf("host UDP local mirror got %q", copy)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("host UDP local mirror did not receive a request copy")
+	}
+	if _, err := harness.WaitClusterProbeOptional(
+		ctx, client, service.Spec.ClusterIP, 9090, "udp", "service-mirror",
+		"cluster-udp:", 20*time.Second,
+	); err != nil {
+		t.Logf("cluster Service UDP probe after mirror: %v", err)
+	}
 
 	if err := live.Manager.StopIntercept(ctx, info.ID); err != nil {
 		t.Fatal(err)

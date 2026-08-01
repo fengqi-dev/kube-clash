@@ -129,6 +129,18 @@ func ExchangeDNS(port int, network, name string, qtype uint16) (*dns.Msg, error)
 	return resp, err
 }
 
+func WaitDNSProxyGone(t *testing.T, port int, name string) {
+	t.Helper()
+	deadline := time.Now().Add(15 * time.Second)
+	for time.Now().Before(deadline) {
+		if _, err := ExchangeDNS(port, "udp", name, dns.TypeA); err != nil {
+			return
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	t.Fatalf("DNS proxy on :%d still answers %s", port, name)
+}
+
 func exchangeDNS(port int, network, name string, qtype uint16) (*dns.Msg, error) {
 	return ExchangeDNS(port, network, name, qtype)
 }

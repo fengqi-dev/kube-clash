@@ -213,6 +213,7 @@ func (f *fakeProcess) Config() []byte {
 func (f *fakeProcess) UpdateDNSNamespace(context.Context, string) error { return nil }
 func (f *fakeProcess) ProbeClusterDNS(context.Context) error            { return nil }
 func (f *fakeProcess) DNSPort() int                                     { return 1053 }
+func (f *fakeProcess) InternalDNSPort() int                             { return 1054 }
 func (f *fakeProcess) Close() error {
 	f.once.Do(func() { close(f.done) })
 	return nil

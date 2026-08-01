@@ -4,7 +4,6 @@ package connect
 
 import (
 	"context"
-	"os"
 	"testing"
 	"time"
 
@@ -26,10 +25,14 @@ func TestTUNCoreCrashCleansUpSessionAndDNS(t *testing.T) {
 	clusterIP := harness.EchoServiceIP(t, ctx, client)
 	fqdn := "echo." + harness.EchoNamespace + ".svc.cluster.local"
 
-	_ = harness.ConnectSession(t, ctx, session.Request{
+	live := harness.ConnectSession(t, ctx, session.Request{
 		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
 	}, nil)
-	harness.WaitLookupIP(t, fqdn, clusterIP)
+	dnsPort, err := live.Manager.InternalDNSPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness.WaitDNSA(t, dnsPort, fqdn, clusterIP)
 
 	helperClient, err := helper.NewClient()
 	if err != nil {
@@ -44,11 +47,7 @@ func TestTUNCoreCrashCleansUpSessionAndDNS(t *testing.T) {
 	if response.PID < 1 {
 		t.Fatalf("helper did not report an active sing-box PID: %+v", response)
 	}
-	process, err := os.FindProcess(response.PID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := process.Kill(); err != nil {
+	if err := harness.KillPrivilegedProcess(response.PID); err != nil {
 		t.Fatalf("kill sing-box PID %d: %v", response.PID, err)
 	}
 
@@ -58,6 +57,7 @@ func TestTUNCoreCrashCleansUpSessionAndDNS(t *testing.T) {
 		status, pingErr := helperClient.Ping(checkCtx)
 		checkCancel()
 		if pingErr == nil && len(status.ActiveSessions) == 0 && status.PID == 0 {
+			harness.WaitDNSProxyGone(t, dnsPort, fqdn)
 			harness.AssertClusterDNSGone(t, fqdn, clusterIP)
 			return
 		}

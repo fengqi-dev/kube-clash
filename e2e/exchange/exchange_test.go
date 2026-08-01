@@ -3,10 +3,10 @@
 package exchange
 
 import (
-	"runtime"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/fengqi-dev/kube-loop/e2e/harness"
@@ -61,20 +61,25 @@ func TestTUNServiceExchangeTCPAndUDP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	gateway, err := live.Provider.GetGateway(ctx, harness.KubeContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListenPort := harness.InterceptListenPort(t, info.Ports, 9090, corev1.ProtocolUDP)
 
 	_ = harness.WaitClusterProbe(t, ctx, client, service.Spec.ClusterIP, 8080, "tcp", "ping", "local-tcp:")
+	_ = harness.WaitClusterProbe(
+		t, ctx, client, gateway.IP, udpListenPort, "udp", "ping", "local-udp:",
+	)
 	harness.WaitHostTCP(t, service.Spec.ClusterIP, 8080, "ping", "local-tcp:")
 	harness.WaitHostUDP(t, service.Spec.ClusterIP, 9090, "ping", "local-udp:")
 	if _, err := harness.WaitClusterProbeOptional(
 		ctx, client, service.Spec.ClusterIP, 9090, "udp", "ping", "local-udp:", 45*time.Second,
 	); err != nil {
-		if runtime.GOOS == "linux" {
-			// Desktop path is covered by WaitHostUDP. Cluster→Service UDP after an
-			// EndpointSlice swap is flaky under kube-proxy conntrack on Linux CI.
-			t.Logf("cluster UDP probe after exchange: %v", err)
-		} else {
-			t.Fatal(err)
-		}
+		// Desktop path is covered by WaitHostUDP. Cluster→Service UDP after an
+		// Direct Gateway and desktop host paths above are authoritative;
+		// report kube-proxy UDP conntrack incompatibility separately.
+		t.Logf("cluster Service UDP probe after exchange: %v", err)
 	}
 
 	if err := live.Manager.StopIntercept(ctx, info.ID); err != nil {

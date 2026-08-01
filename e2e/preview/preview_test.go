@@ -4,10 +4,10 @@ package preview
 
 import (
 	"context"
-	"runtime"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
@@ -67,18 +67,22 @@ func TestTUNPreviewExposesLocalTCPAndUDP(t *testing.T) {
 	if info.ClusterIP == "" {
 		t.Fatal("expected cluster IP")
 	}
+	gateway, err := live.Provider.GetGateway(ctx, harness.KubeContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	udpListenPort := harness.InterceptListenPort(t, info.Ports, 9090, corev1.ProtocolUDP)
 
 	_ = harness.WaitClusterProbe(t, ctx, client, info.ClusterIP, 8080, "tcp", "ping", "preview-tcp:")
+	_ = harness.WaitClusterProbe(
+		t, ctx, client, gateway.IP, udpListenPort, "udp", "ping", "preview-udp:",
+	)
 	harness.WaitHostTCP(t, info.ClusterIP, 8080, "ping", "preview-tcp:")
 	harness.WaitHostUDP(t, info.ClusterIP, 9090, "ping", "preview-udp:")
 	if _, err := harness.WaitClusterProbeOptional(
 		ctx, client, info.ClusterIP, 9090, "udp", "ping", "preview-udp:", 45*time.Second,
 	); err != nil {
-		if runtime.GOOS == "linux" {
-			t.Logf("cluster UDP probe after preview: %v", err)
-		} else {
-			t.Fatal(err)
-		}
+		t.Logf("cluster Service UDP probe after preview: %v", err)
 	}
 
 	if err := live.Manager.StopPreview(ctx, info.ID); err != nil {

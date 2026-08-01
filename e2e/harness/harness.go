@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/client-go/kubernetes"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
@@ -66,6 +67,22 @@ func KubeClient(t *testing.T, provider *cluster.Provider) kubernetes.Interface {
 func TestContext(t *testing.T, timeout time.Duration) (context.Context, context.CancelFunc) {
 	t.Helper()
 	return context.WithTimeout(context.Background(), timeout)
+}
+
+func InterceptListenPort(
+	t *testing.T,
+	ports []cluster.InterceptPort,
+	servicePort int32,
+	protocol corev1.Protocol,
+) int {
+	t.Helper()
+	for _, port := range ports {
+		if port.ServicePort == servicePort && port.Protocol == protocol {
+			return int(port.ListenPort)
+		}
+	}
+	t.Fatalf("intercept listen port not found for %d/%s", servicePort, protocol)
+	return 0
 }
 
 func EnsureGateway(

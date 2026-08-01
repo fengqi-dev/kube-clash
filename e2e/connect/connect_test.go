@@ -76,7 +76,7 @@ func TestTUNConnectManualNetwork(t *testing.T) {
 		t.Fatalf("discovery incomplete: %#v", discovery)
 	}
 
-	_ = harness.ConnectSession(t, ctx, session.Request{
+	live := harness.ConnectSession(t, ctx, session.Request{
 		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
 	}, func(manager *session.Manager) {
 		if err := manager.SetManualNetwork(harness.KubeContext(), cluster.ManualNetwork{
@@ -91,7 +91,16 @@ func TestTUNConnectManualNetwork(t *testing.T) {
 	})
 
 	harness.WaitHostTCP(t, clusterIP, 8080, "manual", "cluster-tcp:")
-	harness.WaitLookupIP(t, "echo."+harness.EchoNamespace+".svc.cluster.local", clusterIP)
+	dnsPort, err := live.Manager.InternalDNSPort()
+	if err != nil {
+		t.Fatal(err)
+	}
+	harness.WaitDNSA(
+		t,
+		dnsPort,
+		"echo."+harness.EchoNamespace+".svc.cluster.local",
+		clusterIP,
+	)
 }
 
 func TestTUNDisconnectTearsDown(t *testing.T) {

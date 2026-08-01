@@ -44,6 +44,7 @@ type RunningCore interface {
 	// ProbeClusterDNS resolves kubernetes.default.svc.<domain> via the local split DNS.
 	ProbeClusterDNS(ctx context.Context) error
 	DNSPort() int
+	InternalDNSPort() int
 }
 
 type TrafficEndpoint struct {
@@ -138,7 +139,7 @@ func (r *Runtime) Start(
 	if err != nil {
 		return nil, err
 	}
-	internalDNSPort, err := availablePort()
+	internalDNSPort, err := availableTCPUDPPort()
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +219,7 @@ func (r *Runtime) Start(
 		controllerAddress: net.JoinHostPort("127.0.0.1", strconv.Itoa(controllerPort)),
 		controllerSecret:  secret,
 		dnsPort:           publicDNSPort,
+		internalDNSPort:   internalDNSPort,
 		resolverDomains:   resolverDomains,
 		dnsProxy:          dnsProxy,
 		httpClient:        r.HTTPClient,
@@ -285,6 +287,7 @@ type Process struct {
 	controllerAddress string
 	controllerSecret  string
 	dnsPort           int
+	internalDNSPort   int
 	resolverDomains   []string
 	dnsProxy          *dnsSearchProxy
 	httpClient        *http.Client
@@ -308,7 +311,8 @@ func (p *Process) Err() error {
 
 func (p *Process) TrafficEndpoints() TrafficEndpoints { return p.trafficEndpoints }
 
-func (p *Process) DNSPort() int { return p.dnsPort }
+func (p *Process) DNSPort() int         { return p.dnsPort }
+func (p *Process) InternalDNSPort() int { return p.internalDNSPort }
 
 func (p *Process) Config() []byte {
 	if len(p.config) == 0 {
@@ -584,6 +588,29 @@ func availablePort() (int, error) {
 	}
 	defer listener.Close()
 	return listener.Addr().(*net.TCPAddr).Port, nil
+}
+
+func availableTCPUDPPort() (int, error) {
+	var lastErr error
+	for range 100 {
+		tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			return 0, err
+		}
+		port := tcpListener.Addr().(*net.TCPAddr).Port
+		udpListener, udpErr := net.ListenPacket(
+			"udp",
+			net.JoinHostPort("127.0.0.1", strconv.Itoa(port)),
+		)
+		if udpErr == nil {
+			_ = udpListener.Close()
+			_ = tcpListener.Close()
+			return port, nil
+		}
+		lastErr = udpErr
+		_ = tcpListener.Close()
+	}
+	return 0, fmt.Errorf("find TCP/UDP port: %w", lastErr)
 }
 
 func availableTrafficPorts(excluded ...int) (TrafficInboundPorts, error) {
