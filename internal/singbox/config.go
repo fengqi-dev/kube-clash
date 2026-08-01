@@ -236,7 +236,7 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 		"address":       []string{options.TUNAddress},
 		"mtu":           9000,
 		"auto_route":    true,
-		"strict_route":  true,
+		"strict_route":  strictRouteForPlatform(runtime.GOOS),
 		"stack":         "mixed",
 		"route_address": routes,
 	}
@@ -316,6 +316,15 @@ func Generate(discovery cluster.Discovery, options Options) ([]byte, error) {
 	}
 
 	return json.MarshalIndent(config, "", "  ")
+}
+
+// strictRouteForPlatform keeps strict routing on platforms where it only
+// constrains route selection. On Windows sing-box implements strict_route
+// with WFP rules that also block DNS on other interfaces. That can conflict
+// with Clash/Mihomo and other VPN clients even though kube-loop only installs
+// precise Pod/Service routes.
+func strictRouteForPlatform(goos string) bool {
+	return goos != "windows"
 }
 
 func clusterRoutes(discovery cluster.Discovery) ([]string, error) {

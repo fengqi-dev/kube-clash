@@ -188,6 +188,44 @@ go test ./...
 ./e2e/run.sh                # Minikube end-to-end (see e2e/)
 ```
 
+### Local end-to-end tests
+
+Local E2E requires Go, Docker, `kubectl`, a running Kubernetes cluster, and
+permission to install the privileged KubeLoop Helper. The scripts build all
+artifacts, install or update the Helper, run the TUN and platform test suites,
+print a per-test summary, and clean temporary resources.
+
+**Windows** (defaults to the `docker-desktop` context):
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\e2e\scripts\run-local-windows.ps1 `
+  -Context docker-desktop `
+  -Timeout 25m
+```
+
+**macOS** (defaults to the `docker-desktop` context):
+
+```bash
+chmod +x e2e/scripts/run-local-macos.sh
+./e2e/scripts/run-local-macos.sh --timeout 25m
+```
+
+**Linux** (defaults to the `minikube` context):
+
+```bash
+chmod +x e2e/scripts/run-local-linux.sh
+./e2e/scripts/run-local-linux.sh --timeout 25m
+```
+
+Common options are `--context`, `--gateway-image`, `--timeout`,
+`--skip-build`, `--skip-platform`, `--keep-resources`, and
+`--ignore-network-preflight`. PowerShell uses the equivalent single-dash
+parameter names such as `-Context` and `-SkipPlatform`.
+
+Test output is written to `e2e-local.log`; privileged platform test output is
+written to `e2e-platform.log`.
+
 Tag `v*` to cut a release (desktop packages, Gateway binaries + GHCR image).
 
 ## Documentation

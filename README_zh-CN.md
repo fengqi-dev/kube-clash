@@ -155,6 +155,43 @@ go test ./...
 ./e2e/run.sh                # Minikube 端到端（见 e2e/）
 ```
 
+### 本地端到端测试
+
+本地 E2E 需要 Go、Docker、`kubectl`、一个正在运行的 Kubernetes 集群，以及
+安装 KubeLoop 特权 Helper 的权限。脚本会构建所需产物、安装或更新 Helper、
+运行 TUN 与平台测试、输出逐项状态汇总，并清理临时资源。
+
+**Windows**（默认使用 `docker-desktop` context）：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File .\e2e\scripts\run-local-windows.ps1 `
+  -Context docker-desktop `
+  -Timeout 25m
+```
+
+**macOS**（默认使用 `docker-desktop` context）：
+
+```bash
+chmod +x e2e/scripts/run-local-macos.sh
+./e2e/scripts/run-local-macos.sh --timeout 25m
+```
+
+**Linux**（默认使用 `minikube` context）：
+
+```bash
+chmod +x e2e/scripts/run-local-linux.sh
+./e2e/scripts/run-local-linux.sh --timeout 25m
+```
+
+常用参数包括 `--context`、`--gateway-image`、`--timeout`、
+`--skip-build`、`--skip-platform`、`--keep-resources` 和
+`--ignore-network-preflight`。PowerShell 使用对应的单横线参数，例如
+`-Context` 和 `-SkipPlatform`。
+
+主测试日志写入 `e2e-local.log`，特权平台测试日志写入
+`e2e-platform.log`。
+
 推送 `v*` 标签即可发布（桌面包、Gateway 二进制与 GHCR 镜像）。
 
 ## 文档

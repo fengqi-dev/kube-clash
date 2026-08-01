@@ -57,6 +57,21 @@ export interface Capabilities {
   issues?: string[];
 }
 
+export interface NetworkDiagnostic {
+  code: string;
+  severity: "info" | "warning";
+  message: string;
+  target?: string;
+  conflict?: string;
+  interface?: string;
+}
+
+export interface NetworkDiagnostics {
+  routingMode: "native" | "vnat" | "proxy";
+  strictRoute: boolean;
+  issues?: NetworkDiagnostic[];
+}
+
 export interface ManualNetwork {
   podCIDRs?: string[];
   serviceCIDRs?: string[];
@@ -119,6 +134,7 @@ export interface SessionState {
   message: string;
   error?: string;
   dnsWarning?: string;
+  network?: NetworkDiagnostics;
   discovery?: Discovery;
   capabilities?: Capabilities;
   scopeNamespaces?: string[];
