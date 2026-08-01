@@ -37,6 +37,14 @@ func (m *Manager) StopIntercept(ctx context.Context, id string) error {
 	return err
 }
 
+func (m *Manager) TestIntercept(ctx context.Context, id string) error {
+	if err := m.intercept.Test(ctx, id); err != nil {
+		return err
+	}
+	m.AppendLog("INFO", fmt.Sprintf("session connectivity test passed: %s", id))
+	return nil
+}
+
 func (m *Manager) ListIntercepts() []intercept.Info {
 	return m.intercept.List()
 }
@@ -89,6 +97,14 @@ func (m *Manager) StopPortForward(id string) error {
 		m.AppendLog("INFO", fmt.Sprintf("stopped port-forward %s", id))
 	}
 	return err
+}
+
+func (m *Manager) TestPortForward(ctx context.Context, id string) error {
+	if err := m.portfwd.Test(ctx, id); err != nil {
+		return err
+	}
+	m.AppendLog("INFO", fmt.Sprintf("port-forward connectivity test passed: %s", id))
+	return nil
 }
 
 func (m *Manager) ListPortForwards() []portfwd.Info {

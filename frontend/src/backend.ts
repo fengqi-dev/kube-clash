@@ -37,6 +37,7 @@ declare global {
           ListPods(contextName: string, namespace: string): Promise<PodInfo[]>;
           Connect(contextName: string, namespace: string): Promise<void>;
           Disconnect(): Promise<void>;
+          TestPortForward(id: string): Promise<void>;
           GetManualNetwork(contextName: string): Promise<ManualNetwork>;
           SetManualNetwork(contextName: string, network: ManualNetwork): Promise<void>;
           SetDNSNamespace(contextName: string, namespace: string): Promise<void>;
@@ -46,6 +47,7 @@ declare global {
           StartIntercept(mapping: InterceptMapping): Promise<InterceptInfo>;
           StartMirror(mapping: InterceptMapping): Promise<InterceptInfo>;
           StopIntercept(id: string): Promise<void>;
+          TestIntercept(id: string): Promise<void>;
           ListIntercepts(): Promise<InterceptInfo[]>;
           ListMirrors(): Promise<InterceptInfo[]>;
           StartPreview(request: PreviewRequest): Promise<PreviewInfo>;
@@ -104,6 +106,8 @@ export const backend = {
   connect: (contextName: string, namespace: string) =>
     Promise.resolve().then(() => api().Connect(contextName, namespace)),
   disconnect: () => Promise.resolve().then(() => api().Disconnect()),
+  testPortForward: (id: string) =>
+    Promise.resolve().then(() => api().TestPortForward(id)),
   getManualNetwork: (contextName: string) =>
     Promise.resolve().then(() => api().GetManualNetwork(contextName)),
   setManualNetwork: (contextName: string, network: ManualNetwork) =>
@@ -121,6 +125,8 @@ export const backend = {
   startMirror: (mapping: InterceptMapping) =>
     Promise.resolve().then(() => api().StartMirror(mapping)),
   stopIntercept: (id: string) => Promise.resolve().then(() => api().StopIntercept(id)),
+  testIntercept: (id: string) =>
+    Promise.resolve().then(() => api().TestIntercept(id)),
   listIntercepts: () => Promise.resolve().then(() => api().ListIntercepts()),
   listMirrors: () => Promise.resolve().then(() => api().ListMirrors()),
   startPreview: (request: PreviewRequest) =>

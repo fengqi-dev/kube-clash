@@ -20,6 +20,10 @@ func (a *App) StopIntercept(id string) error {
 	return a.manager.StopIntercept(a.context(), id)
 }
 
+func (a *App) TestIntercept(id string) error {
+	return a.manager.TestIntercept(a.context(), id)
+}
+
 func (a *App) ListIntercepts() []intercept.Info {
 	return a.manager.ListIntercepts()
 }
@@ -46,6 +50,10 @@ func (a *App) StartPortForward(request portfwd.Request) (portfwd.Info, error) {
 
 func (a *App) StopPortForward(id string) error {
 	return a.manager.StopPortForward(id)
+}
+
+func (a *App) TestPortForward(id string) error {
+	return a.manager.TestPortForward(a.context(), id)
 }
 
 func (a *App) ListPortForwards() []portfwd.Info {

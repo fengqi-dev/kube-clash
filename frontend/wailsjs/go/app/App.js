@@ -170,6 +170,14 @@ export function StopPreview(arg1) {
   return window['go']['app']['App']['StopPreview'](arg1);
 }
 
+export function TestIntercept(arg1) {
+  return window['go']['app']['App']['TestIntercept'](arg1);
+}
+
+export function TestPortForward(arg1) {
+  return window['go']['app']['App']['TestPortForward'](arg1);
+}
+
 export function UninstallHelper() {
   return window['go']['app']['App']['UninstallHelper']();
 }
