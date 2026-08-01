@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
+import { isValidPort } from "@/lib/validation";
 import type { ServiceInfo, ServicePortInfo } from "@/types";
 
 const inputClassName =
@@ -65,7 +66,7 @@ export function MirrorDialog({
   async function onStart() {
     if (!service || !selectedPort) return;
     const parsedLocal = Number(localPort);
-    if (!Number.isFinite(parsedLocal) || parsedLocal <= 0 || parsedLocal > 65535) {
+    if (!isValidPort(parsedLocal)) {
       toast.error(t("mirror.invalidLocalPort"));
       return;
     }

@@ -19,6 +19,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useI18n } from "@/i18n";
+import { isValidPort } from "@/lib/validation";
 
 const inputClassName =
   "h-9 w-full rounded-lg border border-input bg-transparent px-2.5 text-sm outline-none transition-colors focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50 dark:bg-input/30";
@@ -62,12 +63,12 @@ export function PreviewCreateDialog({
       return;
     }
     const parsedServicePort = Number(servicePort);
-    if (!Number.isFinite(parsedServicePort) || parsedServicePort <= 0 || parsedServicePort > 65535) {
+    if (!isValidPort(parsedServicePort)) {
       toast.error(t("preview.invalidServicePort"));
       return;
     }
     const parsedLocal = Number(localPort);
-    if (!Number.isFinite(parsedLocal) || parsedLocal <= 0 || parsedLocal > 65535) {
+    if (!isValidPort(parsedLocal)) {
       toast.error(t("preview.invalidLocalPort"));
       return;
     }

@@ -21,6 +21,7 @@ import type { Connection, Metrics } from "@/types";
 
 const stickyForMs = 30_000;
 const maxTableRows = 100;
+const emptyConnections: Connection[] = [];
 
 const columns = [
   { key: "process", align: "left" as const },
@@ -66,7 +67,9 @@ export function ConnectionsView({
   metrics?: Metrics;
 }) {
   const { t } = useI18n();
-  const live = Array.isArray(metrics?.connections) ? metrics.connections : [];
+  const live = Array.isArray(metrics?.connections)
+    ? metrics.connections
+    : emptyConnections;
   const liveCount = live.length;
   const [sticky, setSticky] = useState<Connection[]>([]);
   const stickyUntil = useRef(0);
@@ -74,7 +77,7 @@ export function ConnectionsView({
 
   useEffect(() => {
     if (!ready) {
-      setSticky([]);
+      if (sticky.length > 0) setSticky([]);
       stickyUntil.current = 0;
       return;
     }

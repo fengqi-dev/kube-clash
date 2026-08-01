@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Circle, Network } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
@@ -50,6 +50,7 @@ export function WorkloadView({
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selected, setSelected] = useState<PodInfo | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const reloadGeneration = useRef(0);
 
   const connected = session.phase === "connected";
   const livePods = session.pods;
@@ -63,32 +64,41 @@ export function WorkloadView({
   }, [namespace, namespaceScoped, namespaces]);
 
   async function reload() {
+    const generation = ++reloadGeneration.current;
     if (!contextName) {
       setPods([]);
       return;
     }
-    if (connected && livePods && livePods.length >= 0) {
+    if (connected && livePods) {
       setPods(livePods);
       return;
     }
     setLoading(true);
     try {
-      setPods(await backend.listPods(contextName, namespace));
+      const items = await backend.listPods(contextName, namespace);
+      if (generation === reloadGeneration.current) setPods(items);
     } catch (error) {
-      toast.error(t("workload.loadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
-      });
+      if (generation === reloadGeneration.current) {
+        toast.error(t("workload.loadFailed"), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
     } finally {
-      setLoading(false);
+      if (generation === reloadGeneration.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (connected && livePods) {
+      reloadGeneration.current += 1;
       setPods(livePods);
+      setLoading(false);
       return;
     }
     void reload();
+    return () => {
+      reloadGeneration.current += 1;
+    };
   }, [connected, contextName, livePods, namespace]);
 
   const filtered = useMemo(() => {
@@ -216,6 +226,7 @@ export function WorkloadView({
       )}
 
       <ActiveSessions
+        contextName={contextName}
         ready={ready}
         refreshKey={refreshKey}
         inventoryRevision={session.inventoryRevision}

@@ -41,6 +41,7 @@ const en = {
   "hosts.cleared": "Host aliases cleared",
   "hosts.clearedReconnect": "Host aliases cleared — reconnect to apply",
   "hosts.saveFailed": "Could not save host aliases",
+  "hosts.incompleteAlias": "Each alias must include both a domain and an IP address.",
   "hosts.loadFailed": "Could not load host aliases",
   "actions.cancel": "Cancel",
   "phase.idle": "Disconnected",
@@ -471,6 +472,7 @@ const zh: Record<TranslationKey, string> = {
   "hosts.cleared": "主机别名已清空",
   "hosts.clearedReconnect": "主机别名已清空 — 请重新连接以生效",
   "hosts.saveFailed": "无法保存主机别名",
+  "hosts.incompleteAlias": "每条别名必须同时填写域名和 IP 地址。",
   "hosts.loadFailed": "无法加载主机别名",
   "actions.cancel": "取消",
   "phase.idle": "未连接",
@@ -873,12 +875,20 @@ const storageKey = "kube-loop.language";
 
 export function LanguageProvider({ children }: { children: ReactNode }) {
   const [language, setLanguage] = useState<Language>(() => {
-    const saved = localStorage.getItem(storageKey);
-    return saved === "zh-CN" ? "zh-CN" : "en";
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return saved === "zh-CN" ? "zh-CN" : "en";
+    } catch {
+      return "en";
+    }
   });
 
   useEffect(() => {
-    localStorage.setItem(storageKey, language);
+    try {
+      localStorage.setItem(storageKey, language);
+    } catch {
+      // Storage may be unavailable in hardened or private browser contexts.
+    }
     document.documentElement.lang = language;
   }, [language]);
 

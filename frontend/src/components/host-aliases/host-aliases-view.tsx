@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
@@ -24,8 +24,10 @@ export function HostAliasesView({
   const [rows, setRows] = useState<DraftAlias[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const contextGeneration = useRef(0);
 
   useEffect(() => {
+    const generation = ++contextGeneration.current;
     if (!contextName) {
       setRows([]);
       return;
@@ -35,32 +37,41 @@ export function HostAliasesView({
     backend
       .getHostAliases(contextName)
       .then((items) => {
-        if (!active) return;
+        if (!active || generation !== contextGeneration.current) return;
         setRows((items ?? []).map((item) => newDraft(item.domain, item.ip)));
       })
       .catch((error) => {
-        if (!active) return;
+        if (!active || generation !== contextGeneration.current) return;
         toast.error(t("hosts.loadFailed"), {
           description: error instanceof Error ? error.message : String(error),
         });
         setRows([]);
       })
       .finally(() => {
-        if (active) setLoading(false);
+        if (active && generation === contextGeneration.current) setLoading(false);
       });
     return () => {
       active = false;
     };
   }, [contextName, t]);
 
-  async function persist(next: DraftAlias[], cleared: boolean) {
-    if (!contextName) return;
+  async function persist(next: DraftAlias[], cleared: boolean): Promise<boolean> {
+    if (!contextName) return false;
+    const targetContext = contextName;
+    const generation = contextGeneration.current;
+    const payload = next
+      .map((row) => ({ domain: row.domain.trim(), ip: row.ip.trim() }))
+      .filter((row) => row.domain || row.ip);
+    if (payload.some((row) => !row.domain || !row.ip)) {
+      toast.error(t("hosts.saveFailed"), {
+        description: t("hosts.incompleteAlias"),
+      });
+      return false;
+    }
     setSaving(true);
     try {
-      const payload = next
-        .map((row) => ({ domain: row.domain.trim(), ip: row.ip.trim() }))
-        .filter((row) => row.domain || row.ip);
-      await backend.setHostAliases(contextName, payload);
+      await backend.setHostAliases(targetContext, payload);
+      if (generation !== contextGeneration.current) return true;
       setRows(payload.map((item) => newDraft(item.domain, item.ip)));
       if (cleared || payload.length === 0) {
         toast.success(
@@ -69,10 +80,13 @@ export function HostAliasesView({
       } else {
         toast.success(ready ? t("hosts.savedReconnect") : t("hosts.saved"));
       }
+      return true;
     } catch (error) {
+      if (generation !== contextGeneration.current) return false;
       toast.error(t("hosts.saveFailed"), {
         description: error instanceof Error ? error.message : String(error),
       });
+      return false;
     } finally {
       setSaving(false);
     }
@@ -80,13 +94,11 @@ export function HostAliasesView({
 
   async function removeRow(key: string) {
     const next = rows.filter((row) => row.key !== key);
-    setRows(next);
     // Persist immediately so deleted aliases are cleared from stored config.
     await persist(next, next.length === 0);
   }
 
   async function clearAll() {
-    setRows([]);
     await persist([], true);
   }
 
