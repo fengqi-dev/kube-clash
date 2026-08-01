@@ -30,7 +30,12 @@ type controlClient struct {
 	onClose func()
 }
 
-func dialControl(ctx context.Context, gatewayAddress string) (*controlClient, error) {
+func dialControl(
+	ctx context.Context,
+	gatewayAddress string,
+	onReady func(interceptID string, network byte, streamID uint64),
+	onClose func(),
+) (*controlClient, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
 	if err != nil {
@@ -48,6 +53,8 @@ func dialControl(ctx context.Context, gatewayAddress string) (*controlClient, er
 		address: gatewayAddress,
 		conn:    conn,
 		replyCh: make(chan tunnel.ControlMessage, 8),
+		onReady: onReady,
+		onClose: onClose,
 	}
 	go client.readLoop()
 	return client, nil
