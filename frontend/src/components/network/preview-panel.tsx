@@ -13,6 +13,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
+import { isValidPort } from "@/lib/validation";
 import type { PreviewInfo } from "@/types";
 
 const inputClassName =
@@ -71,19 +72,11 @@ export function PreviewPanel({
       toast.error(t("preview.invalidName"));
       return;
     }
-    if (
-      !Number.isFinite(parsedServicePort) ||
-      parsedServicePort <= 0 ||
-      parsedServicePort > 65535
-    ) {
+    if (!isValidPort(parsedServicePort)) {
       toast.error(t("preview.invalidServicePort"));
       return;
     }
-    if (
-      !Number.isFinite(parsedLocalPort) ||
-      parsedLocalPort <= 0 ||
-      parsedLocalPort > 65535
-    ) {
+    if (!isValidPort(parsedLocalPort)) {
       toast.error(t("preview.invalidLocalPort"));
       return;
     }

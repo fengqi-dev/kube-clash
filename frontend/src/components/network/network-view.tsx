@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Network } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
@@ -61,6 +61,7 @@ export function NetworkView({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [selected, setSelected] = useState<ServiceInfo | null>(null);
   const [bindings, setBindings] = useState<Record<string, ServiceBinding>>({});
+  const reloadGeneration = useRef(0);
 
   const connected = session.phase === "connected";
   const liveServices = session.services;
@@ -76,6 +77,7 @@ export function NetworkView({
   }, [namespace, namespaceScoped, namespaces]);
 
   async function reload() {
+    const generation = ++reloadGeneration.current;
     if (!contextName) {
       setServices([]);
       return;
@@ -86,22 +88,30 @@ export function NetworkView({
     }
     setLoading(true);
     try {
-      setServices(await backend.listServices(contextName, namespace));
+      const items = await backend.listServices(contextName, namespace);
+      if (generation === reloadGeneration.current) setServices(items);
     } catch (error) {
-      toast.error(t("network.loadFailed"), {
-        description: error instanceof Error ? error.message : String(error),
-      });
+      if (generation === reloadGeneration.current) {
+        toast.error(t("network.loadFailed"), {
+          description: error instanceof Error ? error.message : String(error),
+        });
+      }
     } finally {
-      setLoading(false);
+      if (generation === reloadGeneration.current) setLoading(false);
     }
   }
 
   useEffect(() => {
     if (connected && liveServices) {
+      reloadGeneration.current += 1;
       setServices(liveServices);
+      setLoading(false);
       return;
     }
     void reload();
+    return () => {
+      reloadGeneration.current += 1;
+    };
   }, [connected, contextName, liveServices, namespace]);
 
   useEffect(() => {
@@ -116,7 +126,7 @@ export function NetworkView({
         if (!active) return;
         const next: Record<string, ServiceBinding> = {};
         for (const item of forwards) {
-          if (item.kind !== "service") continue;
+          if (item.context !== contextName || item.kind !== "service") continue;
           next[`${item.namespace}/${item.name}`] = "portForward";
         }
         for (const item of exchanges) {
@@ -134,7 +144,7 @@ export function NetworkView({
     return () => {
       active = false;
     };
-  }, [ready, refreshKey, session.inventoryRevision]);
+  }, [contextName, ready, refreshKey, session.inventoryRevision]);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -303,6 +313,7 @@ export function NetworkView({
       )}
 
       <ActiveSessions
+        contextName={contextName}
         ready={ready}
         refreshKey={refreshKey}
         inventoryRevision={session.inventoryRevision}
@@ -366,4 +377,3 @@ function mirrorActionLabel(
   if (binding === "preview") return t("network.mirrorBlockedByPreview");
   return t("network.tabMirror");
 }
-

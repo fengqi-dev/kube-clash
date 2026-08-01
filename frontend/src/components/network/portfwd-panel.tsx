@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
+import { isValidPort } from "@/lib/validation";
 import type { PodInfo, PortForwardInfo, ServiceInfo, ServicePortInfo } from "@/types";
 
 const inputClassName =
@@ -72,7 +73,7 @@ export function PortForwardPanel({
       return ports.find((port) => portKeyOf(port) === portKey);
     }
     const parsed = Number(manualRemotePort);
-    if (!Number.isFinite(parsed) || parsed <= 0 || parsed > 65535) {
+    if (!isValidPort(parsed)) {
       return undefined;
     }
     return { name: "", port: parsed, protocol: "TCP" } satisfies ServicePortInfo;
@@ -139,7 +140,7 @@ export function PortForwardPanel({
     let parsedLocal = 0;
     if (localPort.trim() !== "") {
       parsedLocal = Number(localPort);
-      if (!Number.isFinite(parsedLocal) || parsedLocal <= 0 || parsedLocal > 65535) {
+      if (!isValidPort(parsedLocal)) {
         toast.error(t("portfwd.invalidLocalPort"));
         return;
       }
@@ -151,6 +152,7 @@ export function PortForwardPanel({
         namespace,
         kind,
         name: targetName,
+        protocol: selectedPort.protocol,
         remotePort: selectedPort.port,
         localPort: parsedLocal,
       });

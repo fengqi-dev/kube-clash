@@ -20,6 +20,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { useI18n } from "@/i18n";
+import { isValidPort } from "@/lib/validation";
 import type { InterceptInfo, ServiceInfo, ServicePortInfo } from "@/types";
 
 const inputClassName =
@@ -118,7 +119,7 @@ export function InterceptPanel({
   async function onStart() {
     if (!selectedService || !selectedPort) return;
     const parsedLocal = Number(localPort);
-    if (!Number.isFinite(parsedLocal) || parsedLocal <= 0 || parsedLocal > 65535) {
+    if (!isValidPort(parsedLocal)) {
       toast.error(t("intercept.invalidLocalPort"));
       return;
     }

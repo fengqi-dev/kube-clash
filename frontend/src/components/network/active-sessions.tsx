@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Copy, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
@@ -22,11 +22,13 @@ import { useI18n } from "@/i18n";
 import type { InterceptInfo, PortForwardInfo, PreviewInfo } from "@/types";
 
 export function ActiveSessions({
+  contextName,
   ready,
   refreshKey,
   inventoryRevision = 0,
   scope = "network",
 }: {
+  contextName: string;
   ready: boolean;
   refreshKey: number;
   /** Informer-driven; reload after reconcile may stop stale bindings. */
@@ -40,24 +42,36 @@ export function ActiveSessions({
   const [mirrors, setMirrors] = useState<InterceptInfo[]>([]);
   const [previews, setPreviews] = useState<PreviewInfo[]>([]);
   const [busy, setBusy] = useState(false);
+  const reloadGeneration = useRef(0);
   const podOnly = scope === "podPortForward";
 
   async function reload() {
+    const generation = ++reloadGeneration.current;
     const [forwardItems, exchangeItems, mirrorItems, previewItems] = await Promise.all([
       backend.listPortForwards(),
       !podOnly && ready ? backend.listIntercepts() : Promise.resolve([]),
       !podOnly && ready ? backend.listMirrors() : Promise.resolve([]),
       !podOnly && ready ? backend.listPreviews() : Promise.resolve([]),
     ]);
+    if (generation !== reloadGeneration.current) return;
     setForwards(
-      forwardItems.filter((item) =>
-        podOnly ? item.kind === "pod" : item.kind === "service",
+      forwardItems.filter(
+        (item) =>
+          item.context === contextName &&
+          (podOnly ? item.kind === "pod" : item.kind === "service"),
       ),
     );
     setExchanges(exchangeItems);
     setMirrors(mirrorItems);
     setPreviews(previewItems);
   }
+
+  useEffect(() => {
+    setForwards([]);
+    setExchanges([]);
+    setMirrors([]);
+    setPreviews([]);
+  }, [contextName, podOnly]);
 
   useEffect(() => {
     let active = true;
@@ -69,8 +83,9 @@ export function ActiveSessions({
       });
     return () => {
       active = false;
+      reloadGeneration.current += 1;
     };
-  }, [podOnly, ready, refreshKey, inventoryRevision, t]);
+  }, [contextName, podOnly, ready, refreshKey, inventoryRevision, t]);
 
   async function stopForward(id: string) {
     setBusy(true);
@@ -200,6 +215,7 @@ export function ActiveSessions({
                       size="sm"
                       variant="ghost"
                       disabled={busy}
+                      aria-label={`${t("portfwd.copyAddress")}: ${item.address}`}
                       onClick={() => void copyAddress(item.address)}
                     >
                       <Copy size={14} />
@@ -209,6 +225,7 @@ export function ActiveSessions({
                       size="sm"
                       variant="ghost"
                       disabled={busy}
+                      aria-label={`${t("portfwd.stop")}: ${item.kind}/${item.namespace}/${item.name}`}
                       onClick={() => void stopForward(item.id)}
                     >
                       {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
@@ -239,6 +256,7 @@ export function ActiveSessions({
                     size="sm"
                     variant="ghost"
                     disabled={busy}
+                    aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
                     onClick={() => void stopExchange(item.id)}
                   >
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
@@ -268,6 +286,7 @@ export function ActiveSessions({
                     size="sm"
                     variant="ghost"
                     disabled={busy}
+                    aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
                     onClick={() => void stopMirror(item.id)}
                   >
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
@@ -302,6 +321,7 @@ export function ActiveSessions({
                     size="sm"
                     variant="ghost"
                     disabled={busy}
+                    aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
                     onClick={() => void stopPreview(item.id)}
                   >
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
