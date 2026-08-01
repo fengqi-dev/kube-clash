@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Copy, Loader2, Trash2 } from "lucide-react";
+import { Activity, Copy, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import {
@@ -9,6 +9,11 @@ import {
   portForwardIcon,
   previewIcon,
 } from "@/components/network/action-icons";
+import {
+  SessionTestPanel,
+  type SessionTestFlow,
+  type SessionTestStatus,
+} from "@/components/network/session-test-panel";
 import { Button } from "@/components/ui/button";
 import {
   Table,
@@ -42,6 +47,10 @@ export function ActiveSessions({
   const [mirrors, setMirrors] = useState<InterceptInfo[]>([]);
   const [previews, setPreviews] = useState<PreviewInfo[]>([]);
   const [busy, setBusy] = useState(false);
+  const [testingSessionID, setTestingSessionID] = useState("");
+  const [testFlow, setTestFlow] = useState<SessionTestFlow | null>(null);
+  const [testStatus, setTestStatus] = useState<SessionTestStatus>("running");
+  const [testError, setTestError] = useState("");
   const reloadGeneration = useRef(0);
   const podOnly = scope === "podPortForward";
 
@@ -156,6 +165,109 @@ export function ActiveSessions({
     }
   }
 
+  async function testForward(item: PortForwardInfo) {
+    const startedAt = Date.now();
+    setTestingSessionID(item.id);
+    setTestFlow({
+      title: `${item.kind}/${item.namespace}/${item.name}`,
+      description: `${(item.protocol || "tcp").toUpperCase()} ${item.address} → :${item.remotePort}`,
+      routes: [
+        {
+          nodes: [
+            t("network.flowLocalClient"),
+            item.address,
+            t("network.flowDataPlane"),
+            `${item.kind}/${item.namespace}/${item.name}:${item.remotePort}`,
+          ],
+        },
+      ],
+    });
+    setTestStatus("running");
+    setTestError("");
+    try {
+      await backend.testPortForward(item.id);
+      await waitForTestAnimation(startedAt);
+      setTestStatus("success");
+    } catch (error) {
+      await waitForTestAnimation(startedAt);
+      setTestStatus("error");
+      setTestError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTestingSessionID("");
+    }
+  }
+
+  async function testIntercept(
+    item: InterceptInfo | PreviewInfo,
+    kind: "exchange" | "mirror" | "preview",
+  ) {
+    const startedAt = Date.now();
+    setTestingSessionID(item.id);
+    const localTargets = item.locals
+      .map(
+        (port) =>
+          `${(port.protocol || "tcp").toUpperCase()} ${port.localHost}:${port.localPort}`,
+      )
+      .join(" · ");
+    const service = `${item.namespace}/${item.service}`;
+    const routes =
+      kind === "mirror"
+        ? [
+            {
+              label: t("network.flowPrimary"),
+              nodes: [
+                t("network.flowClusterClient"),
+                service,
+                t("network.flowOriginalPods"),
+              ],
+            },
+            {
+              label: t("network.flowShadow"),
+              nodes: [
+                service,
+                t("network.flowGatewayMirror"),
+                localTargets,
+              ],
+            },
+          ]
+        : [
+            {
+              nodes: [
+                t("network.flowClusterClient"),
+                service,
+                kind === "exchange"
+                  ? t("network.flowGatewayExchange")
+                  : t("network.flowGatewayPreview"),
+                localTargets,
+              ],
+            },
+          ];
+    setTestFlow({
+      title: `${t(
+        kind === "exchange"
+          ? "network.tabExchange"
+          : kind === "mirror"
+            ? "network.tabMirror"
+            : "network.tabPreview",
+      )} · ${service}`,
+      description: localTargets,
+      routes,
+    });
+    setTestStatus("running");
+    setTestError("");
+    try {
+      await backend.testIntercept(item.id);
+      await waitForTestAnimation(startedAt);
+      setTestStatus("success");
+    } catch (error) {
+      await waitForTestAnimation(startedAt);
+      setTestStatus("error");
+      setTestError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setTestingSessionID("");
+    }
+  }
+
   const empty =
     forwards.length === 0 &&
     exchanges.length === 0 &&
@@ -224,6 +336,23 @@ export function ActiveSessions({
                       type="button"
                       size="sm"
                       variant="ghost"
+                      disabled={busy || testingSessionID !== ""}
+                      aria-label={`${t("network.testSession")}: ${item.kind}/${item.namespace}/${item.name}`}
+                      onClick={() => void testForward(item)}
+                    >
+                      {testingSessionID === item.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {testingSessionID === item.id
+                        ? t("network.testingSession")
+                        : t("network.testSession")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
                       disabled={busy}
                       aria-label={`${t("portfwd.stop")}: ${item.kind}/${item.namespace}/${item.name}`}
                       onClick={() => void stopForward(item.id)}
@@ -251,16 +380,34 @@ export function ActiveSessions({
                     .join(", ")}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
-                    onClick={() => void stopExchange(item.id)}
-                  >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy || testingSessionID !== ""}
+                      onClick={() => void testIntercept(item, "exchange")}
+                    >
+                      {testingSessionID === item.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {testingSessionID === item.id
+                        ? t("network.testingSession")
+                        : t("network.testSession")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
+                      onClick={() => void stopExchange(item.id)}
+                    >
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -281,16 +428,34 @@ export function ActiveSessions({
                     .join(", ")}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
-                    onClick={() => void stopMirror(item.id)}
-                  >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy || testingSessionID !== ""}
+                      onClick={() => void testIntercept(item, "mirror")}
+                    >
+                      {testingSessionID === item.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {testingSessionID === item.id
+                        ? t("network.testingSession")
+                        : t("network.testSession")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
+                      onClick={() => void stopMirror(item.id)}
+                    >
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
@@ -316,22 +481,53 @@ export function ActiveSessions({
                     .join(", ")}
                 </TableCell>
                 <TableCell>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={busy}
-                    aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
-                    onClick={() => void stopPreview(item.id)}
-                  >
-                    {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
-                  </Button>
+                  <div className="flex gap-1">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy || testingSessionID !== ""}
+                      onClick={() => void testIntercept(item, "preview")}
+                    >
+                      {testingSessionID === item.id ? (
+                        <Loader2 size={14} className="animate-spin" />
+                      ) : (
+                        <Activity size={14} />
+                      )}
+                      {testingSessionID === item.id
+                        ? t("network.testingSession")
+                        : t("network.testSession")}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      disabled={busy}
+                      aria-label={`${t("portfwd.stop")}: ${item.namespace}/${item.service}`}
+                      onClick={() => void stopPreview(item.id)}
+                    >
+                      {busy ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+                    </Button>
+                  </div>
                 </TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       )}
+      <SessionTestPanel
+        flow={testFlow}
+        status={testStatus}
+        error={testError}
+        onClose={() => setTestFlow(null)}
+      />
     </section>
   );
+}
+
+async function waitForTestAnimation(startedAt: number) {
+  const remaining = 900 - (Date.now() - startedAt);
+  if (remaining > 0) {
+    await new Promise((resolve) => window.setTimeout(resolve, remaining));
+  }
 }

@@ -93,4 +93,8 @@ export function StopPortForward(arg1:string):Promise<void>;
 
 export function StopPreview(arg1:string):Promise<void>;
 
+export function TestIntercept(arg1:string):Promise<void>;
+
+export function TestPortForward(arg1:string):Promise<void>;
+
 export function UninstallHelper():Promise<void>;
