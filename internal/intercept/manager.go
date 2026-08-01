@@ -311,20 +311,12 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 	}
 
 	interceptID := fmt.Sprintf("%s/%s", mapping.Namespace, mapping.Service)
-	portKeys := make(map[string]PortMapping)
-	for i, port := range ports {
-		network := tunnel.NetworkTCP
-		if port.Protocol == corev1.ProtocolUDP {
-			network = tunnel.NetworkUDP
-		}
-		subID := fmt.Sprintf("%s:%s:%d", interceptID, networkName(network), port.ServicePort)
-		local := localFor(ports[i], locals)
-		if err := control.register(subID, network, uint16(port.ListenPort)); err != nil {
-			m.rollbackRegisters(control, portKeys)
-			return Info{}, fmt.Errorf("register %s: %w", subID, err)
-		}
-		portKeys[subID] = local
+	transaction := newStartTransaction(control)
+	defer transaction.rollback()
+	if err := transaction.registerPorts(interceptID, ports, locals); err != nil {
+		return Info{}, err
 	}
+	portKeys := transaction.portKeys
 
 	selector := map[string]string{}
 	maps.Copy(selector, service.Spec.Selector)
@@ -336,16 +328,16 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		GatewayIP: gatewayIP,
 	}
 	if err := m.cluster.ApplyServiceIntercept(ctx, contextName, snapshot, interceptID); err != nil {
-		m.rollbackRegisters(control, portKeys)
 		return Info{}, err
 	}
+	transaction.compensate(func() {
+		_ = m.cluster.RestoreServiceIntercept(ctx, contextName, *snapshot)
+	})
 
 	var primaryAddrs map[string]string
 	if mode == ModeMirror {
 		primaryAddrs, err = buildPrimaryAddrs(*snapshot, ports, portKeys, interceptID)
 		if err != nil {
-			_ = m.cluster.RestoreServiceIntercept(ctx, contextName, *snapshot)
-			m.rollbackRegisters(control, portKeys)
 			return Info{}, err
 		}
 	}
@@ -365,6 +357,7 @@ func (m *Manager) startServiceIntercept(ctx context.Context, mapping Mapping) (I
 		info: info, snapshot: *snapshot, portKeys: portKeys, primaryAddrs: primaryAddrs, hostKeys: hostKeys,
 	})
 	m.mu.Unlock()
+	transaction.commit()
 	return info, nil
 }
 
@@ -401,20 +394,12 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 
 	previewID := fmt.Sprintf("%s/%s", request.Namespace, request.Name)
-	portKeys := make(map[string]PortMapping)
-	for i, port := range ports {
-		network := tunnel.NetworkTCP
-		if port.Protocol == corev1.ProtocolUDP {
-			network = tunnel.NetworkUDP
-		}
-		subID := fmt.Sprintf("%s:%s:%d", previewID, networkName(network), port.ServicePort)
-		local := localFor(ports[i], locals)
-		if err := control.register(subID, network, uint16(port.ListenPort)); err != nil {
-			m.rollbackRegisters(control, portKeys)
-			return Info{}, fmt.Errorf("register %s: %w", subID, err)
-		}
-		portKeys[subID] = local
+	transaction := newStartTransaction(control)
+	defer transaction.rollback()
+	if err := transaction.registerPorts(previewID, ports, locals); err != nil {
+		return Info{}, err
 	}
+	portKeys := transaction.portKeys
 
 	snapshot := cluster.PreviewServiceSnapshot{
 		Namespace: request.Namespace,
@@ -424,9 +409,11 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	}
 	service, err := m.cluster.CreatePreviewService(ctx, contextName, snapshot, previewID)
 	if err != nil {
-		m.rollbackRegisters(control, portKeys)
 		return Info{}, err
 	}
+	transaction.compensate(func() {
+		_ = m.cluster.DeletePreviewService(ctx, contextName, snapshot)
+	})
 
 	info := Info{
 		ID:        previewID,
@@ -443,6 +430,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 		info: info, preview: &snapshot, portKeys: portKeys, hostKeys: hostKeys,
 	})
 	m.mu.Unlock()
+	transaction.commit()
 	return info, nil
 }
 
@@ -462,9 +450,7 @@ func (m *Manager) Stop(ctx context.Context, id string) error {
 	m.mu.Unlock()
 
 	if control != nil {
-		for subID := range portKeys {
-			_ = control.unregister(subID)
-		}
+		unregisterPorts(control, portKeys)
 	}
 	if preview != nil {
 		return m.cluster.DeletePreviewService(ctx, contextName, *preview)
@@ -595,12 +581,6 @@ func (m *Manager) dialHostMirrorUDP(
 
 func (m *Manager) allocateListenPort() int32 {
 	return int32(atomic.AddUint32(&m.nextPort, 1))
-}
-
-func (m *Manager) rollbackRegisters(control *controlClient, portKeys map[string]PortMapping) {
-	for subID := range portKeys {
-		_ = control.unregister(subID)
-	}
 }
 
 func (m *Manager) handleReady(interceptSubID string, network byte, streamID uint64) {
