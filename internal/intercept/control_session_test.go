@@ -19,12 +19,19 @@ func TestControlSessionStateTransitions(t *testing.T) {
 	if !session.ready() || session.current() != first || session.lostSignal() != firstLost {
 		t.Fatal("attached control session is not ready")
 	}
+	snapshotClient, snapshotGeneration, ready := session.snapshot()
+	if !ready || !session.matches(snapshotClient, snapshotGeneration) {
+		t.Fatal("attached control session snapshot did not match")
+	}
 	old, generation := session.beginRecovery()
 	if old != first {
 		t.Fatalf("beginRecovery returned %#v, want first client", old)
 	}
 	if session.ready() || session.current() != nil || !session.recovering {
 		t.Fatal("control session did not enter recovery state")
+	}
+	if session.matches(snapshotClient, snapshotGeneration) {
+		t.Fatal("pre-recovery control snapshot still matched")
 	}
 
 	session.recoveryFailed(generation)

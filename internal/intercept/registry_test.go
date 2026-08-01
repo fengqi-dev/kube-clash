@@ -79,3 +79,32 @@ func TestRuntimeRegistryFindsPortsAndBuildsSortedRegistrations(t *testing.T) {
 		t.Fatalf("registrations are not sorted: %#v", registrations)
 	}
 }
+
+func TestRuntimeRegistryReservationsRejectConcurrentAndStaleRelease(t *testing.T) {
+	registry := newRuntimeRegistry()
+	first, ok := registry.reserve("team/api")
+	if !ok || first == 0 {
+		t.Fatal("first reservation was rejected")
+	}
+	if _, ok := registry.reserve("team/api"); ok {
+		t.Fatal("concurrent reservation was accepted")
+	}
+
+	registry.release("team/api", first+1)
+	if !registry.reserved("team/api", first) {
+		t.Fatal("stale release cleared current reservation")
+	}
+	registry.release("team/api", first)
+
+	second, ok := registry.reserve("team/api")
+	if !ok || second == first {
+		t.Fatalf("second reservation = %d, first = %d", second, first)
+	}
+	registry.release("team/api", second)
+	registry.add(&runtimeIntercept{info: Info{
+		ID: "team/api", Namespace: "team", Service: "api",
+	}})
+	if _, ok := registry.reserve("team/api"); ok {
+		t.Fatal("active runtime key was reserved")
+	}
+}

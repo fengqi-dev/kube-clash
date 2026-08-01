@@ -6,14 +6,17 @@ import "sort"
 // call; the registry deliberately has no second lock so lifecycle operations
 // can update routes, control state, and indexes atomically.
 type runtimeRegistry struct {
-	byID  map[string]*runtimeIntercept
-	byKey map[string]string // namespace/service -> id
+	byID            map[string]*runtimeIntercept
+	byKey           map[string]string // namespace/service -> id
+	starting        map[string]uint64
+	nextReservation uint64
 }
 
 func newRuntimeRegistry() *runtimeRegistry {
 	return &runtimeRegistry{
-		byID:  make(map[string]*runtimeIntercept),
-		byKey: make(map[string]string),
+		byID:     make(map[string]*runtimeIntercept),
+		byKey:    make(map[string]string),
+		starting: make(map[string]uint64),
 	}
 }
 
@@ -32,6 +35,29 @@ func (r *runtimeRegistry) getByKey(key string) *runtimeIntercept {
 func (r *runtimeRegistry) containsKey(key string) bool {
 	_, exists := r.byKey[key]
 	return exists
+}
+
+func (r *runtimeRegistry) reserve(key string) (uint64, bool) {
+	if r.containsKey(key) {
+		return 0, false
+	}
+	if _, exists := r.starting[key]; exists {
+		return 0, false
+	}
+	r.nextReservation++
+	reservation := r.nextReservation
+	r.starting[key] = reservation
+	return reservation, true
+}
+
+func (r *runtimeRegistry) reserved(key string, reservation uint64) bool {
+	return r.starting[key] == reservation && reservation != 0
+}
+
+func (r *runtimeRegistry) release(key string, reservation uint64) {
+	if r.reserved(key, reservation) {
+		delete(r.starting, key)
+	}
 }
 
 func (r *runtimeRegistry) add(runtime *runtimeIntercept) {

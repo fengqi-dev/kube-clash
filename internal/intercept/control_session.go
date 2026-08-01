@@ -85,6 +85,17 @@ func (s *controlSession) current() *controlClient {
 	return s.client
 }
 
+func (s *controlSession) snapshot() (*controlClient, uint64, bool) {
+	return s.client, s.generation, s.ready()
+}
+
+func (s *controlSession) matches(client *controlClient, generation uint64) bool {
+	return s.client == client &&
+		s.generation == generation &&
+		s.ready() &&
+		!s.client.closed.Load()
+}
+
 func (s *controlSession) lostSignal() <-chan struct{} {
 	return s.lost
 }
