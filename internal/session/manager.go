@@ -168,14 +168,12 @@ type Manager struct {
 	gatewayImage  string
 	store         *store.Store
 
-	mu               sync.RWMutex
-	state            State
-	cancel           context.CancelFunc
-	done             chan struct{}
-	listeners        []func(State)
-	metricsListeners []func(*singbox.Metrics)
-	intercept        *intercept.Manager
-	portfwd          *portfwd.Manager
+	mu        sync.RWMutex
+	stateHub  *stateHub
+	cancel    context.CancelFunc
+	done      chan struct{}
+	intercept *intercept.Manager
+	portfwd   *portfwd.Manager
 
 	recentConnections map[string]recentConnection
 	lastTraffic       map[string]connectionTraffic
@@ -205,9 +203,9 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 		gatewayImage: ResolveGatewayImage(""),
 		intercept:    intercept.NewManager(provider),
 		portfwd:      portfwd.NewManager(provider),
-		state: State{
+		stateHub: newStateHub(State{
 			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
-		},
+		}),
 	}
 	for _, option := range options {
 		option(manager)
@@ -239,8 +237,8 @@ func (m *Manager) ListPods(
 func (m *Manager) SingBoxConfig() ([]byte, error) {
 	m.mu.RLock()
 	core := m.runningCore
-	phase := m.state.Phase
 	m.mu.RUnlock()
+	phase := m.State().Phase
 	if core == nil || phase != PhaseConnected {
 		return nil, errors.New("not connected")
 	}
@@ -255,8 +253,8 @@ func (m *Manager) SingBoxConfig() ([]byte, error) {
 func (m *Manager) DNSPort() (int, error) {
 	m.mu.RLock()
 	core := m.runningCore
-	phase := m.state.Phase
 	m.mu.RUnlock()
+	phase := m.State().Phase
 	if core == nil || phase != PhaseConnected {
 		return 0, errors.New("not connected")
 	}
@@ -272,8 +270,8 @@ func (m *Manager) DNSPort() (int, error) {
 func (m *Manager) InternalDNSPort() (int, error) {
 	m.mu.RLock()
 	core := m.runningCore
-	phase := m.state.Phase
 	m.mu.RUnlock()
+	phase := m.State().Phase
 	if core == nil || phase != PhaseConnected {
 		return 0, errors.New("not connected")
 	}
@@ -285,9 +283,7 @@ func (m *Manager) InternalDNSPort() (int, error) {
 }
 
 func (m *Manager) State() State {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.state
+	return m.stateHub.snapshot()
 }
 
 // SetKubernetesVersion records the API server version for the sidebar/overview.
@@ -295,29 +291,25 @@ func (m *Manager) SetKubernetesVersion(version string) {
 	if version == "" {
 		return
 	}
-	m.mu.Lock()
-	if m.state.KubernetesVersion == version {
-		m.mu.Unlock()
+	m.stateHub.mu.Lock()
+	if m.stateHub.state.KubernetesVersion == version {
+		m.stateHub.mu.Unlock()
 		return
 	}
-	next := m.state
+	next := m.stateHub.state
 	next.KubernetesVersion = version
-	m.mu.Unlock()
+	m.stateHub.mu.Unlock()
 	m.publish(next)
 }
 
 func (m *Manager) Subscribe(listener func(State)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.listeners = append(m.listeners, listener)
+	m.stateHub.subscribe(listener)
 }
 
 // SubscribeMetrics receives high-frequency connection/traffic snapshots without
 // re-emitting the full session inventory on every poll.
 func (m *Manager) SubscribeMetrics(listener func(*singbox.Metrics)) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	m.metricsListeners = append(m.metricsListeners, listener)
+	m.stateHub.subscribeMetrics(listener)
 }
 
 func (m *Manager) Connect(parent context.Context, request Request) error {
@@ -634,21 +626,21 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 			}
 			m.mu.RLock()
 			tracker := m.trafficTracker
-			phase := m.state.Phase
 			m.mu.RUnlock()
+			phase := m.State().Phase
 			if phase != PhaseConnected {
 				continue
 			}
 			metrics = mergeTrafficTracker(metrics, tracker)
 			retained := m.retainMetrics(metrics)
-			m.mu.Lock()
-			if m.state.Phase != PhaseConnected {
-				m.mu.Unlock()
+			m.stateHub.mu.Lock()
+			if m.stateHub.state.Phase != PhaseConnected {
+				m.stateHub.mu.Unlock()
 				continue
 			}
-			m.state.Metrics = retained
-			m.state.UpdatedAt = time.Now()
-			m.mu.Unlock()
+			m.stateHub.state.Metrics = retained
+			m.stateHub.state.UpdatedAt = time.Now()
+			m.stateHub.mu.Unlock()
 			m.publishMetrics(retained)
 		}
 	}
@@ -755,12 +747,12 @@ func trafficOutboundForFeature(feature string) string {
 }
 
 func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
-	m.mu.Lock()
-	if m.state.Phase != PhaseConnected || m.state.Discovery == nil {
-		m.mu.Unlock()
+	m.stateHub.mu.Lock()
+	if m.stateHub.state.Phase != PhaseConnected || m.stateHub.state.Discovery == nil {
+		m.stateHub.mu.Unlock()
 		return
 	}
-	next := m.state
+	next := m.stateHub.state
 	discovery := *next.Discovery
 	discovery.Pods = snap.Pods
 	discovery.Services = snap.Services
@@ -773,8 +765,8 @@ func (m *Manager) applyInventory(snap cluster.InventorySnapshot) {
 	next.Pods = append([]cluster.PodInfo{}, snap.PodItems...)
 	next.Services = append([]cluster.ServiceInfo{}, snap.ServiceItems...)
 	next.InventoryRevision++
-	m.state = next
-	m.mu.Unlock()
+	m.stateHub.state = next
+	m.stateHub.mu.Unlock()
 
 	ctx := context.Background()
 	m.reconcileBindings(ctx, snap)
@@ -1149,8 +1141,8 @@ func (m *Manager) SetDNSNamespace(contextName, namespace string) error {
 	}
 	m.mu.Lock()
 	core := m.runningCore
-	state := m.state
 	m.mu.Unlock()
+	state := m.State()
 	if core == nil || state.Phase != PhaseConnected || state.Context != contextName {
 		return nil
 	}
@@ -1159,12 +1151,12 @@ func (m *Manager) SetDNSNamespace(contextName, namespace string) error {
 	if err := core.UpdateDNSNamespace(ctx, namespace); err != nil {
 		return err
 	}
-	m.mu.Lock()
-	next := m.state
+	m.stateHub.mu.Lock()
+	next := m.stateHub.state
 	next.DNSNamespace = namespace
 	next.DNSWarning = ""
-	m.state = next
-	m.mu.Unlock()
+	m.stateHub.state = next
+	m.stateHub.mu.Unlock()
 	m.publish(next)
 	m.AppendLog("INFO", "DNS search namespace set to "+namespace)
 	m.probeClusterDNS(ctx, next, core)
@@ -1179,17 +1171,17 @@ func (m *Manager) probeClusterDNS(parent context.Context, state State, core sing
 	defer cancel()
 	if err := core.ProbeClusterDNS(ctx); err != nil {
 		warning := "Cluster DNS probe failed; split DNS may be overridden by another proxy (for example Clash Verge TUN/system DNS). Try disabling the other client's TUN DNS or reconnect KubeLoop last."
-		m.mu.Lock()
-		next := m.state
+		m.stateHub.mu.Lock()
+		next := m.stateHub.state
 		if next.Phase == PhaseConnected && next.Context == state.Context {
 			next.DNSWarning = warning
-			m.state = next
-			m.mu.Unlock()
+			m.stateHub.state = next
+			m.stateHub.mu.Unlock()
 			m.publish(next)
 			m.AppendLog("WARN", warning+": "+err.Error())
 			return
 		}
-		m.mu.Unlock()
+		m.stateHub.mu.Unlock()
 	}
 }
 
@@ -1251,34 +1243,11 @@ func (m *Manager) GatewayInstallManifest() string {
 }
 
 func (m *Manager) publish(state State) {
-	state.UpdatedAt = time.Now()
-	m.mu.Lock()
-	if state.Events == nil {
-		state.Events = m.state.Events
-	}
-	// Keep the latest high-frequency metrics when a slower state publish
-	// (inventory, phase change) does not carry a fresher snapshot.
-	if state.Metrics == nil && m.state.Metrics != nil && state.Phase == PhaseConnected {
-		state.Metrics = m.state.Metrics
-	}
-	m.state = state
-	listeners := append([]func(State){}, m.listeners...)
-	m.mu.Unlock()
-	for _, listener := range listeners {
-		listener(state)
-	}
+	m.stateHub.publish(state)
 }
 
 func (m *Manager) publishMetrics(metrics *singbox.Metrics) {
-	if metrics == nil {
-		return
-	}
-	m.mu.RLock()
-	listeners := append([]func(*singbox.Metrics){}, m.metricsListeners...)
-	m.mu.RUnlock()
-	for _, listener := range listeners {
-		listener(metrics)
-	}
+	m.stateHub.publishMetrics(metrics)
 }
 
 type closerFunc func()
