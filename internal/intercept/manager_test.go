@@ -26,6 +26,10 @@ type fakeCluster struct {
 	deleted          bool
 	previewIP        string
 	endpointsSubsets []corev1.EndpointSubset
+	restoreErr       error
+	deleteErr        error
+	restoreCalls     int
+	deleteCalls      int
 }
 
 func (f *fakeCluster) GetService(
@@ -49,6 +53,10 @@ func (f *fakeCluster) ApplyServiceIntercept(
 func (f *fakeCluster) RestoreServiceIntercept(
 	context.Context, string, cluster.ServiceInterceptSnapshot,
 ) error {
+	f.restoreCalls++
+	if f.restoreErr != nil {
+		return f.restoreErr
+	}
 	f.restored = true
 	return nil
 }
@@ -71,6 +79,10 @@ func (f *fakeCluster) CreatePreviewService(
 func (f *fakeCluster) DeletePreviewService(
 	context.Context, string, cluster.PreviewServiceSnapshot,
 ) error {
+	f.deleteCalls++
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
 	f.deleted = true
 	return nil
 }

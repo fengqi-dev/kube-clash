@@ -107,6 +107,7 @@ type runtimeIntercept struct {
 	portKeys     map[string]PortMapping // subID -> local mapping
 	primaryAddrs map[string]string      // subID -> pod host:port (mirror)
 	hostKeys     []hostRouteKey
+	stopping     bool
 }
 
 func NewManager(api ClusterAPI) *Manager {
@@ -461,26 +462,51 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 
 func (m *Manager) Stop(ctx context.Context, id string) error {
 	m.mu.Lock()
-	runtime := m.registry.remove(id)
+	runtime := m.registry.get(id)
 	if runtime == nil {
 		m.mu.Unlock()
 		return fmt.Errorf("intercept %q not found", id)
 	}
-	m.routes.remove(runtime.hostKeys)
-	control := m.control.current()
+	if runtime.stopping {
+		m.mu.Unlock()
+		return fmt.Errorf("intercept %q stop already in progress", id)
+	}
+	runtime.stopping = true
 	contextName := m.contextName
-	portKeys := runtime.portKeys
 	snapshot := runtime.snapshot
 	preview := runtime.preview
+	m.mu.Unlock()
+
+	var err error
+	if preview != nil {
+		err = m.cluster.DeletePreviewService(ctx, contextName, *preview)
+	} else {
+		err = m.cluster.RestoreServiceIntercept(ctx, contextName, snapshot)
+	}
+	if err != nil {
+		m.mu.Lock()
+		if m.registry.get(id) == runtime {
+			runtime.stopping = false
+		}
+		m.mu.Unlock()
+		return err
+	}
+
+	m.mu.Lock()
+	if m.registry.get(id) != runtime {
+		m.mu.Unlock()
+		return nil
+	}
+	m.registry.remove(id)
+	m.routes.remove(runtime.hostKeys)
+	control := m.control.current()
+	portKeys := runtime.portKeys
 	m.mu.Unlock()
 
 	if control != nil {
 		unregisterPorts(control, portKeys)
 	}
-	if preview != nil {
-		return m.cluster.DeletePreviewService(ctx, contextName, *preview)
-	}
-	return m.cluster.RestoreServiceIntercept(ctx, contextName, snapshot)
+	return nil
 }
 
 func (m *Manager) allocateListenPort() int32 {
