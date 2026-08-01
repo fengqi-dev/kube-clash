@@ -13,8 +13,6 @@ import (
 	"sync"
 	"time"
 
-	corev1 "k8s.io/api/core/v1"
-
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
@@ -82,12 +80,20 @@ type State struct {
 	UpdatedAt         time.Time `json:"updatedAt"`
 }
 
-type ClusterProvider interface {
+// ClusterCatalog exposes read-only cluster inventory used by the desktop
+// facade. Keeping it separate from connection lifecycle operations lets
+// callers test and replace those concerns independently.
+type ClusterCatalog interface {
 	Contexts() ([]cluster.ContextInfo, error)
 	Namespaces(context.Context, string) ([]string, error)
-	ServerVersion(context.Context, string) (string, error)
 	ListServices(context.Context, string, string) ([]cluster.ServiceInfo, error)
 	ListPods(context.Context, string, string) ([]cluster.PodInfo, error)
+}
+
+// ClusterConnection exposes the Kubernetes operations needed to establish and
+// monitor a connected session.
+type ClusterConnection interface {
+	ServerVersion(context.Context, string) (string, error)
 	Discover(context.Context, string, []string) (cluster.Discovery, error)
 	WatchInventory(
 		context.Context,
@@ -96,16 +102,24 @@ type ClusterProvider interface {
 		func(cluster.InventorySnapshot),
 	) (io.Closer, error)
 	ProbeCapabilities(context.Context, string) (cluster.Capabilities, error)
+}
+
+// GatewayManager owns the in-cluster Gateway and its API-server channel.
+type GatewayManager interface {
 	GetGateway(context.Context, string) (cluster.GatewayInfo, error)
 	EnsureGateway(context.Context, string, string) (cluster.GatewayInfo, error)
 	StartPortForward(context.Context, string, string, uint16) (cluster.PortForward, error)
-	StartPodPortForward(context.Context, string, string, string, uint16, uint16) (cluster.PortForward, error)
-	ResolveServiceBackend(context.Context, string, string, string, int32) (string, uint16, error)
-	ApplyServiceIntercept(context.Context, string, *cluster.ServiceInterceptSnapshot, string) error
-	RestoreServiceIntercept(context.Context, string, cluster.ServiceInterceptSnapshot) error
-	CreatePreviewService(context.Context, string, cluster.PreviewServiceSnapshot, string) (*corev1.Service, error)
-	DeletePreviewService(context.Context, string, cluster.PreviewServiceSnapshot) error
-	GetService(context.Context, string, string, string) (*corev1.Service, error)
+}
+
+// ClusterProvider is the composition-root contract implemented by
+// cluster.Provider. Manager stores each facet behind its narrow interface,
+// while feature managers receive only their own consumer-defined contracts.
+type ClusterProvider interface {
+	ClusterCatalog
+	ClusterConnection
+	GatewayManager
+	intercept.ClusterAPI
+	portfwd.ClusterAPI
 }
 
 type Core interface {
@@ -146,7 +160,9 @@ type connectionTraffic struct {
 }
 
 type Manager struct {
-	provider      ClusterProvider
+	catalog       ClusterCatalog
+	connection    ClusterConnection
+	gateway       GatewayManager
 	core          Core
 	bridgeFactory BridgeFactory
 	gatewayImage  string
@@ -179,8 +195,10 @@ const (
 
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	manager := &Manager{
-		provider: provider,
-		core:     newSingboxRuntime(),
+		catalog:    provider,
+		connection: provider,
+		gateway:    provider,
+		core:       newSingboxRuntime(),
 		bridgeFactory: func(ctx context.Context, gatewayAddress string) (net.Listener, error) {
 			return socksbridge.Listen(ctx, gatewayAddress)
 		},
@@ -198,23 +216,23 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 }
 
 func (m *Manager) Contexts() ([]cluster.ContextInfo, error) {
-	return m.provider.Contexts()
+	return m.catalog.Contexts()
 }
 
 func (m *Manager) Namespaces(ctx context.Context, contextName string) ([]string, error) {
-	return m.provider.Namespaces(ctx, contextName)
+	return m.catalog.Namespaces(ctx, contextName)
 }
 
 func (m *Manager) ListServices(
 	ctx context.Context, contextName, namespace string,
 ) ([]cluster.ServiceInfo, error) {
-	return m.provider.ListServices(ctx, contextName, namespace)
+	return m.catalog.ListServices(ctx, contextName, namespace)
 }
 
 func (m *Manager) ListPods(
 	ctx context.Context, contextName, namespace string,
 ) ([]cluster.PodInfo, error) {
-	return m.provider.ListPods(ctx, contextName, namespace)
+	return m.catalog.ListPods(ctx, contextName, namespace)
 }
 
 // SingBoxConfig returns the active session's generated sing-box config JSON.
@@ -351,14 +369,14 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.publish(state)
 	m.AppendLog("INFO", fmt.Sprintf("connecting to context %s", request.Context))
 
-	caps, err := m.provider.ProbeCapabilities(ctx, request.Context)
+	caps, err := m.connection.ProbeCapabilities(ctx, request.Context)
 	if err != nil {
 		m.fail(ctx, state, "Could not check cluster permissions", err)
 		return
 	}
 	state.Capabilities = &caps
 	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
-	if version, versionErr := m.provider.ServerVersion(ctx, request.Context); versionErr == nil {
+	if version, versionErr := m.connection.ServerVersion(ctx, request.Context); versionErr == nil {
 		state.KubernetesVersion = version
 	}
 	m.publish(state)
@@ -381,13 +399,13 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.publish(state)
 	var gateway cluster.GatewayInfo
 	if caps.GatewayInstall {
-		gateway, err = m.provider.EnsureGateway(ctx, request.Context, m.gatewayImage)
+		gateway, err = m.gateway.EnsureGateway(ctx, request.Context, m.gatewayImage)
 		if err != nil {
 			m.fail(ctx, state, "Could not install the cluster Gateway", err)
 			return
 		}
 	} else {
-		gateway, err = m.provider.GetGateway(ctx, request.Context)
+		gateway, err = m.gateway.GetGateway(ctx, request.Context)
 		if err != nil {
 			state.GatewayManifest = cluster.GatewayInstallManifest(m.gatewayImage)
 			m.fail(ctx, state, "No preinstalled Gateway found; ask an admin to install it or grant install permission", err)
@@ -402,7 +420,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	if caps.InventoryCluster {
 		scopeNS = nil
 	}
-	discovery, err := m.provider.Discover(ctx, request.Context, scopeNS)
+	discovery, err := m.connection.Discover(ctx, request.Context, scopeNS)
 	if err != nil {
 		m.fail(ctx, state, "Could not read cluster network information", err)
 		return
@@ -428,7 +446,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.AppendLog("WARN", issue.Message)
 	}
 
-	forwarder, err := m.provider.StartPortForward(
+	forwarder, err := m.gateway.StartPortForward(
 		ctx, request.Context, gateway.Name, cluster.GatewayPort,
 	)
 	if err != nil {
@@ -530,7 +548,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.probeClusterDNS(ctx, state, core)
 	m.restoreBindings(ctx, request.Context)
 
-	inventory, err := m.provider.WatchInventory(ctx, request.Context, scopeNS, func(snap cluster.InventorySnapshot) {
+	inventory, err := m.connection.WatchInventory(ctx, request.Context, scopeNS, func(snap cluster.InventorySnapshot) {
 		m.applyInventory(snap)
 	})
 	if err != nil {

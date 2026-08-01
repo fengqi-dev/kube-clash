@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -234,6 +235,36 @@ type fakeAddress string
 func (f fakeAddress) Network() string { return "tcp" }
 func (f fakeAddress) String() string  { return string(f) }
 
+type trackedListener struct {
+	mu     sync.Mutex
+	closed bool
+}
+
+func (l *trackedListener) Accept() (net.Conn, error) { return nil, net.ErrClosed }
+func (l *trackedListener) Addr() net.Addr            { return fakeAddress("127.0.0.1:23457") }
+func (l *trackedListener) Close() error {
+	l.mu.Lock()
+	l.closed = true
+	l.mu.Unlock()
+	return nil
+}
+
+func (l *trackedListener) isClosed() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return l.closed
+}
+
+type failingCore struct {
+	err error
+}
+
+func (f failingCore) Start(
+	context.Context, cluster.Discovery, string, string, []singbox.HostAlias,
+) (singbox.RunningCore, error) {
+	return nil, f.err
+}
+
 func TestManagerPublishesConnectedStateAndCleansUp(t *testing.T) {
 	want := cluster.Discovery{
 		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.1"},
@@ -299,6 +330,107 @@ func TestManagerPublishesGatewayError(t *testing.T) {
 	}
 }
 
+func TestManagerCoreFailurePublishesPhasesAndRollsBackResources(t *testing.T) {
+	provider := &fakeProvider{discovery: cluster.Discovery{
+		PodCIDRs: []string{"10.244.0.0/16"}, ServiceIPs: []string{"10.96.0.1"},
+	}}
+	bridge := &trackedListener{}
+	manager := NewManager(
+		provider,
+		WithCore(failingCore{err: errors.New("core failed")}),
+		WithBridgeFactory(func(context.Context, string) (net.Listener, error) {
+			return bridge, nil
+		}),
+	)
+
+	var phasesMu sync.Mutex
+	var phases []Phase
+	failed := make(chan State, 1)
+	manager.Subscribe(func(state State) {
+		phasesMu.Lock()
+		phases = append(phases, state.Phase)
+		phasesMu.Unlock()
+		if state.Phase == PhaseError {
+			failed <- state
+		}
+	})
+
+	if err := manager.Connect(context.Background(), Request{Context: "dev"}); err != nil {
+		t.Fatal(err)
+	}
+	state := receiveState(t, failed)
+	if state.Message != "Could not start sing-box TUN" || state.Error != "core failed" {
+		t.Fatalf("unexpected error state: %#v", state)
+	}
+
+	waitFor(t, func() bool {
+		if provider.forwarder == nil || !bridge.isClosed() {
+			return false
+		}
+		provider.forwarder.mu.Lock()
+		defer provider.forwarder.mu.Unlock()
+		return provider.forwarder.closed
+	})
+
+	phasesMu.Lock()
+	gotPhases := compactPhases(phases)
+	phasesMu.Unlock()
+	wantPhases := []Phase{
+		PhaseChecking,
+		PhaseInstalling,
+		PhaseDiscovering,
+		PhaseStarting,
+		PhaseError,
+	}
+	if fmt.Sprint(gotPhases) != fmt.Sprint(wantPhases) {
+		t.Fatalf("phases = %v, want %v", gotPhases, wantPhases)
+	}
+}
+
+func compactPhases(phases []Phase) []Phase {
+	compacted := make([]Phase, 0, len(phases))
+	for _, phase := range phases {
+		if len(compacted) == 0 || compacted[len(compacted)-1] != phase {
+			compacted = append(compacted, phase)
+		}
+	}
+	return compacted
+}
+
+func TestStateJSONContract(t *testing.T) {
+	state := State{
+		Phase:             PhaseConnected,
+		Context:           "dev",
+		Namespace:         "default",
+		DNSNamespace:      "team-a",
+		Message:           "Connected",
+		Error:             "sample",
+		DNSWarning:        "warning",
+		InventoryRevision: 7,
+		KubernetesVersion: "v1.35.1",
+		UpdatedAt:         time.Date(2026, 8, 1, 12, 0, 0, 0, time.UTC),
+		ScopeNamespaces:   nil,
+		GatewayManifest:   "",
+		CoreVersion:       "",
+		ConnectedAt:       nil,
+		Discovery:         nil,
+		Capabilities:      nil,
+		Network:           nil,
+		Pods:              nil,
+		Services:          nil,
+		Events:            nil,
+		Metrics:           nil,
+	}
+	data, err := json.Marshal(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const want = `{"phase":"connected","context":"dev","namespace":"default","dnsNamespace":"team-a","message":"Connected","error":"sample","dnsWarning":"warning","inventoryRevision":7,"kubernetesVersion":"v1.35.1","updatedAt":"2026-08-01T12:00:00Z"}`
+	if string(data) != want {
+		t.Fatalf("State JSON changed:\n got: %s\nwant: %s", data, want)
+	}
+}
+
 func TestManagerRejectsSecondConnection(t *testing.T) {
 	manager := NewManager(
 		&fakeProvider{discovery: cluster.Discovery{
@@ -327,6 +459,18 @@ func receiveState(t *testing.T, states <-chan State) State {
 		t.Fatal("timed out waiting for session state")
 		return State{}
 	}
+}
+
+func waitFor(t *testing.T, condition func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out waiting for condition")
 }
 
 func TestRetainMetricsKeepsRecentConnections(t *testing.T) {
