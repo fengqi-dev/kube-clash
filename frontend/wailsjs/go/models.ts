@@ -1,5 +1,5 @@
 export namespace app {
-
+	
 	export class BootstrapData {
 	    contexts: cluster.ContextInfo[];
 	    namespaces: string[];
@@ -8,11 +8,11 @@ export namespace app {
 	    preferredContext?: string;
 	    preferredNamespace?: string;
 	    kubeconfigFiles?: cluster.KubeconfigFileInfo[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new BootstrapData(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.contexts = this.convertValues(source["contexts"], cluster.ContextInfo);
@@ -23,7 +23,7 @@ export namespace app {
 	        this.preferredNamespace = source["preferredNamespace"];
 	        this.kubeconfigFiles = this.convertValues(source["kubeconfigFiles"], cluster.KubeconfigFileInfo);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -658,11 +658,11 @@ export namespace session {
 	    target?: string;
 	    conflict?: string;
 	    interface?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new NetworkDiagnostic(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.code = source["code"];
@@ -677,18 +677,18 @@ export namespace session {
 	    routingMode: string;
 	    strictRoute: boolean;
 	    issues?: NetworkDiagnostic[];
-
+	
 	    static createFrom(source: any = {}) {
 	        return new NetworkDiagnostics(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.routingMode = source["routingMode"];
 	        this.strictRoute = source["strictRoute"];
 	        this.issues = this.convertValues(source["issues"], NetworkDiagnostic);
 	    }
-
+	
 		convertValues(a: any, classs: any, asMap: boolean = false): any {
 		    if (!a) {
 		        return a;
@@ -948,3 +948,4 @@ export namespace update {
 	}
 
 }
+
