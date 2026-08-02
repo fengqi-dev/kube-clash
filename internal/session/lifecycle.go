@@ -2,19 +2,21 @@ package session
 
 import (
 	"errors"
-	"log"
+	"fmt"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
 func (m *Manager) Disconnect() error {
+	m.recordLog("INFO", "disconnect requested")
 	return m.disconnect(true)
 }
 
 // Shutdown persists restore intents, then tears down runtime without clearing
 // the "was connected" flag used for next-launch recovery.
 func (m *Manager) Shutdown() error {
+	m.recordLog("INFO", "application shutdown started; preserving session restore state")
 	m.mu.Lock()
 	m.shuttingDown = true
 	m.mu.Unlock()
@@ -51,6 +53,7 @@ func (m *Manager) disconnect(clearConnected bool) error {
 		}
 		return nil
 	case <-time.After(25 * time.Second):
+		m.recordLog("ERROR", "timed out cleaning up the active connection")
 		return errors.New("timed out cleaning up the active connection")
 	}
 }
@@ -60,6 +63,6 @@ func (m *Manager) markDisconnected(contextName, namespace string) {
 		return
 	}
 	if err := m.store.SetConnected(contextName, namespace, false); err != nil {
-		log.Printf("persist disconnected state: %v", err)
+		m.AppendLog("ERROR", fmt.Sprintf("persist disconnected state: %v", err))
 	}
 }

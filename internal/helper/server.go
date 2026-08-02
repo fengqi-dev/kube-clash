@@ -115,20 +115,28 @@ func (s *Server) dispatch(request Request) Response {
 		if request.Session == nil {
 			return Response{OK: false, Error: "session is required"}
 		}
+		s.Log.Printf("starting privileged session %s", request.Session.ID)
 		if err := s.startSession(*request.Session); err != nil {
+			s.Log.Printf("start privileged session %s: %v", request.Session.ID, err)
 			return Response{OK: false, Error: err.Error()}
 		}
+		s.Log.Printf("privileged session %s started", request.Session.ID)
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
 	case OpStop:
 		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
 			return Response{OK: false, Error: err.Error()}
 		}
+		s.Log.Printf("stopping privileged session %s", request.SessionID)
 		if err := s.stopSession(request.SessionID); err != nil {
+			s.Log.Printf("stop privileged session %s: %v", request.SessionID, err)
 			return Response{OK: false, Error: err.Error()}
 		}
+		s.Log.Printf("privileged session %s stopped", request.SessionID)
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
 	case OpStopAll:
+		s.Log.Printf("stopping all privileged sessions")
 		s.stopAllSessions()
+		s.Log.Printf("all privileged sessions stopped")
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
 	case OpUpdateDNS:
 		if err := singbox.ValidateSessionID(request.SessionID); err != nil {
@@ -137,9 +145,15 @@ func (s *Server) dispatch(request Request) Response {
 		if request.DNS == nil {
 			return Response{OK: false, Error: "dns is required"}
 		}
+		s.Log.Printf(
+			"updating split DNS for session %s: domains=%d",
+			request.SessionID, len(request.DNS.Domains),
+		)
 		if err := s.updateSessionDNS(request.SessionID, *request.DNS); err != nil {
+			s.Log.Printf("update split DNS for session %s: %v", request.SessionID, err)
 			return Response{OK: false, Error: err.Error()}
 		}
+		s.Log.Printf("split DNS updated for session %s", request.SessionID)
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
@@ -289,11 +303,19 @@ func (s *Server) startSession(spec singbox.SessionSpec) error {
 		}
 		current.lifecycleMu.Lock()
 		current.stopping = true
-		_ = restoreLinkDNS(current.tunAddress)
-		_ = restorePlatformDNS(current.workDir, current.dns)
+		if err := restoreLinkDNS(current.tunAddress); err != nil {
+			s.Log.Printf("restore link DNS for session %s: %v", spec.ID, err)
+		}
+		if err := restorePlatformDNS(current.workDir, current.dns); err != nil {
+			s.Log.Printf("restore platform DNS for session %s: %v", spec.ID, err)
+		}
 		cleanupPlatformRoutes(current.routes)
-		_ = logFile.Close()
-		_ = os.RemoveAll(current.workDir)
+		if err := logFile.Close(); err != nil {
+			s.Log.Printf("close log for session %s: %v", spec.ID, err)
+		}
+		if err := os.RemoveAll(current.workDir); err != nil {
+			s.Log.Printf("remove protected files for session %s: %v", spec.ID, err)
+		}
 		s.mu.Lock()
 		if s.sessions[spec.ID] == current {
 			delete(s.sessions, spec.ID)
@@ -456,7 +478,9 @@ func (s *Server) stopAllSessions() {
 	}
 	s.mu.Unlock()
 	for _, id := range ids {
-		_ = s.stopSession(id)
+		if err := s.stopSession(id); err != nil {
+			s.Log.Printf("stop privileged session %s during stop-all: %v", id, err)
+		}
 	}
 }
 

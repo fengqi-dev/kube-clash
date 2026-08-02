@@ -2,7 +2,7 @@ package session
 
 import (
 	"context"
-	"log"
+	"fmt"
 
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
@@ -19,7 +19,13 @@ func (m *Manager) RememberSelection(contextName, namespace string) error {
 	if m.store == nil {
 		return nil
 	}
-	return m.store.SetUI(contextName, namespace)
+	if err := m.store.SetUI(contextName, namespace); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf(
+			"remember cluster selection %s/%s: %v", contextName, namespace, err,
+		))
+		return err
+	}
+	return nil
 }
 
 func (m *Manager) PreferredSelection() (contextName, namespace string) {
@@ -63,7 +69,7 @@ func (m *Manager) persistPortForwards() {
 	}
 	for contextName, items := range grouped {
 		if err := m.store.SetPortForwards(contextName, items); err != nil {
-			log.Printf("persist port-forwards for %s: %v", contextName, err)
+			m.AppendLog("ERROR", fmt.Sprintf("persist port-forwards for %s: %v", contextName, err))
 		}
 	}
 }
@@ -82,7 +88,7 @@ func (m *Manager) persistExchanges(contextName string) {
 		})
 	}
 	if err := m.store.SetExchanges(contextName, specs); err != nil {
-		log.Printf("persist exchanges for %s: %v", contextName, err)
+		m.AppendLog("ERROR", fmt.Sprintf("persist exchanges for %s: %v", contextName, err))
 	}
 }
 
@@ -100,7 +106,7 @@ func (m *Manager) persistMirrors(contextName string) {
 		})
 	}
 	if err := m.store.SetMirrors(contextName, specs); err != nil {
-		log.Printf("persist mirrors for %s: %v", contextName, err)
+		m.AppendLog("ERROR", fmt.Sprintf("persist mirrors for %s: %v", contextName, err))
 	}
 }
 
@@ -118,7 +124,7 @@ func (m *Manager) persistPreviews(contextName string) {
 		})
 	}
 	if err := m.store.SetPreviews(contextName, specs); err != nil {
-		log.Printf("persist previews for %s: %v", contextName, err)
+		m.AppendLog("ERROR", fmt.Sprintf("persist previews for %s: %v", contextName, err))
 	}
 }
 
@@ -141,7 +147,7 @@ func (m *Manager) PersistShutdown() {
 			m.persistPreviews(contextName)
 		}
 		if err := m.store.SetConnected(contextName, namespace, connected); err != nil {
-			log.Printf("persist connected flag: %v", err)
+			m.AppendLog("ERROR", fmt.Sprintf("persist connected flag: %v", err))
 		}
 	}
 }
@@ -152,6 +158,10 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 		return
 	}
 	snap := m.store.Snapshot()
+	m.AppendLog("INFO", fmt.Sprintf(
+		"startup session restore scan: contexts=%d lastContext=%s",
+		len(snap.Clusters), snap.UI.LastContext,
+	))
 	for contextName, cluster := range snap.Clusters {
 		if cluster == nil {
 			continue
@@ -162,7 +172,7 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 			continue
 		}
 		for _, item := range cluster.PortForwards {
-			_, err := m.portfwd.Start(ctx, portfwd.Request{
+			info, err := m.portfwd.Start(ctx, portfwd.Request{
 				Context:    contextName,
 				Namespace:  item.Namespace,
 				Kind:       item.Kind,
@@ -172,14 +182,23 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 				LocalPort:  item.LocalPort,
 			})
 			if err != nil {
-				log.Printf("restore port-forward %s/%s/%s: %v", contextName, item.Kind, item.Name, err)
+				m.AppendLog("ERROR", fmt.Sprintf(
+					"restore port-forward %s/%s/%s: %v",
+					contextName, item.Kind, item.Name, err,
+				))
+				continue
 			}
+			m.AppendLog("INFO", fmt.Sprintf(
+				"restored port-forward %s/%s/%s at %s",
+				contextName, item.Kind, item.Name, info.Address,
+			))
 		}
 	}
 
 	contextName := snap.UI.LastContext
 	cluster := snap.Clusters[contextName]
 	if contextName == "" || cluster == nil || !cluster.Connected {
+		m.AppendLog("INFO", "startup session restore complete; no cluster reconnect requested")
 		return
 	}
 	namespace := cluster.Namespace
@@ -189,8 +208,12 @@ func (m *Manager) RestoreStartup(ctx context.Context) {
 	if namespace == "" {
 		namespace = "default"
 	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"restoring cluster connection: context=%s namespace=%s",
+		contextName, namespace,
+	))
 	if err := m.Connect(ctx, Request{Context: contextName, Namespace: namespace}); err != nil {
-		log.Printf("restore connect %s: %v", contextName, err)
+		m.AppendLog("ERROR", fmt.Sprintf("restore connect %s: %v", contextName, err))
 	}
 }
 
@@ -208,11 +231,26 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 	}()
 
 	cluster := m.store.Cluster(contextName)
+	total := len(cluster.PortForwards) + len(cluster.Exchanges) +
+		len(cluster.Mirrors) + len(cluster.Previews)
+	if total == 0 {
+		m.AppendLog("INFO", "no persisted sessions to restore for context "+contextName)
+		return
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"restoring sessions for %s: portForwards=%d exchanges=%d mirrors=%d previews=%d",
+		contextName, len(cluster.PortForwards), len(cluster.Exchanges),
+		len(cluster.Mirrors), len(cluster.Previews),
+	))
+	restored := 0
+	failed := 0
+	skipped := 0
 	for _, item := range cluster.PortForwards {
 		if m.hasPortForward(contextName, item) {
+			skipped++
 			continue
 		}
-		_, err := m.portfwd.Start(ctx, portfwd.Request{
+		info, err := m.portfwd.Start(ctx, portfwd.Request{
 			Context:    contextName,
 			Namespace:  item.Namespace,
 			Kind:       item.Kind,
@@ -222,11 +260,18 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 			LocalPort:  item.LocalPort,
 		})
 		if err != nil {
-			log.Printf(
+			failed++
+			m.AppendLog("ERROR", fmt.Sprintf(
 				"restore port-forward %s/%s/%s: %v",
 				contextName, item.Kind, item.Name, err,
-			)
+			))
+			continue
 		}
+		restored++
+		m.AppendLog("INFO", fmt.Sprintf(
+			"restored port-forward %s/%s/%s at %s",
+			contextName, item.Kind, item.Name, info.Address,
+		))
 	}
 	for _, item := range cluster.Exchanges {
 		_, err := m.intercept.StartIntercept(ctx, intercept.Mapping{
@@ -235,8 +280,16 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 			Ports:     toInterceptPorts(item.Ports),
 		})
 		if err != nil {
-			log.Printf("restore exchange %s/%s: %v", item.Namespace, item.Service, err)
+			failed++
+			m.AppendLog("ERROR", fmt.Sprintf(
+				"restore exchange %s/%s: %v", item.Namespace, item.Service, err,
+			))
+			continue
 		}
+		restored++
+		m.AppendLog("INFO", fmt.Sprintf(
+			"restored exchange %s/%s", item.Namespace, item.Service,
+		))
 	}
 	for _, item := range cluster.Mirrors {
 		_, err := m.intercept.StartMirror(ctx, intercept.Mapping{
@@ -245,8 +298,16 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 			Ports:     toInterceptPorts(item.Ports),
 		})
 		if err != nil {
-			log.Printf("restore mirror %s/%s: %v", item.Namespace, item.Service, err)
+			failed++
+			m.AppendLog("ERROR", fmt.Sprintf(
+				"restore mirror %s/%s: %v", item.Namespace, item.Service, err,
+			))
+			continue
 		}
+		restored++
+		m.AppendLog("INFO", fmt.Sprintf(
+			"restored mirror %s/%s", item.Namespace, item.Service,
+		))
 	}
 	for _, item := range cluster.Previews {
 		_, err := m.intercept.StartPreview(ctx, intercept.PreviewRequest{
@@ -255,9 +316,21 @@ func (m *Manager) restoreBindings(ctx context.Context, contextName string) {
 			Ports:     toInterceptPorts(item.Ports),
 		})
 		if err != nil {
-			log.Printf("restore preview %s/%s: %v", item.Namespace, item.Name, err)
+			failed++
+			m.AppendLog("ERROR", fmt.Sprintf(
+				"restore preview %s/%s: %v", item.Namespace, item.Name, err,
+			))
+			continue
 		}
+		restored++
+		m.AppendLog("INFO", fmt.Sprintf(
+			"restored preview %s/%s", item.Namespace, item.Name,
+		))
 	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"session restore complete for %s: restored=%d skipped=%d failed=%d",
+		contextName, restored, skipped, failed,
+	))
 }
 
 func (m *Manager) hasPortForward(contextName string, want store.PortForwardSpec) bool {

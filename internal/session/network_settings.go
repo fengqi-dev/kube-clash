@@ -3,6 +3,7 @@ package session
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 
@@ -27,35 +28,54 @@ func (m *Manager) ManualNetwork(contextName string) cluster.ManualNetwork {
 
 func (m *Manager) SetManualNetwork(contextName string, network cluster.ManualNetwork) error {
 	if m.store == nil {
-		return errors.New("state store is unavailable")
+		err := errors.New("state store is unavailable")
+		m.AppendLog("ERROR", "save manual network: "+err.Error())
+		return err
 	}
 	if contextName == "" {
-		return errors.New("context is required")
+		err := errors.New("context is required")
+		m.AppendLog("ERROR", "save manual network: "+err.Error())
+		return err
 	}
 	normalized, err := cluster.NormalizeManualNetwork(network)
 	if err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("validate manual network for %s: %v", contextName, err))
 		return err
 	}
-	return m.store.SetManualNetwork(contextName, store.ManualNetwork{
+	if err := m.store.SetManualNetwork(contextName, store.ManualNetwork{
 		PodCIDRs:       normalized.PodCIDRs,
 		ServiceCIDRs:   normalized.ServiceCIDRs,
 		DNSServer:      normalized.DNSServer,
 		ClusterDomains: normalized.ClusterDomains,
 		DNSNamespace:   normalized.DNSNamespace,
-	})
+	}); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("save manual network for %s: %v", contextName, err))
+		return err
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"manual network saved for %s: podCIDRs=%d serviceCIDRs=%d domains=%d dnsNamespace=%s",
+		contextName, len(normalized.PodCIDRs), len(normalized.ServiceCIDRs),
+		len(normalized.ClusterDomains), normalized.DNSNamespace,
+	))
+	return nil
 }
 
 // SetDNSNamespace updates short-name search namespace for the active tunnel.
 func (m *Manager) SetDNSNamespace(contextName, namespace string) error {
 	namespace = strings.TrimSpace(namespace)
 	if contextName == "" {
-		return errors.New("context is required")
+		err := errors.New("context is required")
+		m.AppendLog("ERROR", "set DNS search namespace: "+err.Error())
+		return err
 	}
 	if namespace == "" {
 		namespace = "default"
 	}
 	normalized, err := cluster.NormalizeManualNetwork(cluster.ManualNetwork{DNSNamespace: namespace})
 	if err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf(
+			"validate DNS search namespace for %s: %v", contextName, err,
+		))
 		return err
 	}
 	namespace = normalized.DNSNamespace
@@ -79,6 +99,9 @@ func (m *Manager) SetDNSNamespace(contextName, namespace string) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	if err := core.UpdateDNSNamespace(ctx, namespace); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf(
+			"update active DNS search namespace for %s: %v", contextName, err,
+		))
 		return err
 	}
 	m.stateHub.mu.Lock()
@@ -125,16 +148,28 @@ func (m *Manager) HostAliases(contextName string) []store.HostAliasSpec {
 // SetHostAliases replaces host aliases for a context. An empty list clears stored config.
 func (m *Manager) SetHostAliases(contextName string, items []store.HostAliasSpec) error {
 	if m.store == nil {
-		return errors.New("state store is unavailable")
+		err := errors.New("state store is unavailable")
+		m.AppendLog("ERROR", "save host aliases: "+err.Error())
+		return err
 	}
 	if contextName == "" {
-		return errors.New("context is required")
+		err := errors.New("context is required")
+		m.AppendLog("ERROR", "save host aliases: "+err.Error())
+		return err
 	}
 	normalized, err := normalizeHostAliasSpecs(items)
 	if err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("validate host aliases for %s: %v", contextName, err))
 		return err
 	}
-	return m.store.SetHostAliases(contextName, normalized)
+	if err := m.store.SetHostAliases(contextName, normalized); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("save host aliases for %s: %v", contextName, err))
+		return err
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"host aliases saved for %s: entries=%d", contextName, len(normalized),
+	))
+	return nil
 }
 
 func (m *Manager) hostAliasesFor(contextName string) []singbox.HostAlias {

@@ -38,6 +38,15 @@ func (m *Manager) AppendLog(level, message string) {
 	m.publish(next)
 }
 
+// recordLog stores an event without immediately republishing the full session
+// state. Lifecycle code uses it when a synchronous subscriber could otherwise
+// block teardown; the next state transition carries the event to subscribers.
+func (m *Manager) recordLog(level, message string) {
+	m.stateHub.mu.Lock()
+	m.appendLogLocked(level, message)
+	m.stateHub.mu.Unlock()
+}
+
 func (m *Manager) reconcileBindings(ctx context.Context, snap cluster.InventorySnapshot) {
 	pods := indexPods(snap.PodItems)
 	services := indexServices(snap.ServiceItems)

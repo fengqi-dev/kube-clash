@@ -43,6 +43,7 @@ type Server struct {
 	httpServer   *http.Server
 	listener     net.Listener
 	lastErr      string
+	onError      func(error)
 }
 
 // NewServer builds an MCP server bound to backend. Call Start after configuring
@@ -56,6 +57,13 @@ func NewServer(backend Backend, version string) *Server {
 		version: version,
 		port:    store.DefaultMCPPort,
 	}
+}
+
+// SetErrorHandler receives unexpected asynchronous listener failures.
+func (s *Server) SetErrorHandler(handler func(error)) {
+	s.mu.Lock()
+	s.onError = handler
+	s.mu.Unlock()
 }
 
 // Configure updates persisted settings without starting or stopping.
@@ -189,7 +197,11 @@ func (s *Server) Start() error {
 			s.lastErr = err.Error()
 			s.listener = nil
 			s.httpServer = nil
+			onError := s.onError
 			s.mu.Unlock()
+			if onError != nil {
+				onError(err)
+			}
 		}
 	}()
 	return nil

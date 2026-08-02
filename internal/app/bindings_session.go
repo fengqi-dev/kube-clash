@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
@@ -50,8 +51,10 @@ func (a *App) GatewayInstallManifest() string {
 func (a *App) GetSingBoxConfig() (string, error) {
 	raw, err := a.manager.SingBoxConfig()
 	if err != nil {
+		a.manager.AppendLog("WARN", fmt.Sprintf("read active sing-box config: %v", err))
 		return "", err
 	}
+	a.manager.AppendLog("INFO", "active sing-box config retrieved")
 	var pretty bytes.Buffer
 	if err := json.Indent(&pretty, raw, "", "  "); err != nil {
 		return string(raw), nil
@@ -72,7 +75,17 @@ func (a *App) InstallHelper() error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return helper.EnsureInstall(ctx)
+	a.manager.AppendLog("INFO", "installing privileged helper")
+	if err := helper.EnsureInstall(ctx); err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("install privileged helper: %v", err))
+		return err
+	}
+	status := helper.GetStatus(ctx)
+	a.manager.AppendLog("INFO", fmt.Sprintf(
+		"privileged helper ready: version=%s protocol=%d coreReady=%t",
+		status.Version, status.Protocol, status.CoreReady,
+	))
+	return nil
 }
 
 func (a *App) UninstallHelper() error {
@@ -80,5 +93,11 @@ func (a *App) UninstallHelper() error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	return helper.Uninstall(ctx)
+	a.manager.AppendLog("INFO", "uninstalling privileged helper")
+	if err := helper.Uninstall(ctx); err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("uninstall privileged helper: %v", err))
+		return err
+	}
+	a.manager.AppendLog("INFO", "privileged helper uninstalled")
+	return nil
 }

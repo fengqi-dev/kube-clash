@@ -14,6 +14,7 @@ import (
 type Controller struct {
 	server *Server
 	store  *store.Store
+	logs   *session.Manager
 }
 
 // NewController wires a Backend over provider/manager and loads store config.
@@ -26,7 +27,11 @@ func NewController(
 	c := &Controller{
 		server: NewServer(managerBackend{provider: provider, manager: manager}, version),
 		store:  stateStore,
+		logs:   manager,
 	}
+	c.server.SetErrorHandler(func(err error) {
+		c.appendLog("ERROR", fmt.Sprintf("MCP server stopped unexpectedly: %v", err))
+	})
 	if stateStore != nil {
 		c.server.Configure(stateStore.MCP())
 	}
@@ -41,21 +46,25 @@ func (c *Controller) StartFromStore() {
 	cfg := c.store.MCP()
 	if !cfg.Enabled {
 		c.server.Configure(cfg)
+		c.appendLog("INFO", "MCP server disabled by saved configuration")
 		return
 	}
+	c.appendLog("INFO", fmt.Sprintf("starting MCP server on port %d", cfg.Port))
 	var err error
 	cfg, err = ensureToken(cfg)
 	if err != nil {
-		log.Printf("mcp token: %v", err)
+		c.appendLog("ERROR", fmt.Sprintf("prepare MCP authentication: %v", err))
 		return
 	}
 	if err := c.persist(cfg); err != nil {
-		log.Printf("persist mcp: %v", err)
+		c.appendLog("ERROR", fmt.Sprintf("persist MCP configuration: %v", err))
 		return
 	}
 	if err := c.server.Apply(); err != nil {
-		log.Printf("start mcp: %v", err)
+		c.appendLog("ERROR", fmt.Sprintf("start MCP server: %v", err))
+		return
 	}
+	c.appendLog("INFO", "MCP server listening at "+c.server.Status().URL)
 }
 
 // Stop shuts down the HTTP listener.
@@ -63,7 +72,16 @@ func (c *Controller) Stop() error {
 	if c == nil || c.server == nil {
 		return nil
 	}
-	return c.server.Stop()
+	if !c.server.Status().Listening {
+		return nil
+	}
+	c.appendLog("INFO", "stopping MCP server")
+	if err := c.server.Stop(); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("stop MCP server: %v", err))
+		return err
+	}
+	c.appendLog("INFO", "MCP server stopped")
+	return nil
 }
 
 // Status returns runtime + config for the UI.
@@ -84,12 +102,23 @@ func (c *Controller) SetEnabled(enabled bool) error {
 	var err error
 	cfg, err = ensureToken(cfg)
 	if err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("prepare MCP authentication: %v", err))
 		return err
 	}
 	if err := c.persist(cfg); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("persist MCP enabled=%t: %v", enabled, err))
 		return err
 	}
-	return c.server.SetEnabled(enabled)
+	if err := c.server.SetEnabled(enabled); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("set MCP enabled=%t: %v", enabled, err))
+		return err
+	}
+	if enabled {
+		c.appendLog("INFO", "MCP server enabled at "+c.server.Status().URL)
+	} else {
+		c.appendLog("INFO", "MCP server disabled")
+	}
+	return nil
 }
 
 // SetPort updates the listen port and persists it.
@@ -98,14 +127,22 @@ func (c *Controller) SetPort(port int) error {
 		return errors.New("mcp server unavailable")
 	}
 	if port <= 0 || port > 65535 {
-		return fmt.Errorf("invalid mcp port %d", port)
+		err := fmt.Errorf("invalid mcp port %d", port)
+		c.appendLog("ERROR", err.Error())
+		return err
 	}
 	cfg := c.server.Config()
 	cfg.Port = port
 	if err := c.persist(cfg); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("persist MCP port %d: %v", port, err))
 		return err
 	}
-	return c.server.SetPort(port)
+	if err := c.server.SetPort(port); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("set MCP port %d: %v", port, err))
+		return err
+	}
+	c.appendLog("INFO", fmt.Sprintf("MCP server port set to %d", port))
+	return nil
 }
 
 // SetTokenEnabled turns Bearer token auth on or off and persists the choice.
@@ -118,12 +155,19 @@ func (c *Controller) SetTokenEnabled(enabled bool) error {
 	var err error
 	cfg, err = ensureToken(cfg)
 	if err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("prepare MCP authentication: %v", err))
 		return err
 	}
 	if err := c.persist(cfg); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("persist MCP token authentication: %v", err))
 		return err
 	}
-	return c.server.SetTokenEnabled(enabled)
+	if err := c.server.SetTokenEnabled(enabled); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("set MCP token authentication enabled=%t: %v", enabled, err))
+		return err
+	}
+	c.appendLog("INFO", fmt.Sprintf("MCP token authentication enabled=%t", enabled))
+	return nil
 }
 
 // RegenerateToken replaces the bearer token when token auth is enabled.
@@ -133,19 +177,25 @@ func (c *Controller) RegenerateToken() (string, error) {
 	}
 	cfg := c.server.Config()
 	if !cfg.TokenEnabled {
-		return "", errors.New("enable MCP token auth first")
+		err := errors.New("enable MCP token auth first")
+		c.appendLog("WARN", "regenerate MCP token: "+err.Error())
+		return "", err
 	}
 	token, err := GenerateToken()
 	if err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("generate MCP authentication token: %v", err))
 		return "", err
 	}
 	cfg.Token = token
 	if err := c.persist(cfg); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("persist regenerated MCP token: %v", err))
 		return "", err
 	}
 	if err := c.server.SetToken(token); err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("apply regenerated MCP token: %v", err))
 		return "", err
 	}
+	c.appendLog("INFO", "MCP authentication token regenerated")
 	return token, nil
 }
 
@@ -163,16 +213,27 @@ func (c *Controller) InstallClient(client string) (InstallResult, error) {
 		status = c.server.Status()
 	}
 	if status.URL == "" {
-		return InstallResult{}, errors.New("mcp server is not ready")
+		err := errors.New("mcp server is not ready")
+		c.appendLog("ERROR", "install MCP client configuration: "+err.Error())
+		return InstallResult{}, err
 	}
 	if status.TokenEnabled && status.Token == "" {
-		return InstallResult{}, errors.New("mcp token is not ready")
+		err := errors.New("mcp token is not ready")
+		c.appendLog("ERROR", "install MCP client configuration: "+err.Error())
+		return InstallResult{}, err
 	}
 	token := ""
 	if status.TokenEnabled {
 		token = status.Token
 	}
-	return InstallClientConfig(client, status.URL, token)
+	c.appendLog("INFO", "installing MCP client configuration for "+client)
+	result, err := InstallClientConfig(client, status.URL, token)
+	if err != nil {
+		c.appendLog("ERROR", fmt.Sprintf("install MCP client configuration for %s: %v", client, err))
+		return InstallResult{}, err
+	}
+	c.appendLog("INFO", "MCP client configuration installed for "+client)
+	return result, nil
 }
 
 func (c *Controller) persist(cfg store.MCPConfig) error {
@@ -208,4 +269,12 @@ func ensureToken(cfg store.MCPConfig) (store.MCPConfig, error) {
 		cfg.Port = store.DefaultMCPPort
 	}
 	return cfg, nil
+}
+
+func (c *Controller) appendLog(level, message string) {
+	if c != nil && c.logs != nil {
+		c.logs.AppendLog(level, message)
+		return
+	}
+	log.Printf("%s: %s", level, message)
 }

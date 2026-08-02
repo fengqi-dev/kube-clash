@@ -3,6 +3,8 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -15,6 +17,7 @@ import (
 func (a *App) Bootstrap() (BootstrapData, error) {
 	contexts, err := a.manager.Contexts()
 	if err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("load kubeconfig contexts during bootstrap: %v", err))
 		return BootstrapData{}, err
 	}
 	preferredContext, preferredNamespace := a.manager.PreferredSelection()
@@ -35,6 +38,10 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 	if selected != "" {
 		if found, listErr := a.manager.Namespaces(a.ctx, selected); listErr == nil && len(found) > 0 {
 			namespaces = found
+		} else if listErr != nil {
+			a.manager.AppendLog("WARN", fmt.Sprintf(
+				"load namespaces during bootstrap for %s: %v", selected, listErr,
+			))
 		}
 	}
 	if preferredNamespace == "" || !slices.Contains(namespaces, preferredNamespace) {
@@ -58,7 +65,17 @@ func (a *App) Bootstrap() (BootstrapData, error) {
 }
 
 func (a *App) ReloadContexts() (cluster.ClusterInventory, error) {
-	return a.provider.Inventory()
+	a.manager.AppendLog("INFO", "reloading kubeconfig contexts")
+	inventory, err := a.provider.Inventory()
+	if err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("reload kubeconfig contexts: %v", err))
+		return cluster.ClusterInventory{}, err
+	}
+	a.manager.AppendLog("INFO", fmt.Sprintf(
+		"kubeconfig contexts reloaded: contexts=%d files=%d",
+		len(inventory.Contexts), len(inventory.Files),
+	))
+	return inventory, nil
 }
 
 func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
@@ -73,6 +90,7 @@ func (a *App) AddKubeconfig() (cluster.ClusterInventory, error) {
 		}},
 	})
 	if err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("open kubeconfig file picker: %v", err))
 		return cluster.ClusterInventory{}, err
 	}
 	if path == "" {
@@ -85,40 +103,60 @@ func (a *App) AddKubeconfigPath(path string) (cluster.ClusterInventory, error) {
 	if path == "" {
 		return cluster.ClusterInventory{}, errors.New("kubeconfig path is required")
 	}
+	displayName := filepath.Base(path)
+	a.manager.AppendLog("INFO", "adding kubeconfig file "+displayName)
 	if err := cluster.ValidateKubeconfigFile(path); err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("validate kubeconfig %s: %v", displayName, err))
 		return cluster.ClusterInventory{}, err
 	}
 	if a.store != nil {
 		if err := a.store.AddKubeconfigFile(path); err != nil {
+			a.manager.AppendLog("ERROR", fmt.Sprintf("save kubeconfig %s: %v", displayName, err))
 			return cluster.ClusterInventory{}, err
 		}
 		a.provider.SetExtraKubeconfigFiles(a.store.KubeconfigFiles())
 	} else {
 		a.provider.SetExtraKubeconfigFiles(append(a.provider.ExtraKubeconfigFiles(), path))
 	}
-	return a.provider.Inventory()
+	inventory, err := a.provider.Inventory()
+	if err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("reload contexts after adding %s: %v", displayName, err))
+		return cluster.ClusterInventory{}, err
+	}
+	a.manager.AppendLog("INFO", fmt.Sprintf(
+		"kubeconfig file added: %s contexts=%d", displayName, len(inventory.Contexts),
+	))
+	return inventory, nil
 }
 
 func (a *App) RemoveKubeconfig(path string) (cluster.ClusterInventory, error) {
 	if path == "" {
 		return cluster.ClusterInventory{}, errors.New("kubeconfig path is required")
 	}
+	displayName := filepath.Base(path)
+	a.manager.AppendLog("INFO", "removing kubeconfig file "+displayName)
 	state := a.manager.State()
 	if sessionActive(state.Phase) {
 		contexts, err := a.provider.Contexts()
 		if err != nil {
+			a.manager.AppendLog("ERROR", fmt.Sprintf(
+				"inspect active kubeconfig before removing %s: %v", displayName, err,
+			))
 			return cluster.ClusterInventory{}, err
 		}
 		for _, item := range contexts {
 			if item.Name == state.Context && item.Source == path {
-				return cluster.ClusterInventory{}, errors.New(
+				err := errors.New(
 					"disconnect before removing the active kubeconfig",
 				)
+				a.manager.AppendLog("WARN", fmt.Sprintf("remove kubeconfig %s: %v", displayName, err))
+				return cluster.ClusterInventory{}, err
 			}
 		}
 	}
 	if a.store != nil {
 		if err := a.store.RemoveKubeconfigFile(path); err != nil {
+			a.manager.AppendLog("ERROR", fmt.Sprintf("remove kubeconfig %s: %v", displayName, err))
 			return cluster.ClusterInventory{}, err
 		}
 		a.provider.SetExtraKubeconfigFiles(a.store.KubeconfigFiles())
@@ -131,7 +169,15 @@ func (a *App) RemoveKubeconfig(path string) (cluster.ClusterInventory, error) {
 		}
 		a.provider.SetExtraKubeconfigFiles(remaining)
 	}
-	return a.provider.Inventory()
+	inventory, err := a.provider.Inventory()
+	if err != nil {
+		a.manager.AppendLog("ERROR", fmt.Sprintf("reload contexts after removing %s: %v", displayName, err))
+		return cluster.ClusterInventory{}, err
+	}
+	a.manager.AppendLog("INFO", fmt.Sprintf(
+		"kubeconfig file removed: %s contexts=%d", displayName, len(inventory.Contexts),
+	))
+	return inventory, nil
 }
 
 func sessionActive(phase session.Phase) bool {
@@ -155,6 +201,17 @@ func (a *App) ProbeContext(contextName string) (cluster.ProbeResult, error) {
 	probeCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
 	defer cancel()
 	result := a.provider.Probe(probeCtx, contextName)
+	if result.OK {
+		a.manager.AppendLog("INFO", fmt.Sprintf(
+			"cluster probe succeeded: context=%s version=%s latencyMs=%d",
+			contextName, result.Version, result.LatencyMs,
+		))
+	} else {
+		a.manager.AppendLog("WARN", fmt.Sprintf(
+			"cluster probe failed: context=%s latencyMs=%d error=%s",
+			contextName, result.LatencyMs, result.Error,
+		))
+	}
 	state := a.manager.State()
 	if result.OK && result.Version != "" &&
 		state.Context == contextName && sessionActive(state.Phase) {

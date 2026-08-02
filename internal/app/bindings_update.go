@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/update"
@@ -10,6 +11,7 @@ import (
 )
 
 func (a *App) CheckForUpdates() update.Info {
+	a.manager.AppendLog("INFO", "checking for application updates")
 	checkContext, cancel := context.WithTimeout(a.context(), 20*time.Second)
 	defer cancel()
 	state := a.checkForUpdates(checkContext)
@@ -27,8 +29,11 @@ func (a *App) OpenUpdatePage() error {
 		target = "https://github.com/fengqi-dev/kube-loop/releases"
 	}
 	if a.ctx == nil {
-		return errors.New("application is not ready")
+		err := errors.New("application is not ready")
+		a.manager.AppendLog("ERROR", "open update page: "+err.Error())
+		return err
 	}
+	a.manager.AppendLog("INFO", "opening application update page")
 	runtime.BrowserOpenURL(a.ctx, target)
 	return nil
 }
@@ -39,6 +44,14 @@ func (a *App) checkForUpdates(ctx context.Context) update.Info {
 	state, err := a.updater.Check(ctx)
 	if err != nil {
 		state.Error = err.Error()
+		a.manager.AppendLog("WARN", fmt.Sprintf("application update check failed: %v", err))
+	} else if state.Available {
+		a.manager.AppendLog("INFO", fmt.Sprintf(
+			"application update available: current=%s latest=%s",
+			state.CurrentVersion, state.LatestVersion,
+		))
+	} else {
+		a.manager.AppendLog("INFO", "application is up to date")
 	}
 	a.updateMu.Lock()
 	a.updateState = state

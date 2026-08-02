@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"net/netip"
 	"sort"
 	"sync"
@@ -162,16 +163,19 @@ func (w *inventoryWatcher) emit() {
 	for _, factory := range factories {
 		listedPods, err := factory.Core().V1().Pods().Lister().List(labels.Everything())
 		if err != nil {
+			log.Printf("inventory watcher list pods: %v", err)
 			return
 		}
 		pods = append(pods, listedPods...)
 		listedServices, err := factory.Core().V1().Services().Lister().List(labels.Everything())
 		if err != nil {
+			log.Printf("inventory watcher list services: %v", err)
 			return
 		}
 		services = append(services, listedServices...)
 		listedDeployments, err := factory.Apps().V1().Deployments().Lister().List(labels.Everything())
 		if err != nil {
+			log.Printf("inventory watcher list deployments: %v", err)
 			return
 		}
 		deployments = append(deployments, listedDeployments...)
