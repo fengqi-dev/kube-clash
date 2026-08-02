@@ -2,208 +2,248 @@
 
 [![CI](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml)
 [![Release](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/fengqi-dev/kube-loop)](https://github.com/fengqi-dev/kube-loop/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/license/mit)
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-**[官网](https://fengqi-dev.github.io/kube-loop/)** · **[下载](https://github.com/fengqi-dev/kube-loop/releases)** · **[设计文档](docs/design.zh-CN.md)** · **[Design](docs/design.md)**
+**[官网](https://fengqi-dev.github.io/kube-loop/)** ·
+**[下载](https://github.com/fengqi-dev/kube-loop/releases/latest)** ·
+**[系统设计](docs/design.zh-CN.md)** ·
+**[数据面设计](docs/singbox-traffic-dataplane.zh-CN.md)**
 
-KubeLoop 是一款桌面客户端：像连 VPN 一样连上 Kubernetes 集群，让本机应用直接访问
-Pod IP、ClusterIP Service 和 `*.cluster.local`——不必再为每个服务做端口转发，也不用给
-每个应用配代理。
+KubeLoop 像一条只面向 Kubernetes 的 VPN，把开发者工作站连接到集群。点击连接后，本地浏览器、
+IDE、CLI 和 SDK 可以直接访问 Pod IP、ClusterIP Service 和 `*.cluster.local`，无需给每个
+应用配置代理，也无需在终端维护 port-forward。
 
----
+## 为什么选择 KubeLoop？
 
-## 你能得到什么
+- **透明访问集群**——普通本地应用可直接使用集群地址。
+- **只接管集群流量**——无关流量继续使用原有网络。
+- **不暴露公网 Gateway**——数据面经过 Kubernetes API Server port-forward，不需要
+  NodePort、LoadBalancer 或 Ingress。
+- **完整桌面工作流**——连接、查看、转发、Exchange、Service Mirror、Preview 和诊断都在一个 UI 中。
+- **跨平台**——为 macOS、Windows、Linux 提供 amd64 和 arm64 安装包。
+- **不依赖本机 `kubectl`**——直接使用 client-go 和用户 kubeconfig。
 
-- **一键接入集群网络** — 选择 kubeconfig Context 与 Namespace，点击连接。KubeLoop
-  自动发现 Pod / Service 网段与集群 DNS，并拉起定向隧道。
-- **对应用透明** — 浏览器、IDE、CLI、SDK 直接访问集群地址，无需在每个软件里配置
-  SOCKS / HTTP 代理。
-- **只接管集群流量** — 仅 Kubernetes 相关目标走隧道，其余流量仍走你原来的网络。
-- **不依赖公网暴露** — 集群内 Gateway 经 Kubernetes API Server（port-forward）到达，
-  不用 NodePort、LoadBalancer 或对外 Ingress。
-- **macOS / Windows / Linux** — 同一套桌面使用体验。
+## 常见工作流
 
-## 常见场景
-
-| 你想做的事 | KubeLoop 怎么帮你 |
+| 目标 | KubeLoop 工作流 |
 | --- | --- |
-| 浏览器打开集群内 Service / 调内部 API | 连接后使用 ClusterIP 或 `*.svc.cluster.local` |
-| 直接访问真实 Pod IP 做排查 | 连接后本机已路由 Pod 网段 |
-| 不想敲 `kubectl port-forward` | 网络页的 **端口转发** |
-| 用本机进程顶替某个集群 Service | **流量交换**（Service Local Intercept）：集群侧仍用原 ClusterIP / DNS，流量落到本机 |
-| 把本机进程临时暴露成新的 ClusterIP | **预览**：创建临时 Service 指向本地应用 |
+| 在本地打开集群内部 Service | 连接后使用 ClusterIP 或集群 DNS 名称 |
+| 直接调试 Pod | 连接后使用 Pod IP |
+| 把 Pod 或 Service 端口暴露到本地 | **Port Forward** |
+| 让现有 Service 调用本地应用 | **Exchange** |
+| 在不替换原始 Pod 主路径的情况下观察现有 Service | **Service Mirror** |
+| 通过新的 ClusterIP Service 暴露本地应用 | **Preview** |
 
-## 工作原理（简版）
+### Exchange、Service Mirror 与 Preview
+
+- **Exchange** 保留现有 Service 的 ClusterIP 和 DNS 名称，但用本地进程替换后端。
+- **Service Mirror** 的操作对象是现有 Service。原始 Pod 保持 Primary 路径，请求同时复制
+  给本地 Shadow 进程，Shadow 响应会被丢弃。
+- **Preview** 创建一个由本地进程提供服务的临时 ClusterIP Service。
+
+功能停止或集群 Session 断开时，KubeLoop 会恢复或删除相关 Service、Endpoints 和 EndpointSlices。
+
+## 工作原理
 
 ```text
-本机应用  →  TUN + 分流 DNS  →  本地桥  →  API Server  →  集群内 Gateway
-                                                         ├─ Pod
-                                                         ├─ Service
-                                                         └─ CoreDNS
+本地应用
+  → 平台 TUN + split DNS
+  → 托管 sing-box
+  → 本地 SOCKS Bridge
+  → Kubernetes API Server port-forward
+  → 集群内无特权 Gateway
+  → Pods / Services / CoreDNS
 ```
 
-KubeLoop 托管固定版本的 [sing-box](https://github.com/SagerNet/sing-box) 负责
-TUN / DNS / 规则，并在集群中部署轻量、无特权的 Gateway。本机不必安装 `kubectl`。
+只有发现或手工配置的集群 route 会进入隧道。Gateway 在集群内建立最终连接，没有
+ServiceAccount token、`hostNetwork`、`privileged` 或 `NET_ADMIN`。
 
-## 快速开始
+Port Forward、Exchange、Service Mirror 和 Preview 共享固定且经过认证的 sing-box feature
+inbound；创建新功能不会重启 core。
 
-### 安装 KubeLoop
+## 安装
 
-**macOS / Linux**（按 CPU 架构下载最新 Release 包）：
+### macOS 与 Linux
+
+脚本会解析最新 Release，并自动选择当前 CPU 架构：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
 ```
 
-**Windows**（PowerShell；优先运行最新 NSIS 安装包）：
+- macOS：下载对应 DMG；打开后将 KubeLoop 拖入 Applications。
+- Linux：优先安装对应 deb/rpm，否则解压 tarball。
+
+可通过 `VERSION=v1.5.0` 选择指定版本；Linux 可使用 `PACKAGE=deb`、`PACKAGE=rpm` 或
+`PACKAGE=tarball` 指定格式。
+
+### Windows
+
+在 PowerShell 中启动最新 NSIS installer：
 
 ```powershell
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
 ```
 
-其他方式：
+在源码 checkout 中下载并解压 portable 版本：
 
-- **macOS（Homebrew）**：
-  ```bash
-  brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-  brew install --cask kubeloop
-  ```
-- **macOS（手动）**：从 [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-  下载 `.dmg`，将 `KubeLoop.app` 拖入 Applications（或解压 `.tar.gz`）。
-  若被 Gatekeeper 拦截，可右键 → **打开**，或执行 `xattr -cr KubeLoop.app`。
-- **Windows**：运行 NSIS 安装包（`kubeloop-*-windows-*-installer.exe`），或解压便携 zip。
-  若出现 SmartScreen，选择 **更多信息** → **仍要运行**。
-- **Linux**：安装 `.deb` / `.rpm`，或解压 `.tar.gz` 后运行 `KubeLoop`。
-- 或按下方说明自行构建。
+```powershell
+.\scripts\install.ps1 -Package portable
+```
 
-然后：
+也可直接从 Releases 下载对应架构的 portable zip。
 
-1. 确认本机 kubeconfig 能正常访问目标集群 API。
-2. 打开 KubeLoop，选择 **Context**，点击 **连接**。
-3. 首次使用时批准一次 **虚拟网卡服务**（特权 Helper）。之后连接通常不再要求授权；
-   可在 **设置** 中安装或卸载该服务。
+### Homebrew
 
-连接成功后，可在概览查看流量与状态，在网络页使用发现。端口转发、流量交换、流量镜像与预览各自
-带有 Namespace 选择器。Exchange 用本机进程替换 Service；Mirror 保留集群 Pod 为主路径，并将 TCP/UDP 请求拷贝到本机。
+```bash
+brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
+brew install --cask kubeloop
+```
 
-## 安全设计
+也可从 [Releases 页面](https://github.com/fengqi-dev/kube-loop/releases/latest)手工下载 DMG、
+installer、portable zip、deb、rpm 和 tar.gz。每个 Release 都包含 `SHA256SUMS`。
 
-- kubeconfig 凭证留在桌面进程内，不会交给 Gateway，也不会作为独立密钥库交给 UI。
-- Gateway 不使用 `privileged`、`hostNetwork`、`NET_ADMIN`，也不挂载 ServiceAccount
-  Token；不以 Service / Ingress 对外发布。
-- 路由仅覆盖已发现的 Pod / Service 网段；非集群流量保持直连。
-- 流量交换 / 镜像 / 预览对 Service、Endpoints、EndpointSlice 的修改，在停止或断开时始终恢复。
-- 特权 Helper 只接受带认证的本机 IPC 和字段受限的 Session 描述，不接受调用方传入的
-  命令、可执行文件路径或配置路径。它在系统保护目录内重新生成配置并管理校验后的内核，
-  且不访问 Kubernetes API。
-- 可选 MCP 服务仅监听 `127.0.0.1`；Bearer Token 认证可选，默认关闭。
+## 首次连接
 
-## MCP（Cursor / AI Agent）
+1. 确保工作站可使用有效 kubeconfig 访问 Kubernetes API Server。
+2. 打开 KubeLoop，选择 kubeconfig Context 和默认 Namespace。
+3. 点击**连接**。
+4. 首次使用时批准安装本地虚拟网络 Helper。
+5. 权限允许时，KubeLoop 会在 `kubeloop-system` 安装或升级 Gateway。
 
-KubeLoop 可将桌面控制面以本机 [MCP](https://modelcontextprotocol.io) 服务暴露（`127.0.0.1` 上的 Streamable HTTP）。工具覆盖连接/断开、发现、Port Forward、Exchange、Mirror、Preview 与 Helper 安装。
+Helper 只需安装一次，可在设置中查看或卸载。它仅管理 KubeLoop 的 sing-box 进程、TUN、
+route、split DNS 和恢复状态。
 
-1. 启动 KubeLoop，打开 **MCP** 页。
-2. 选择客户端（Claude Code / Codex / Cursor / VS Code），点击 **安装 MCP Server**
-   （写入对应用户级配置；如未启用会自动启用本机端点）。
-3. 在对应客户端中重启或刷新 MCP。
+## 受限 RBAC
 
-也可对所选客户端使用 **复制配置**。MCP **默认关闭**（安装或手动启用后开启），仅监听本机；Bearer Token 认证可选且默认关闭。
+KubeLoop 支持 Namespace 范围的开发者账号：
 
-## 平台说明
+1. 管理员预装 Overview 页面提供的 Gateway manifest。
+2. 用户拥有 Gateway Pod 的 `get/list` 和 `pods/portforward` 权限。
+3. Pod 和 Service inventory 限制到授权 Namespace。
+4. 无法读取 Node 或 CoreDNS 时，在 Overview 手工填写 Pod CIDR、Service CIDR、集群 DNS
+   和 DNS Namespace。
 
-| | |
+各能力独立降级。缺少 Service、Endpoints 或 EndpointSlice 写权限时，只禁用 Exchange、
+Service Mirror 和 Preview，不影响透明集群访问。
+
+## Session 诊断
+
+活动 TCP Session 提供纯图标连通性操作：
+
+- Port Forward 测试活动本地监听。
+- Exchange、Service Mirror 和 Preview 测试 Gateway control 注册及每个本地目标。
+- 结果图会区分实际测试路径和仅拓扑路径，并能定位 `local-listener`、
+  `gateway-control` 或 `local-target` 失败。
+
+这些检查验证传输层可达性，不验证应用层响应语义。通用 UDP 测试需要协议专用 payload，
+因此有意不支持。
+
+## 编辑器与 Agent 的 MCP
+
+KubeLoop 可通过 `127.0.0.1` 上的 Streamable HTTP MCP Server 暴露同一个后端。
+
+1. 打开 KubeLoop 的 **MCP** 页面。
+2. 选择 Codex、Claude Code、Cursor 或 VS Code。
+3. 点击**安装 MCP Server**，或复制生成的客户端配置。
+
+MCP 默认关闭，永远不会绑定 LAN 地址，可选启用 Bearer 认证。工具覆盖连接状态、发现、
+Port Forward、Exchange、Service Mirror、Preview 和 Helper 管理。
+
+## 安全模型
+
+- kubeconfig 凭证留在 Go 桌面进程。
+- Gateway 无特权、没有 Kubernetes 凭证，也不暴露公网入口。
+- 特权 Helper 只接受经过认证、字段受限的 IPC，不接受命令或调用方选择的可执行文件/配置路径。
+- sing-box 和 feature inbound 只监听本地，并使用每 Session 凭证。
+- 集群路由限制到经过校验的 Pod/Service 目标。
+- 功能资源变更具备事务和恢复能力。
+- 日志脱敏凭证、证书、token 和 kubeconfig 内容。
+
+信任边界和 capability 行为详见
+[系统设计](docs/design.zh-CN.md#11-安全与权限)。
+
+## 平台支持
+
+| 项目 | 支持 |
 | --- | --- |
-| **界面** | 浅色 / 深色（跟随系统），英文与简体中文 |
-| **数据** | 状态与内核位于 `~/.kubeloop` |
-| **Helper** | 安装一次即可管理 TUN / DNS / 路由；可在设置中随时卸载 |
-| **更新** | 启动时检查 GitHub Releases；可在设置中打开下载页 |
+| 桌面系统 | macOS、Windows、Linux |
+| CPU | amd64、arm64 |
+| UI | 跟随系统的明暗主题；English 和简体中文 |
+| 安装包 | DMG、NSIS、zip、deb、rpm、tar.gz、Homebrew Cask |
+| 应用状态 | `~/.kubeloop` |
+| Core | 每个 Release 随附固定版本 sing-box |
+| 更新 | 在设置中检查 GitHub Release |
 
-## 开发者
+## 开发
 
-环境：Go 1.26+、Node.js 22+、[Wails](https://wails.io) v2.13。
+环境要求：
+
+- Go 1.26+
+- Node.js 22+
+- Wails 2.13
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-npm install --prefix frontend
-wails dev # 自动构建并内嵌当前平台的 Helper
+npm ci --prefix frontend
+wails dev
 ```
 
-```bash
-# VERSION 会同时注入 Go、前端、Helper，以及 Gateway 镜像/二进制
-VERSION=v0.1.0
-VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
-# 平台安装包（在 wails build 之后）：
-#   macOS DMG / tar.gz:  VERSION=$VERSION ./build/package-desktop.sh
-#   Linux deb/rpm/tar:   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
-#                        # Debian/Ubuntu 还需: apt install rpm
-#                        VERSION=$VERSION ./build/package-desktop.sh
-#   Windows 安装包:      VITE_APP_VERSION="$VERSION" wails build -nsis -ldflags "-X main.version=${VERSION}"
-# Gateway 镜像（发版 CI）：docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
-```
-
-开发常用覆盖：
+`wails dev` 会自动构建并嵌入平台 Helper。使用本地 Gateway image：
 
 ```bash
-# 使用本地 Gateway 镜像
 KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
 ```
 
+### 测试
+
 ```bash
+npm run build --prefix frontend
 go test ./...
-./e2e/run.sh                # Minikube 端到端（见 e2e/）
 ```
 
-### 本地端到端测试
-
-本地 E2E 需要 Go、Docker、`kubectl`、一个正在运行的 Kubernetes 集群，以及
-安装 KubeLoop 特权 Helper 的权限。脚本会构建所需产物、安装或更新 Helper、
-运行 TUN 与平台测试、输出逐项状态汇总，并清理临时资源。
-
-**Windows**（默认使用 `docker-desktop` context）：
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\e2e\scripts\run-local-windows.ps1 `
-  -Context docker-desktop `
-  -Timeout 25m
-```
-
-**macOS**（默认使用 `docker-desktop` context）：
+Minikube E2E：
 
 ```bash
-chmod +x e2e/scripts/run-local-macos.sh
+./e2e/run.sh
+```
+
+平台本地 suite 会安装 Helper、测试 TUN/DNS 和功能流，并清理临时资源：
+
+```bash
 ./e2e/scripts/run-local-macos.sh --timeout 25m
-```
-
-**Linux**（默认使用 `minikube` context）：
-
-```bash
-chmod +x e2e/scripts/run-local-linux.sh
 ./e2e/scripts/run-local-linux.sh --timeout 25m
 ```
 
-常用参数包括 `--context`、`--gateway-image`、`--timeout`、
-`--skip-build`、`--skip-platform`、`--keep-resources` 和
-`--ignore-network-preflight`。PowerShell 使用对应的单横线参数，例如
-`-Context` 和 `-SkipPlatform`。
+Windows：
 
-主测试日志写入 `e2e-local.log`，特权平台测试日志写入
-`e2e-platform.log`。
+```powershell
+.\e2e\scripts\run-local-windows.ps1 -Timeout 25m
+```
 
-推送 `v*` 标签即可发布（桌面包、Gateway 二进制与 GHCR 镜像）。
+## 构建与发布
+
+构建桌面应用：
+
+```bash
+VERSION=v1.5.0
+VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
+```
+
+推送 `v*` tag 会触发 Release workflow，构建六个平台目标、Gateway binary、多架构 Gateway
+image、校验文件、Homebrew Cask 更新和项目官网。
 
 ## 文档
 
-- [项目网站](https://fengqi-dev.github.io/kube-loop/)
-- [桌面客户端设计（简体中文）](docs/design.zh-CN.md)
-- [Desktop design (English)](docs/design.md)
-- [第三方软件声明](THIRD_PARTY_NOTICES.md)
+- [系统设计](docs/design.zh-CN.md)
+- [统一流量数据面](docs/singbox-traffic-dataplane.zh-CN.md)
+- [官网](https://fengqi-dev.github.io/kube-loop/)
+- [第三方声明](THIRD_PARTY_NOTICES.md)
 
 ## 许可证
 
-KubeLoop 源代码使用 [MIT License](LICENSE)。
-
-sing-box 是独立托管的 GPLv3 程序。分发包含 sing-box 的安装包时须自行履行其许可证义务，
-详见[第三方软件声明](THIRD_PARTY_NOTICES.md)。
+KubeLoop 使用 MIT License 分发。随附第三方组件保留各自许可证，详见
+[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
