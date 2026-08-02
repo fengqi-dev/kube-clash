@@ -2,243 +2,264 @@
 
 [![CI](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/ci.yml)
 [![Release](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml/badge.svg)](https://github.com/fengqi-dev/kube-loop/actions/workflows/release.yml)
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Latest release](https://img.shields.io/github/v/release/fengqi-dev/kube-loop)](https://github.com/fengqi-dev/kube-loop/releases/latest)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://opensource.org/license/mit)
 
 [English](README.md) | [简体中文](README_zh-CN.md)
 
-**[Website](https://fengqi-dev.github.io/kube-loop/)** · **[Releases](https://github.com/fengqi-dev/kube-loop/releases)** · **[Design](docs/design.md)** · **[设计文档](docs/design.zh-CN.md)**
+**[Website](https://fengqi-dev.github.io/kube-loop/)** ·
+**[Download](https://github.com/fengqi-dev/kube-loop/releases/latest)** ·
+**[System design](docs/design.md)** ·
+**[Data-plane design](docs/singbox-traffic-dataplane.md)**
 
-KubeLoop is a desktop client that connects your laptop to a Kubernetes cluster
-like a VPN — so local apps can reach Pod IPs, ClusterIP Services, and
-`*.cluster.local` without port-forwards, proxy env vars, or per-app setup.
+KubeLoop connects your workstation to a Kubernetes cluster like a focused VPN.
+After one click, local browsers, IDEs, CLIs, and SDKs can use Pod IPs, ClusterIP
+Services, and `*.cluster.local` names directly—without per-app proxy settings or
+terminal-managed port-forwards.
 
----
+## Why KubeLoop?
 
-## What you get
+- **Transparent cluster access** — use cluster addresses from ordinary local apps.
+- **Cluster traffic only** — unrelated traffic keeps its normal route.
+- **No public Gateway** — the data plane travels through Kubernetes API Server
+  port-forward; no NodePort, LoadBalancer, or Ingress is required.
+- **Desktop workflow** — connect, inspect, forward, exchange, mirror, preview, and
+  diagnose from one UI.
+- **Cross-platform** — macOS, Windows, and Linux packages for amd64 and arm64.
+- **No local `kubectl` dependency** — KubeLoop uses client-go and your kubeconfig.
 
-- **One-click cluster network** — Pick a kubeconfig context and namespace, click
-  Connect. KubeLoop discovers Pod / Service CIDRs and cluster DNS, then brings
-  up a focused tunnel.
-- **Transparent access** — Browsers, IDEs, CLIs, and SDKs talk to cluster
-  addresses as if they were on the same network. No SOCKS settings in each app.
-- **Cluster traffic only** — Only Kubernetes destinations go through the tunnel.
-  Everything else stays on your normal route.
-- **Works offline of the public internet path** — The in-cluster Gateway is
-  reached through the Kubernetes API Server (port-forward). No NodePort,
-  LoadBalancer, or public ingress for the data path.
-- **macOS, Windows, and Linux** — Same desktop workflow across platforms.
+## Workflows
 
-## Everyday workflows
-
-| Need | How KubeLoop helps |
+| Goal | KubeLoop workflow |
 | --- | --- |
-| Open a Service in the browser / call an internal API | Connect, then use the ClusterIP or `*.svc.cluster.local` name |
-| Debug against a real Pod IP | Pod CIDR is routed locally after Connect |
-| `kubectl port-forward` without the terminal | **Port Forward** in the Network page |
-| Run a local process *as* a cluster Service | **Exchange** (Service Local Intercept): cluster clients keep the same ClusterIP / DNS; traffic lands on your machine |
-| Expose a local process as a new ClusterIP | **Preview** creates a temporary Service that points at your local app |
+| Open an internal Service locally | Connect, then use its ClusterIP or cluster DNS name |
+| Debug a Pod directly | Connect, then use the Pod IP |
+| Expose a Pod or Service port locally | **Port Forward** |
+| Make an existing Service call a local app | **Exchange** |
+| Observe an existing Service without replacing its primary Pods | **Service Mirror** |
+| Expose a local app through a new ClusterIP Service | **Preview** |
 
-## How it works (short)
+### Exchange, Service Mirror, and Preview
+
+- **Exchange** keeps an existing Service's ClusterIP and DNS name but replaces its
+  backends with a local process.
+- **Service Mirror** operates on an existing Service. Original Pods remain the
+  Primary path; request data is also sent to a local Shadow process, whose response
+  is discarded.
+- **Preview** creates a new temporary ClusterIP Service backed by a local process.
+
+KubeLoop restores or deletes the affected Service, Endpoints, and EndpointSlices
+when a feature stops or the cluster session disconnects.
+
+## How it works
 
 ```text
-Your apps  →  TUN + split DNS  →  local bridge  →  API Server  →  in-cluster Gateway
-                                                                    ├─ Pods
-                                                                    ├─ Services
-                                                                    └─ CoreDNS
+Local applications
+  → platform TUN + split DNS
+  → managed sing-box
+  → local SOCKS Bridge
+  → Kubernetes API Server port-forward
+  → unprivileged in-cluster Gateway
+  → Pods / Services / CoreDNS
 ```
 
-Under the hood KubeLoop manages a pinned [sing-box](https://github.com/SagerNet/sing-box)
-core for TUN / DNS / rules, and a small unprivileged Gateway Deployment in the
-cluster. You do not need `kubectl` installed locally.
+Only discovered or manually configured cluster routes enter the tunnel. The
+Gateway performs final in-cluster connections and has no ServiceAccount token,
+`hostNetwork`, `privileged`, or `NET_ADMIN`.
 
-## Get started
+Port Forward, Exchange, Service Mirror, and Preview share fixed, authenticated
+sing-box feature inbounds. Creating a feature does not restart the core.
 
-### Install KubeLoop
+## Install
 
-**macOS / Linux** (downloads the latest release package for your CPU):
+### macOS and Linux
+
+The installer resolves the latest release and selects the current CPU architecture:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.sh | bash
 ```
 
-**Windows** (PowerShell; runs the latest NSIS installer when available):
+- macOS: downloads the matching DMG; open it and drag KubeLoop into Applications.
+- Linux: installs a matching deb/rpm when available, otherwise extracts the tarball.
+
+Select a specific release with `VERSION=v1.5.0`, or select a Linux format with
+`PACKAGE=deb`, `PACKAGE=rpm`, or `PACKAGE=tarball`.
+
+### Windows
+
+Run the latest NSIS installer from PowerShell:
 
 ```powershell
 irm https://raw.githubusercontent.com/fengqi-dev/kube-loop/main/scripts/install.ps1 | iex
 ```
 
-Other options:
+From a source checkout, download and extract the portable build with:
 
-- **macOS (Homebrew)**:
-  ```bash
-  brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
-  brew install --cask kubeloop
-  ```
-- **macOS (manual)**: download the `.dmg` from [GitHub Releases](https://github.com/fengqi-dev/kube-loop/releases)
-  and drag `KubeLoop.app` into Applications (or extract the `.tar.gz`). If Gatekeeper
-  blocks it, right-click → **Open**, or run `xattr -cr KubeLoop.app`.
-- **Windows**: run the NSIS installer (`kubeloop-*-windows-*-installer.exe`), or extract the
-  portable zip into a folder (flat layout like `Program Files\KubeLoop\` with
-  `sing-box.exe` and `resources\` helper tools). If SmartScreen appears, choose
-  **More info** → **Run anyway**.
-- **Linux**: install the `.deb` / `.rpm`, or extract the `.tar.gz` and run `KubeLoop`.
-- Or build from source — see below.
+```powershell
+.\scripts\install.ps1 -Package portable
+```
 
-Then:
+You can also download the matching portable zip directly from Releases.
 
-1. Ensure your machine can reach the cluster API with a normal kubeconfig.
-2. Open KubeLoop, choose a **Context**, click **Connect**.
-3. On first use, approve the **virtual network service** (privileged helper)
-   once. Later connects should not ask again. You can install or remove it under
-   **Settings**.
+### Homebrew
 
-After you are connected, open Overview for traffic and status, or Network for
-discovery. Port Forward, Exchange, and Preview each have their own Namespace
-picker.
+```bash
+brew tap kube-loop/kubeloop https://github.com/fengqi-dev/kube-loop
+brew install --cask kubeloop
+```
 
-### Limited RBAC / single-namespace accounts
+Manual DMG, installer, portable zip, deb, rpm, and tar.gz downloads are available
+on the [Releases page](https://github.com/fengqi-dev/kube-loop/releases/latest).
+Each release includes `SHA256SUMS`.
 
-KubeLoop supports developer kubeconfigs that cannot install the Gateway or list
-the whole cluster:
+## First connection
 
-1. **Admin preinstalls Gateway** in `kubeloop-system` (copy YAML from Overview when
-   install is forbidden and no Gateway is found).
-2. Grant the user `get/list` + `pods/portforward` on the Gateway Pod.
-3. Scope Pod/Service list/watch to the allowed Namespace(s).
-4. If the user cannot list Nodes / read CoreDNS, enter **Pod CIDR**, **Service
-   CIDR**, and **Cluster DNS** on Overview (saved per context; reconnect to apply).
+1. Ensure the workstation can reach the Kubernetes API Server with a valid kubeconfig.
+2. Open KubeLoop and select a kubeconfig Context and default Namespace.
+3. Click **Connect**.
+4. Approve installation of the local virtual-network Helper on first use.
+5. If permitted, KubeLoop installs or upgrades its Gateway in `kubeloop-system`.
 
-Exchange / Mirror / Preview stay disabled when Service / EndpointSlice / Endpoints write is missing.
-**Exchange** replaces a Service with a local process; **Mirror** keeps cluster Pods as the
-primary path and tees TCP/UDP requests to a local process.
-See [docs/design.md](docs/design.md) §8 (or [中文](docs/design.zh-CN.md)) for example Roles.
+The Helper is installed once and can be inspected or removed from Settings. It
+manages only KubeLoop's sing-box process, TUN, routes, split DNS, and recovery state.
 
-## MCP (Cursor / AI agents)
+## Restricted RBAC
 
-KubeLoop can expose its desktop control plane as a local [MCP](https://modelcontextprotocol.io) server (Streamable HTTP on `127.0.0.1`). Tools cover connect/disconnect, discovery, Port Forward, Exchange, Mirror, Preview, and helper install.
+KubeLoop supports namespace-scoped developer accounts:
 
-1. Start KubeLoop, open the **MCP** tab.
-2. Choose a client (Claude Code / Codex / Cursor / VS Code) and click **Install MCP server**
-   (writes the user-scoped config and enables the local endpoint if needed).
-3. Restart or refresh MCP in that client.
+1. An administrator preinstalls the Gateway manifest shown in Overview.
+2. The user receives `get/list` and `pods/portforward` access to the Gateway Pod.
+3. Pod and Service inventory is limited to authorized Namespaces.
+4. If Nodes or CoreDNS cannot be read, enter Pod CIDR, Service CIDR, cluster DNS,
+   and DNS Namespace manually in Overview.
 
-You can also **Copy config** for the selected client. MCP is **off by default** until enabled
-or installed; it binds only to localhost. Bearer token auth is optional and **off by default**.
+Capabilities degrade independently. Missing Service, Endpoints, or EndpointSlice
+write access disables Exchange, Service Mirror, and Preview without disabling
+transparent cluster access.
 
-## Security posture
+## Session diagnostics
 
-KubeLoop is built so cluster access stays scoped and recoverable:
+Active TCP sessions have an icon-only connectivity action:
 
-- kubeconfig credentials stay in the desktop process — not sent to the Gateway
-  or the UI layer as a separate secret store.
-- The Gateway runs without `privileged`, `hostNetwork`, `NET_ADMIN`, or a
-  mounted ServiceAccount token, and is not published as a Service / Ingress.
-- Routing is limited to discovered Pod and Service ranges; non-cluster traffic
-  remains direct.
-- Exchange / Mirror / Preview changes to Services, Endpoints, and EndpointSlices are always
-  restored on stop or disconnect.
-- The privileged helper accepts authenticated local IPC with a field-constrained
-  session description — never caller-supplied commands, executable paths, or config
-  paths. It regenerates config and manages the verified core under protected system
-  storage, and never talks to the Kubernetes API.
-- The optional MCP server listens on `127.0.0.1` only; Bearer token auth is optional (off by default).
+- Port Forward tests its active local listener.
+- Exchange, Service Mirror, and Preview test Gateway control registration and each
+  configured local target.
+- The result diagram distinguishes tested paths from topology-only paths and can
+  identify `local-listener`, `gateway-control`, or `local-target` failures.
 
-## Platform notes
+These checks verify transport reachability, not application-level response semantics.
+Generic UDP testing is intentionally unsupported because it requires a
+protocol-specific payload.
 
-| | |
+## MCP for editors and agents
+
+KubeLoop can expose the same backend through a local MCP server using Streamable
+HTTP on `127.0.0.1`.
+
+1. Open the **MCP** page in KubeLoop.
+2. Choose Codex, Claude Code, Cursor, or VS Code.
+3. Click **Install MCP server**, or copy the generated client configuration.
+
+MCP is off by default. It never binds to a LAN address; optional Bearer
+authentication can be enabled. Tools cover connection state, discovery, Port
+Forward, Exchange, Service Mirror, Preview, and Helper management.
+
+## Security model
+
+- kubeconfig credentials remain in the Go desktop process.
+- The Gateway is unprivileged, has no Kubernetes credentials, and is not publicly exposed.
+- The privileged Helper accepts authenticated, field-constrained IPC—not commands
+  or caller-selected executable/config paths.
+- sing-box and feature inbounds bind locally and use per-session credentials.
+- Cluster routing is limited to validated Pod/Service destinations.
+- Feature mutations are transactional and recoverable.
+- Logs redact credentials, certificates, tokens, and kubeconfig content.
+
+See [System design](docs/design.md#11-security-and-permissions) for trust boundaries
+and capability behavior.
+
+## Platform support
+
+| Area | Support |
 | --- | --- |
-| **UI** | Light / dark (system-aware), English and 简体中文 |
-| **Data** | App state under `~/.kubeloop`; helper state under system-protected storage |
-| **Helper** | Install once for TUN / DNS / routes; uninstall anytime in Settings (Windows: `resources\kubeloop-helper-*.exe`) |
-| **Core** | Packages ship pinned sing-box beside the app; helper runs it in place (no copy/download) |
-| **Updates** | Checks GitHub Releases on startup; open the download page from Settings |
+| Desktop | macOS, Windows, Linux |
+| CPU | amd64, arm64 |
+| UI | System-aware light/dark theme; English and 简体中文 |
+| Packages | DMG, NSIS, zip, deb, rpm, tar.gz, Homebrew Cask |
+| App state | `~/.kubeloop` |
+| Core | Pinned sing-box bundled with each release |
+| Updates | GitHub Release check from Settings |
 
-## For developers
+## Development
 
-Requirements: Go 1.26+, Node.js 22+, [Wails](https://wails.io) v2.13.
+Requirements:
+
+- Go 1.26+
+- Node.js 22+
+- Wails 2.13
 
 ```bash
 go install github.com/wailsapp/wails/v2/cmd/wails@v2.13.0
-npm install --prefix frontend
-wails dev # automatically builds and embeds the platform helper
+npm ci --prefix frontend
+wails dev
 ```
 
-```bash
-# VERSION is injected into Go, the Vite frontend, helper, and Gateway image/binary
-VERSION=v0.1.0
-VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
-# Platform packages (after wails build):
-#   macOS DMG / tar.gz:  VERSION=$VERSION ./build/package-desktop.sh
-#   Linux deb/rpm/tar:   go install github.com/goreleaser/nfpm/v2/cmd/nfpm@v2.46.3
-#                        # Debian/Ubuntu also needs: apt install rpm
-#                        VERSION=$VERSION ./build/package-desktop.sh
-#   Windows installer:   VITE_APP_VERSION="$VERSION" wails build -nsis -ldflags "-X main.version=${VERSION}"
-# Gateway image (release CI): docker build --build-arg VERSION=$VERSION -f build/gateway.Dockerfile .
-```
-
-Useful overrides while developing:
+`wails dev` builds and embeds the platform Helper automatically. To use a local
+Gateway image:
 
 ```bash
-# Use a local Gateway image
 KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
 ```
 
+### Tests
+
 ```bash
+npm run build --prefix frontend
 go test ./...
-./e2e/run.sh                # Minikube end-to-end (see e2e/)
 ```
 
-### Local end-to-end tests
-
-Local E2E requires Go, Docker, `kubectl`, a running Kubernetes cluster, and
-permission to install the privileged KubeLoop Helper. The scripts build all
-artifacts, install or update the Helper, run the TUN and platform test suites,
-print a per-test summary, and clean temporary resources.
-
-**Windows** (defaults to the `docker-desktop` context):
-
-```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass `
-  -File .\e2e\scripts\run-local-windows.ps1 `
-  -Context docker-desktop `
-  -Timeout 25m
-```
-
-**macOS** (defaults to the `docker-desktop` context):
+Minikube end-to-end:
 
 ```bash
-chmod +x e2e/scripts/run-local-macos.sh
+./e2e/run.sh
+```
+
+Platform-local suites install the Helper, exercise TUN/DNS and feature flows, and
+clean temporary resources:
+
+```bash
 ./e2e/scripts/run-local-macos.sh --timeout 25m
-```
-
-**Linux** (defaults to the `minikube` context):
-
-```bash
-chmod +x e2e/scripts/run-local-linux.sh
 ./e2e/scripts/run-local-linux.sh --timeout 25m
 ```
 
-Common options are `--context`, `--gateway-image`, `--timeout`,
-`--skip-build`, `--skip-platform`, `--keep-resources`, and
-`--ignore-network-preflight`. PowerShell uses the equivalent single-dash
-parameter names such as `-Context` and `-SkipPlatform`.
+Windows:
 
-Test output is written to `e2e-local.log`; privileged platform test output is
-written to `e2e-platform.log`.
+```powershell
+.\e2e\scripts\run-local-windows.ps1 -Timeout 25m
+```
 
-Tag `v*` to cut a release (desktop packages, Gateway binaries + GHCR image).
+## Build and release
+
+Build the desktop application:
+
+```bash
+VERSION=v1.5.0
+VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
+```
+
+Pushing a `v*` tag triggers the release workflow. It builds six desktop targets,
+Gateway binaries, a multi-architecture Gateway image, checksums, the Homebrew Cask
+update, and the project website.
 
 ## Documentation
 
-- [Project website](https://fengqi-dev.github.io/kube-loop/)
-- [Desktop design (English)](docs/design.md)
-- [桌面客户端设计（简体中文）](docs/design.zh-CN.md)
+- [System design](docs/design.md)
+- [Unified traffic data plane](docs/singbox-traffic-dataplane.md)
+- [Website](https://fengqi-dev.github.io/kube-loop/)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)
 
 ## License
 
-KubeLoop is licensed under the [MIT License](LICENSE).
-
-sing-box is a separately licensed (GPLv3) managed dependency. Distributions that
-bundle it must meet its license obligations — see
-[Third-party notices](THIRD_PARTY_NOTICES.md).
+KubeLoop is distributed under the MIT License. Bundled third-party components retain
+their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
