@@ -108,6 +108,8 @@ func (e TrafficEndpoints) Validate() error {
 
 const DefaultMetricsInterval = time.Second
 
+const startPortCollisionAttempts = 3
+
 type Runtime struct {
 	HTTPClient          *http.Client
 	PrivilegedStart     PrivilegedStartFunc
@@ -115,6 +117,49 @@ type Runtime struct {
 }
 
 func (r *Runtime) Start(
+	ctx context.Context,
+	network NetworkSpec,
+	bridgeAddress string,
+	namespace string,
+	hosts []HostAlias,
+) (RunningCore, error) {
+	return startWithPortCollisionRetry(ctx, func() (RunningCore, error) {
+		return r.startOnce(ctx, network, bridgeAddress, namespace, hosts)
+	})
+}
+
+func startWithPortCollisionRetry(
+	ctx context.Context,
+	start func() (RunningCore, error),
+) (RunningCore, error) {
+	var lastErr error
+	for attempt := 1; attempt <= startPortCollisionAttempts; attempt++ {
+		core, err := start()
+		if err == nil {
+			return core, nil
+		}
+		lastErr = err
+		if ctx.Err() != nil || !isAddressAlreadyInUse(err) {
+			return nil, err
+		}
+	}
+	return nil, fmt.Errorf(
+		"start sing-box after %d port allocation attempts: %w",
+		startPortCollisionAttempts,
+		lastErr,
+	)
+}
+
+func isAddressAlreadyInUse(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "address already in use") ||
+		strings.Contains(message, "only one usage of each socket address")
+}
+
+func (r *Runtime) startOnce(
 	ctx context.Context,
 	network NetworkSpec,
 	bridgeAddress string,
