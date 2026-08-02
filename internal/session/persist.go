@@ -285,6 +285,12 @@ func (m *Manager) isRestoring() bool {
 	return m.restoring
 }
 
+func (m *Manager) isShuttingDown() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.shuttingDown
+}
+
 func toStorePorts(items []intercept.PortMapping) []store.PortMapping {
 	out := make([]store.PortMapping, 0, len(items))
 	for _, item := range items {

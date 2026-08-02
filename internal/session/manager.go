@@ -175,6 +175,7 @@ type Manager struct {
 	recentConnections map[string]recentConnection
 	lastTraffic       map[string]connectionTraffic
 	restoring         bool
+	shuttingDown      bool
 	runningCore       singbox.RunningCore
 	trafficTracker    *traffic.Tracker
 }

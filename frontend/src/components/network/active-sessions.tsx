@@ -3,13 +3,6 @@ import { Activity, Copy, Loader2, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import {
-  ActionTypeBadge,
-  exchangeIcon,
-  mirrorIcon,
-  portForwardIcon,
-  previewIcon,
-} from "@/components/network/action-icons";
-import {
   SessionTestPanel,
   type SessionTestFlow,
   type SessionTestStatus,
@@ -364,11 +357,12 @@ export function ActiveSessions({
           <TableBody>
             {forwards.map((item) => (
               <TableRow key={`pf-${item.id}`}>
-                <TableCell>
-                  <ActionTypeBadge
-                    label={t("network.tabPortForward")}
-                    icon={portForwardIcon}
-                  />
+                <TableCell className="text-[12px] font-medium">
+                  {t(
+                    item.kind === "pod"
+                      ? "network.typePodPortForward"
+                      : "network.typeNetworkPortForward",
+                  )}
                 </TableCell>
                 <TableCell className="font-medium">
                   {item.kind}/{item.namespace}/{item.name}
@@ -418,11 +412,8 @@ export function ActiveSessions({
             ))}
             {exchanges.map((item) => (
               <TableRow key={`ex-${item.id}`}>
-                <TableCell>
-                  <ActionTypeBadge
-                    label={t("network.tabExchange")}
-                    icon={exchangeIcon}
-                  />
+                <TableCell className="text-[12px] font-medium">
+                  {t("network.tabExchange")}
                 </TableCell>
                 <TableCell className="font-medium">
                   {item.namespace}/{item.service}
@@ -464,11 +455,8 @@ export function ActiveSessions({
             ))}
             {mirrors.map((item) => (
               <TableRow key={`mr-${item.id}`}>
-                <TableCell>
-                  <ActionTypeBadge
-                    label={t("network.tabMirror")}
-                    icon={mirrorIcon}
-                  />
+                <TableCell className="text-[12px] font-medium">
+                  {t("network.tabMirror")}
                 </TableCell>
                 <TableCell className="font-medium">
                   {item.namespace}/{item.service}
@@ -510,11 +498,8 @@ export function ActiveSessions({
             ))}
             {previews.map((item) => (
               <TableRow key={`pv-${item.id}`}>
-                <TableCell>
-                  <ActionTypeBadge
-                    label={t("network.tabPreview")}
-                    icon={previewIcon}
-                  />
+                <TableCell className="text-[12px] font-medium">
+                  {t("network.tabPreview")}
                 </TableCell>
                 <TableCell className="font-medium">
                   {item.namespace}/{item.service}

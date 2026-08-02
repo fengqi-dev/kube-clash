@@ -263,7 +263,12 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.intercept.SetTrafficDialers(intercept.TrafficDialers{})
 		m.portfwd.StopRouted()
 		m.portfwd.SetTrafficDialer("", nil)
-		m.persistPortForwards()
+		// A normal disconnect removes routed forwards from the persisted
+		// intents. During application shutdown, PersistShutdown already saved
+		// those intents for the next launch, so teardown must not erase them.
+		if !m.isShuttingDown() {
+			m.persistPortForwards()
+		}
 		m.mu.Lock()
 		m.trafficTracker = nil
 		m.mu.Unlock()
@@ -279,6 +284,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
 	state.DNSNamespace = dnsNamespace
 	state.DNSWarning = ""
+	// Restore bindings before publishing Connected so the frontend's first
+	// ready-state refresh observes the restored sessions.
+	m.restoreBindings(ctx, request.Context)
 	m.publish(state)
 	m.AppendLog("INFO", fmt.Sprintf("connected to context %s", request.Context))
 	if m.store != nil {
@@ -287,7 +295,6 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		}
 	}
 	m.probeClusterDNS(ctx, state, core)
-	m.restoreBindings(ctx, request.Context)
 
 	inventory, err := m.connection.WatchInventory(ctx, request.Context, scopeNS, func(snap cluster.InventorySnapshot) {
 		m.applyInventory(snap)
