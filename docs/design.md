@@ -1,623 +1,415 @@
-# KubeLoop Desktop Client Design
+# KubeLoop System Design
 
 [English](design.md) | [简体中文](design.zh-CN.md)
 
-> Status: Draft v0.2 (product boundaries confirmed)  
-> Goal: Let developers connect to a Kubernetes cluster like a VPN, and transparently reach Pod IPs, Service IPs, and cluster DNS from the local machine.
-
-## 0. Confirmed product decisions
-
-- Target platforms are macOS, Windows, and Linux, with macOS first;
-- The desktop client automatically checks, installs, and upgrades the Gateway;
-- Phase one delivers transparent access to Pods, Services, and cluster DNS only;
-- M2 supports replacing a cluster Service with a local process (TCP/UDP) and fully restores Endpoints on disconnect;
-- Use sing-box as the TUN, DNS, and rule-routing core.
-
-## 1. Product positioning
-
-KubeLoop is a desktop network client, not a CLI. Users should not need to understand routes, TUN, port-forwarding, or Kubernetes networking details — they select a cluster and click Connect.
-
-It aims for a familiar desktop network-client experience:
-
-- Lives in the system tray;
-- One-click connect and disconnect;
-- Transparent TUN takeover — no per-app proxy configuration;
-- Live connection status, routes, requests, and errors;
-- Automatic CIDR conflict detection;
-- Optional launch-at-login and auto-reconnect.
-
-It solves Kubernetes development networking problems, not public proxy problems:
-
-- Reach Pod IPs;
-- Reach ClusterIP Services;
-- Resolve and reach `*.svc.cluster.local`;
-- Map a local process as the backend of a cluster Service (Service Local Intercept).
-
-## 2. First-release scope
-
-### 2.1 MVP includes
-
-1. Read the local kubeconfig and show Context, cluster, and Namespace.
-2. Discover Pod CIDR, Service IPs, and cluster DNS via the Kubernetes API.
-3. Create a system TUN that only takes over the target cluster ranges.
-4. Automatically install or reuse the in-cluster Gateway.
-5. Reach the Gateway through Kubernetes API Server port-forward — no public ports.
-6. Support TCP and UDP.
-7. Forward `cluster.local` DNS queries to in-cluster CoreDNS.
-8. Show connection duration, upload/download, active connections, and diagnostics.
-9. Complete connect, disconnect, Gateway install, and uninstall from the UI.
-
-### 2.2 M2: Service Local Intercept
-
-While connected, users can replace an existing ClusterIP Service with a local process:
-
-1. The desktop registers a unique listen port (TCP/UDP) on the Gateway over the control channel;
-2. Clear the Service selector, snapshot and delete classic Endpoints, replace EndpointSlices with a managed slice pointing at Gateway Pod IP:listenPort;
-3. Cluster clients keep the original ClusterIP / DNS; kube-proxy sends traffic to the Gateway;
-4. The Gateway emits `InboundReady`; the desktop `Accept`s and forwards to `127.0.0.1` (or a configured local address);
-5. On stop or disconnect, restore the selector, recreate Endpoints from the snapshot, delete the managed EndpointSlice, and unregister the Gateway listener.
-
-The Gateway still has no kube API access, no privilege, and no hostNetwork. EndpointSlice changes are performed with the desktop kubeconfig.
-
-### 2.2.1 Traffic Mirror
-
-Mirror uses the same Service → Gateway hijack as Exchange, but the desktop datapath differs:
-
-1. Dial the original Pod (from the Endpoints snapshot) as the **primary** path via Gateway outbound TCP/UDP, and return its response to the cluster client;
-2. Tee a copy of the client request to a local TCP/UDP process; discard the local response;
-3. If the local dial fails, primary traffic continues uninterrupted.
-
-### 2.3 Out of MVP
-
-- Global public proxying and rule subscriptions;
-- Simultaneous multi-cluster connect;
-- Full ICMP/Ping semantics;
-- Headless / ExternalName Service intercept;
-- Service Mesh traffic identity simulation;
-- Windows client (in MVP delivery order).
-
-Architecture stays cross-platform from day one. Delivery order:
-
-1. macOS;
-2. Windows;
-3. Linux.
-
-The core network stack, Kubernetes access, tunnel protocol, and Gateway must be shared across platforms. System network configuration lives in a platform adapter layer and must not enter the common connect flow.
-
-## 3. User experience
-
-### 3.1 Home
-
-```text
-┌──────────────────────────────────────────────────────┐
-│ KubeLoop                              Settings  —  □ │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│             ● Connected                              │
-│             dev-cluster / default                    │
-│             00:42:18                                 │
-│                                                      │
-│               [ Disconnect ]                         │
-│                                                      │
-│  Pod network      Service         DNS                │
-│  10.244.0.0/16    32 IPs          cluster.local      │
-│                                                      │
-│  ↓ 18.2 MB        ↑ 4.7 MB        12 active conns    │
-├──────────────────────────────────────────────────────┤
-│  Overview    Connections    Network    Logs          │
-└──────────────────────────────────────────────────────┘
-```
-
-When disconnected, the main area shows:
-
-1. kubeconfig selection;
-2. Context selection;
-3. Namespace selection;
-4. Primary Connect button;
-5. First-connect Gateway install prompt.
-
-### 3.2 Connection states
-
-The state machine must be explainable to users:
-
-```text
-Disconnected
-  → Check kubeconfig
-  → Check cluster permissions
-  → Check/install Gateway
-  → Discover Pod and Service networks
-  → Check local CIDR conflicts
-  → Request system network permission
-  → Create secure channel
-  → Connected
-```
-
-On any failure, the UI shows:
-
-- A human-readable reason;
-- Which capabilities are affected;
-- A Retry button;
-- Copyable diagnostic details.
-
-### 3.3 System tray
-
-The tray menu provides:
-
-- Current connection status;
-- Recently used clusters;
-- Connect / Disconnect;
-- Open main window;
-- Quit.
-
-Closing the main window does not disconnect. Quitting the app must ask for confirmation.
-
-## 4. Architecture
-
-```text
-┌──────────────── macOS Desktop ─────────────────┐
-│                                                │
-│  ┌─────────────┐     ┌──────────────────────┐  │
-│  │ Desktop UI  │────▶│ Core Service         │  │
-│  │ React       │     │ Go                   │  │
-│  └─────────────┘     │ - kubeconfig/context │  │
-│                      │ - cluster discovery  │  │
-│                      │ - session lifecycle  │  │
-│                      │ - traffic metrics    │  │
-│                      └──────────┬───────────┘  │
-│                                 │ local IPC     │
-│                      ┌──────────▼───────────┐  │
-│                      │ Privileged Helper    │  │
-│                      │ - utun               │  │
-│                      │ - routes             │  │
-│                      │ - split DNS          │  │
-│                      └──────────┬───────────┘  │
-│                                 │ packets       │
-│                      ┌──────────▼───────────┐  │
-│                      │ sing-box Core          │  │
-│                      │ TUN / DNS / Rules    │  │
-│                      └──────────┬───────────┘  │
-└─────────────────────────────────┼──────────────┘
-                                  │ encrypted Kubernetes
-                                  │ port-forward channel
-                         ┌────────▼─────────┐
-                         │ In-cluster      │
-                         │ Gateway         │
-                         │ TCP/UDP dialer  │
-                         └────────┬─────────┘
-                                  │
-                         Pod / Service / CoreDNS
-```
-
-### 4.1 Desktop UI
-
-Recommended stack: Wails + React:
-
-- Go fits Kubernetes clients, network control, and concurrency;
-- UI can stay a modern desktop experience;
-- Smaller install size and resident memory than Electron;
-- Core logic can be reused on Windows and Linux.
-
-The UI process does not hold root privileges.
-
-### 4.2 Core Service
-
-Runs as a normal user and owns:
-
-- kubeconfig and Context management;
-- Kubernetes API resource discovery;
-- Gateway install, upgrade, and health checks;
-- port-forward setup;
-- Connection state machine;
-- Userspace TCP/IP stack orchestration;
-- Metrics and structured logs;
-- Status push to the UI over local RPC.
-
-MVP does not invoke external `kubectl`; it uses client-go directly to avoid version skew and flashing terminal windows.
-
-### 4.3 sing-box Core and Privileged Helper
-
-sing-box ships as a managed independent process in the platform package and is responsible for:
-
-- Creating the TUN and receiving target cluster traffic;
-- DNS hijack / `cluster.local` nameserver policy;
-- Rule routing from Pod CIDR and Service IPs;
-- Sending cluster traffic to the local `KUBERNETES` SOCKS5 bridge;
-- Keeping all non-cluster traffic `DIRECT`.
-
-The desktop generates a minimal config — no proxy subscriptions and no takeover of public internet traffic. sing-box exposes a health External Controller on `127.0.0.1` only; the Controller Secret is random per session.
-
-The Privileged Helper is a separate, least-privilege system service. Its
-token-authenticated local IPC accepts a field-constrained session description,
-not commands or filesystem paths. It:
-
-- Runs the pinned sing-box binary shipped in the platform package in place
-  (no runtime copy or download into protected storage);
-- Regenerates the sing-box config in a protected per-session directory;
-- Creates and destroys utun/TUN;
-- Adds and removes explicit Pod/Service routes;
-- Configures `cluster.local` split DNS;
-- Cleans residual network config on crash recovery.
-
-On Windows the package layout mirrors common sidecar apps: a flat
-`Program Files\KubeLoop\` directory with `sing-box.exe` beside the app and
-`resources\` containing `kubeloop-helper.exe` plus dedicated
-`kubeloop-helper-install.exe` / `kubeloop-helper-uninstall.exe` tools used for
-UAC elevation.
-
-The Helper does not read kubeconfig or hold Kubernetes credentials.
-
-sing-box is GPLv3. Distributions that bundle it must keep license and copyright notices and provide corresponding source as required. sing-box stays an unmodified separate process; the release pipeline still produces third-party notices and source-access instructions.
-
-Platform mapping:
-
-| Platform | TUN | Privilege service | DNS |
-| --- | --- | --- | --- |
-| macOS | Network Extension or utun | LaunchDaemon + Authorization Services | DNS Settings / split DNS |
-| Windows | Wintun | Windows Service | NRPT / DNS config |
-| Linux | `/dev/net/tun` | systemd service or polkit | systemd-resolved |
-
-Users authorize only on first Helper install or upgrade, not on every Connect.
-
-For the macOS prototype, utun is acceptable to validate the data path; before GA, prefer evaluating a Packet Tunnel Network Extension for a more stable system lifecycle and signed distribution.
-
-### 4.4 In-cluster Gateway
-
-The Gateway is a normal Deployment:
-
-- One replica by default;
-- No public LoadBalancer;
-- Reached only via Kubernetes API Server port-forward;
-- Accepts multiplexed TCP/UDP sessions;
-- Dials target Pods, Services, or CoreDNS inside the Pod network;
-- Exposes health checks and protocol version;
-- Needs no `hostNetwork`, `privileged`, or `NET_ADMIN`.
-
-This is safer than creating a TUN inside the cluster and rewriting iptables, and easier for enterprise clusters to accept.
-
-### 4.5 Cross-platform boundary
-
-Shared modules:
-
-- Kubernetes API and kubeconfig;
-- Gateway installer;
-- Connection state machine;
-- Userspace TCP/IP stack;
-- Tunnel protocol;
-- Route planning and conflict detection;
-- Metrics, logs, and diagnostics.
-
-Platform modules only implement:
-
-```text
-EnsureHelper()
-CreateTunnel(configuration)
-ApplyRoutes(routes)
-ConfigureSplitDNS(domains, server)
-WatchNetworkChanges()
-RestoreSystemNetwork()
-```
-
-Platform modules return structured errors; the UI does not parse raw system command output.
-
-## 5. Data path
-
-### 5.1 Pod IP / Service IP
-
-1. An app connects to a Pod IP or ClusterIP.
-2. The system route sends packets into the KubeLoop TUN.
-3. sing-box selects the `KUBERNETES` outbound from dynamically generated IP-CIDR rules.
-4. sing-box sends the TCP/UDP session to the local SOCKS5 bridge.
-5. The SOCKS5 bridge multiplexes TCP and UDP onto a reliable stream.
-6. Traffic reaches the Gateway through API Server port-forward.
-7. The Gateway dials the real target in-cluster.
-8. Return traffic follows the same path back through sing-box TUN to the app.
-
-Benefits of the sing-box network stack:
-
-- The cluster Gateway needs no network-admin privileges;
-- No dependency on CNI return-path behavior;
-- The laptop’s real IP is not leaked into the Pod network;
-- TCP/UDP errors and timeouts return correctly to local apps.
-
-### 5.2 DNS
-
-The client uses split DNS and only takes over:
-
-- Configured cluster domains (always includes `cluster.local`, plus optional custom domains);
-- Matching `svc.<domain>` / `<ns>.svc.<domain>` suffixes.
-
-Queries are forwarded through the existing tunnel to the kube-system CoreDNS Service. All other names keep using the user’s original DNS. The local DNS search proxy listens on UDP and TCP; sing-box DNS uses `prefer_ipv4` so AAAA answers are allowed when dual-stack routes exist.
-
-Short names such as `my-service` are namespace-sensitive. Search suffixes use the connect Namespace (UI connects with `default`):
-
-```text
-<namespace>.svc.<cluster-domain>
-svc.<cluster-domain>
-<cluster-domain>
-```
-
-The UI must clearly show the configured cluster domains.
-
-#### Coexistence with other TUN / system-DNS clients
-
-KubeLoop does **not** hijack the system default resolver. It installs selective split DNS only. Clients such as Clash Verge that take over TUN and/or force system DNS can prevent cluster names from reaching KubeLoop. After connect, KubeLoop probes `kubernetes.default.svc.<cluster-domain>` via its split-DNS port and surfaces a warning when the probe fails. Practical guidance: avoid running two TUN stacks at once, or disable the other client’s TUN/system DNS while KubeLoop is connected (connect KubeLoop last when both must run).
-
-## 6. Cluster network discovery
-
-### 6.1 Pod network
-
-Prefer Node fields:
-
-- `spec.podCIDR`;
-- `spec.podCIDRs` (dual-stack).
-
-If the CNI does not populate Node PodCIDR, fall back to reading existing Pod IPs and installing precise routes. The UI should warn that this mode cannot automatically cover Pods that do not exist yet.
-
-### 6.2 Service network
-
-The Kubernetes API often does not expose Service CIDR directly. MVP uses a two-level strategy:
-
-1. Collect all Service `clusterIPs` and install precise `/32` or `/128` routes;
-2. Watch Service changes and update routes incrementally.
-
-If the user or cluster metadata provides a Service CIDR, install a range route instead.
-
-Must ignore:
-
-- Headless Services (`clusterIP: None`);
-- ExternalName;
-- Empty addresses;
-- Namespaces the user explicitly excludes.
-
-### 6.3 CIDR conflicts
-
-Before connect, compare target routes with local:
-
-- LAN routes;
-- VPN routes;
-- Docker / VM networks;
-- Routes from other connected clusters.
-
-Conflicts must not be overwritten silently. The UI shows both sides, likely impact, and offers:
-
-- Cancel connect;
-- Add only precise Pod/Service IP routes;
-- Force preferred routes after explicit user confirmation.
-
-## 7. Tunnel protocol
-
-The protocol runs on a single reliable byte stream and multiplexes sessions to reduce port-forward count.
-
-### 7.1 Handshake
-
-The client sends:
-
-- Protocol version;
-- Client version;
-- Cluster session ID;
-- Capabilities: TCP, UDP, IPv6, DNS;
-- Max frame length.
-
-The Gateway returns negotiated capabilities and limits. Incompatible versions return a clear upgrade message.
-
-### 7.2 Frame types
-
-- `OPEN_TCP`
-- `TCP_DATA`
-- `OPEN_UDP`
-- `UDP_DATA`
-- `CLOSE`
-- `RESET`
-- `PING` / `PONG`
-- `DNS_QUERY` / `DNS_RESPONSE`
-- `WINDOW_UPDATE`
-
-Each stream has an independent Stream ID. TCP must have flow control so one large download cannot stall everything. UDP sessions are keyed by source, destination, and idle timeout.
-
-Payloads are not encrypted separately because the path already uses the API Server TLS channel, but each session still needs a random token so other processes inside the Gateway Pod cannot reuse the listen port.
-
-## 8. Kubernetes permissions
-
-Before connect, the client probes capabilities with `SelfSubjectAccessReview` and degrades accordingly:
-
-| Capability | When missing |
+> Status: implemented baseline for KubeLoop v1.5.0
+> Audience: contributors, reviewers, operators, and integrators
+
+## 1. Purpose
+
+KubeLoop is a cross-platform desktop network client for Kubernetes development.
+It connects a workstation to one cluster at a time so ordinary local applications
+can use Pod IPs, ClusterIP Services, and cluster DNS without per-application proxy
+settings.
+
+The design follows six principles:
+
+1. **Cluster traffic only.** Public and unrelated private traffic stays on the
+   workstation's normal network.
+2. **No public cluster ingress.** The data plane reaches the in-cluster Gateway
+   through Kubernetes API Server port-forward.
+3. **Least privilege.** Kubernetes credentials remain in the desktop process;
+   system networking is delegated to a narrow privileged helper; the Gateway is
+   unprivileged.
+4. **Transactional mutations.** Exchange, Service Mirror, and Preview either publish a
+   complete runtime or roll back every earlier mutation.
+5. **Recoverable ownership.** Every process, listener, route, DNS rule, Gateway
+   registration, and Kubernetes resource has one lifecycle owner.
+6. **Explainable diagnostics.** The UI distinguishes what was actually tested
+   from topology shown only for context.
+
+## 2. Product model
+
+### 2.1 User-facing capabilities
+
+| Capability | Result |
 | --- | --- |
-| Gateway install (`kubeloop-system` Deployment) | Only look for a preinstalled Gateway; otherwise show copyable admin YAML |
-| Gateway `pods/portforward` | **Hard fail** (cannot build TUN) |
-| list nodes / kube-dns / ServiceCIDR sources | Overview allows manual Pod/Service CIDR and CoreDNS, persisted per Context |
-| Cluster-wide list pods/services | Degrade to visible Namespace list (one or many) |
-| Service update + EndpointSlice | Exchange disabled |
-| Service create + EndpointSlice | Preview disabled |
+| Cluster connection | Transparent Pod, Service, and cluster-DNS access through TUN |
+| Port Forward | Expose a Pod or Service port on a local TCP/UDP listener |
+| Exchange | Replace an existing Service's backends with a local process |
+| Service Mirror | Intercept an existing Service, keep its original Pods as Primary, and tee requests to a local process |
+| Preview | Create a temporary ClusterIP Service backed by a local process |
+| Session diagnostics | Test active TCP sessions and identify the failed diagnostic layer |
+| MCP | Optionally control the same application backend through localhost Streamable HTTP |
 
-### 8.0 Admin preinstall + minimal developer permissions
+The desktop UI, MCP server, and restored persisted intents all call the same Go
+managers. They are control surfaces, not independent implementations.
 
-The Gateway is **always** installed in `kubeloop-system` (not split per app Namespace). Developers at least need `get/list` and `pods/portforward` on the Gateway Pod.
+### 2.2 Non-goals
 
-A developer scoped to one app Namespace (for example `dev`) roughly needs:
+KubeLoop is not:
 
-```yaml
-# Gateway path (cluster-scoped or kubeloop-system Role)
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list"]
-- apiGroups: [""]
-  resources: ["pods/portforward"]
-  verbs: ["create"]
-# App Namespace
-- apiGroups: [""]
-  resources: ["pods", "services"]
-  verbs: ["get", "list", "watch"]
-# Strongly recommended (otherwise fill CIDR/DNS manually on Overview)
-- apiGroups: [""]
-  resources: ["nodes"]
-  verbs: ["list"]
-- apiGroups: [""]
-  resources: ["services"]
-  resourceNames: ["kube-dns", "coredns"]
-  verbs: ["get"]
-  # Scope: kube-system
-# Exchange / Preview additionally need services update/create, endpointslices *, and endpoints *
+- a general-purpose VPN or public proxy;
+- a Service Mesh identity emulator;
+- an ICMP tunnel with full ping semantics;
+- a multi-cluster concurrent router;
+- a replacement for application-level health checks;
+- a way to bypass Kubernetes RBAC.
+
+UDP transport is supported, but a generic UDP connectivity test is not: health
+requires a protocol-specific request and response.
+
+## 3. System context
+
+```mermaid
+flowchart LR
+    User["User / local app"]
+    UI["Wails + React UI"]
+    MCP["Optional localhost MCP"]
+    Core["Go Core Service"]
+    Helper["Privileged Helper"]
+    SingBox["Managed sing-box"]
+    Bridge["SOCKS Bridge"]
+    API["Kubernetes API Server"]
+    Gateway["Unprivileged Gateway Pod"]
+    Targets["Pods / Services / CoreDNS"]
+    Local["Local development process"]
+
+    User --> UI
+    User --> SingBox
+    MCP --> Core
+    UI --> Core
+    Core --> Helper
+    Helper --> SingBox
+    SingBox --> Bridge
+    Bridge --> API
+    API --> Gateway
+    Gateway --> Targets
+    Gateway --> Core
+    SingBox --> Local
 ```
 
-Hard client dependencies (connect):
+The system has four trust boundaries:
 
-- Read the Gateway Pod;
-- Create port-forward to the Gateway Pod.
+- **UI boundary:** React receives display-safe state and invokes typed Wails
+  bindings. It never receives raw kubeconfig credentials.
+- **desktop boundary:** the Go process owns Kubernetes clients, session state,
+  feature registries, persistence, and the Gateway protocols.
+- **privilege boundary:** the helper accepts authenticated, field-constrained
+  session descriptions; it does not accept commands or caller-selected paths.
+- **cluster boundary:** the Gateway has no ServiceAccount token, `hostNetwork`,
+  `privileged`, or `NET_ADMIN`, and is not published through Service or Ingress.
 
-Automatic network discovery (fill Overview when present, else manual):
+## 4. Component responsibilities
 
-- Read Nodes (Pod CIDR);
-- Read kube-dns/coredns Service in `kube-system`;
-- Read ServiceCIDR sources (for example servicecidrs / kubeadm-config).
+| Component | Owns |
+| --- | --- |
+| React UI | Interaction, localization, rendering, and client-side async state |
+| Application bindings | Narrow Wails and MCP adapters over the same backend contracts |
+| `session.Manager` | One cluster lifecycle, published state, discovery, metrics, restore |
+| `portfwd.Manager` | Local listeners and active Port Forward runtimes |
+| `intercept.Manager` | Exchange/Service Mirror/Preview registry, control session, host routes |
+| Cluster provider | kubeconfig, RBAC probes, inventory, Gateway and Service mutations |
+| Privileged helper | sing-box process, TUN, routes, split DNS, protected recovery state |
+| sing-box | Fixed inbounds, policy routing, local/cluster outbounds, core metrics |
+| SOCKS Bridge | Adapt `kubernetes-out` to the Gateway tunnel protocol |
+| Gateway | Cluster-side dial, reverse listeners, TCP/UDP relay |
+| Store | Per-context preferences, manual network data, aliases, and restore intents |
 
-Inventory:
+High-frequency metrics and inventory updates are published through a state hub so
+they do not contend with connection lifecycle bookkeeping.
 
-- List/watch Pods and Services in allowed Namespaces.
+## 5. Cluster connection lifecycle
 
-Service Local Intercept / Preview additionally need in the target Namespace:
+### 5.1 State machine
 
-- Update or create Services;
-- Create, update, and delete EndpointSlices;
-- Get, delete, and create Endpoints (Exchange snapshots and restores classic Endpoints).
+The externally visible phases are:
 
-Installing the Gateway also needs create rights for Deployment / ServiceAccount / Role / RoleBinding in `kubeloop-system`. Enterprises can preinstall; accounts without install rights reuse an existing Gateway.
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> checking: Connect
+    state "installing-gateway" as installing_gateway
+    state "discovering-network" as discovering_network
+    state "starting-tunnel" as starting_tunnel
+    checking --> installing_gateway
+    installing_gateway --> discovering_network
+    discovering_network --> starting_tunnel
+    starting_tunnel --> connected
+    checking --> error
+    installing_gateway --> error
+    discovering_network --> error
+    starting_tunnel --> error
+    connected --> error: core/control recovery exhausted
+    connected --> idle: Disconnect
+    error --> idle: Disconnect
+    idle --> checking: Retry
+```
 
-The Gateway itself does not need Kubernetes API access, so its default ServiceAccount gets no extra permissions.
+Only one run may be active. `Connect` installs a cancellation function and a
+completion channel before starting work. `Disconnect` cancels that run and waits,
+with a bounded timeout, for teardown to finish. Idle is published only after owned
+runtime resources have closed.
 
-### 8.1 Gateway auto-install flow
+### 5.2 Startup order
 
-1. Client checks the `kubeloop-system` Namespace;
-2. Server-side apply version-labeled resources;
-3. Wait until the Deployment is Available;
-4. Verify image digest, protocol version, and health;
-5. Establish port-forward;
-6. On client upgrade, check protocol compatibility before rolling the Gateway.
+1. Probe the selected context and discover effective RBAC capabilities.
+2. Install/upgrade the Gateway, or reuse an administrator-preinstalled Gateway.
+3. Discover Pod routes, Service routes, DNS, Kubernetes version, and scoped
+   inventory; merge saved manual overrides.
+4. Open API Server port-forward to the Gateway.
+5. Start the Gateway control channel.
+6. Start the local SOCKS Bridge and attach host-route handlers.
+7. Ask the helper to generate and start the sing-box session.
+8. Validate fixed feature inbounds and bind feature traffic dialers.
+9. Publish Connected, probe cluster DNS, restore persisted features, and start
+   inventory and metrics loops.
 
-Install must be idempotent. The client only manages resources with:
+A `sessionRuntime` records each resource as it is created and closes resources in
+reverse registration order. Cleanup is idempotent so startup failure, explicit
+disconnect, and application shutdown may converge safely.
+
+### 5.3 Connected-loop recovery
+
+The connected loop reacts to cancellation, sing-box exit, Gateway control loss,
+and metric ticks. Control recovery first redials the current Gateway channel. Later
+attempts may find a replacement Gateway Pod, open a new API port-forward, update
+the SOCKS Bridge address, and re-register active listeners.
+
+A monotonically increasing control generation rejects stale recovery results.
+After five bounded attempts, the session enters Error instead of silently running
+with a partially available data plane.
+
+## 6. Network discovery and transparent data path
+
+### 6.1 Discovery
+
+The cluster provider derives:
+
+- Pod CIDRs from Nodes and observed Pods;
+- Service CIDRs when available, otherwise precise Service IP routes;
+- cluster DNS server and search domains;
+- inventory scoped to cluster-wide or permitted Namespaces;
+- capability issues that disable only the affected features.
+
+Users with restricted RBAC can save Pod CIDRs, Service CIDRs, DNS server, DNS
+Namespace, cluster domains, and host aliases per context. Manual values are
+validated and merged with discovered values.
+
+Before TUN startup, KubeLoop compares cluster routes with local interfaces, VPNs,
+Docker/VM networks, and default routes. Conflicts are surfaced explicitly.
+
+### 6.2 Transparent traffic
 
 ```text
-app.kubernetes.io/managed-by: kube-loop
-app.kubernetes.io/part-of: kube-loop
+Local application
+  → platform TUN
+  → sing-box tun-in
+  → kubernetes-out
+  → local SOCKS Bridge
+  → Kubernetes API Server port-forward
+  → Gateway
+  → Pod / Service / CoreDNS
 ```
 
-If the user lacks install rights, the UI shows missing RBAC and a copyable admin manifest, and never falls back to running external commands.
+sing-box receives fixed routes for cluster destinations. Cluster traffic selects
+`kubernetes-out`; unrelated traffic remains `direct-out`. The Gateway performs the
+final in-cluster dial, so the target sees cluster-originated traffic rather than the
+workstation's physical address.
 
-Uninstalling the Gateway is a separate Settings action. Disconnect does not delete the Gateway, so the next connect is fast.
+### 6.3 DNS
 
-## 9. Security design
+The helper installs platform-appropriate split DNS for configured cluster domains.
+Queries enter `dns-in`, follow the cluster route through the Bridge and Gateway, and
+reach CoreDNS. Public DNS continues to use the operating system's normal resolver.
 
-- kubeconfig credentials are read only by Core Service in memory — never sent to UI, Helper, or Gateway;
-- Logs redact tokens, certificates, and kubeconfig content by default;
-- The Gateway is not published as NodePort, LoadBalancer, or Ingress;
-- Helper IPC verifies caller process signature and user identity;
-- Helper may only operate interfaces, routes, and DNS config created by KubeLoop;
-- Network changes are written to a recovery log and rolled back after abnormal exit;
-- Gateway images are pinned by digest and shown in the UI;
-- Admins can disable arbitrary-target access and limit routes to cluster CIDRs.
+Platform adapters contain all route and DNS mutation logic. Common session code
+works only with validated network specifications and cleanup contracts.
 
-## 10. Failure recovery
+## 7. Unified feature data plane
 
-The client must handle:
+sing-box creates fixed feature inbounds once per cluster session. Creating or
+stopping an individual mapping never restarts sing-box.
 
-- Sleep and wake;
-- Wi-Fi changes;
-- Brief API Server outages;
-- Gateway recreation;
-- kubeconfig credential refresh;
-- App crashes;
-- Helper or Core Service version mismatch.
+| Inbound/user | Destination class | Used by |
+| --- | --- | --- |
+| `traffic-in` / `port-forward` | Cluster through `kubernetes-out` | Port Forward |
+| `traffic-in` / `exchange` | Authorized local target through `local-out` | Exchange |
+| `traffic-in` / `preview` | Authorized local target through `local-out` | Preview |
+| `traffic-in` / `mirror-shadow` | Authorized local target through `local-out` | Service Mirror Shadow |
 
-On disconnect, keep the session and reconnect with exponential backoff first. After a threshold, remove TUN routes so application traffic does not black-hole forever.
+The shared inbound listens on loopback, uses a session-random password, and uses
+the SOCKS username as a feature dye. Unknown users, cluster targets for local-class
+features, and invalid target combinations are rejected.
 
-## 11. Observability
+See [Unified Traffic Data Plane Design](singbox-traffic-dataplane.md) for protocol
+adaptation, routing rules, backpressure, and UDP association details.
 
-The UI shows:
+## 8. Feature sessions
 
-- Current phase and connection duration;
-- Gateway version and latency;
-- Pod/Service route counts;
-- Active TCP/UDP connections;
-- Upload/download bytes;
-- DNS success rate and recent errors;
-- Reconnect count.
+### 8.1 Port Forward
 
-Diagnostic bundles include only:
+Port Forward exposes a selected Pod or Service port on a local listener. While the
+cluster session is connected, feature traffic enters sing-box as `port-forward`
+and exits through the Gateway path. The manager persists successful starts and
+removes the intent only after a successful stop.
 
-- Redacted client logs;
-- Network route snapshots;
-- Version and platform info;
-- Gateway status;
-- Permission check results.
+### 8.2 Exchange
 
-By default they exclude traffic payloads, DNS query details, and Kubernetes Secrets.
+Exchange rewrites an existing ClusterIP Service:
 
-## 12. Milestones
+1. Reserve `namespace/service` and register Gateway reverse-listen ports.
+2. Snapshot the selector, classic Endpoints, and EndpointSlices.
+3. Clear the selector and install a managed EndpointSlice pointing to the Gateway.
+4. Route reverse traffic to the configured local targets.
+5. On stop, restore the snapshot and unregister listeners.
 
-### M0: Interaction prototype
+Cluster clients keep the original ClusterIP and DNS name.
 
-- Home, cluster selection, connection status, network and logs pages;
-- Validate product flow with mock data;
-- Settle brand, information hierarchy, and error UX.
+### 8.3 Preview
 
-### M1: Developer preview
+Preview creates a new selectorless ClusterIP Service and managed EndpointSlice
+pointing to Gateway listeners. Stopping Preview deletes the created resources and
+host routes. It does not mutate an existing Service.
 
-- macOS arm64;
-- Single cluster;
-- Pod/Service IPv4;
-- TCP, UDP, and cluster.local DNS;
-- Automatic Gateway install;
-- Basic diagnostics and auto-recovery.
+### 8.4 Service Mirror
 
-### M2: Trialable release
+Service Mirror is defined on an existing Kubernetes Service. It uses the same
+Service interception point and resource snapshot as Exchange, then splits each
+request into two paths:
 
-- macOS amd64;
-- IPv6 / dual-stack;
-- System tray, launch-at-login, auto-update;
-- Enterprise preinstalled Gateway;
-- Performance and stability work.
+- **Primary:** Gateway dials an original Pod from the pre-intercept snapshot and
+  returns its response to the cluster client.
+- **Shadow:** request data is copied to the configured local process; its response
+  is discarded.
 
-### M3: Windows
+Shadow failure, slowness, disconnect, or buffer pressure must not interrupt Primary.
 
-- Windows 10/11;
-- Wintun and Windows Service;
-- NRPT split DNS;
-- Shared protocol and Gateway with macOS.
+### 8.5 Transactional start and stop
 
-### M4: Linux
+Exchange, Service Mirror, and Preview startup:
 
-- Mainstream desktop distributions;
-- `/dev/net/tun`;
-- systemd-resolved;
-- Evaluate deb/rpm/AppImage distribution.
+1. snapshots the control generation and reserves the feature key;
+2. validates targets and registers Gateway ports;
+3. applies Kubernetes mutations;
+4. installs host routes and constructs the runtime;
+5. publishes only if the lifecycle snapshot is still current;
+6. persists only after commit.
 
-Multi-cluster and advanced rule routing come after the three platforms have stable basic access. Service Local Intercept is in §2.2.
+Deferred compensations undo completed stages in reverse order. A failed stop keeps
+the runtime and restore intent visible so it can be retried; it is never reported as
+stopped merely because part of cleanup succeeded.
 
-## 13. MVP acceptance criteria
+## 9. Active session diagnostics
 
-On a standard Kubernetes cluster, from the desktop UI a user can:
+The Network view renders active sessions and offers a TCP connectivity test.
 
-1. Select a Context and complete connect;
-2. Reach a Pod IP from a browser or local app;
-3. Reach a ClusterIP Service;
-4. Reach `service.namespace.svc.cluster.local`;
-5. Fully restore system routes and DNS after disconnect;
-6. Have the Helper clean residual config if the app is force-quit;
-7. Do all of the above without a terminal, without installing kubectl, and without exposing the cluster on the public internet.
+| Session | Probe | Failure layer |
+| --- | --- | --- |
+| Port Forward | Dial the active local listener | `local-listener` |
+| Exchange/Service Mirror/Preview | Check control readiness and registered ports, then dial every TCP local target | `gateway-control`, `local-target` |
 
-Initial performance targets:
+The result dialog shows the full topology, but tested and topology-only segments
+are visually different. Exchange/Service Mirror/Preview tests do not create a cluster
+workload, send an application payload through the Service, or validate business
+response semantics. Retest repeats the same session target after completion.
 
-- Extra TCP connect latency under 30 ms (excluding baseline cluster latency);
-- Single-connection throughput at least 100 Mbps;
-- Idle resident memory under 150 MB;
-- Client remains usable with 1000 concurrent TCP connections.
+## 10. Persistence and failure semantics
 
-## 14. Open decisions
+Persisted data includes context selection, manual network settings, host aliases,
+UI preferences, the previous connected flag, and feature restore intents.
 
-These do not block the interaction prototype, but should be confirmed before M1 development:
+Required invariants:
 
-1. Whether to support multiple kubeconfig files and `KUBECONFIG` merge rules;
-2. Whether macOS GA uses Network Extension or a standalone utun Helper;
-3. Gateway image registry and signing / supply-chain plan;
-4. Whether to ship an offline admin install manifest for enterprises;
-5. Whether large Service counts should use precise routes or require an admin-provided Service CIDR;
-6. Client auto-update and code-signing channels.
+- startup cancellation returns to Idle and permits immediate reconnect;
+- Kubernetes resources are restored before dependent data-plane resources close;
+- active Gateway listeners are re-registered before recovered control becomes ready;
+- sing-box startup retries bounded local control/DNS port collisions with new ports;
+- no failed path silently bypasses sing-box or changes the selected traffic policy;
+- shutdown preserves restore intent for next-launch recovery;
+- explicit disconnect clears the connected flag after cleanup.
+
+## 11. Security and permissions
+
+### 11.1 Local security
+
+- kubeconfig credentials remain in the Go desktop process;
+- helper IPC authenticates the caller and validates every field;
+- helper state and generated configs live in protected system storage;
+- feature inbounds and MCP bind only to `127.0.0.1`;
+- MCP is off by default; optional Bearer authentication may be enabled;
+- logs redact kubeconfig, tokens, certificates, and secrets.
+
+### 11.2 Cluster security
+
+The Gateway is a dialer and reverse-listener relay, not a Kubernetes controller.
+All Kubernetes reads and mutations use the user's desktop kubeconfig.
+
+Capability tiers degrade independently:
+
+| Permission | Effect when absent |
+| --- | --- |
+| Gateway install/update | Require administrator-preinstalled Gateway |
+| Gateway Pod port-forward | Connection cannot start |
+| Nodes/CoreDNS/cluster-wide inventory | Use scoped discovery and manual network values |
+| Service/Endpoints/EndpointSlice writes | Disable Exchange, Service Mirror, and Preview |
+| Namespace inventory | Limit selection and watches to permitted Namespaces |
+
+Gateway images are version-pinned for releases. No NodePort, LoadBalancer, Ingress,
+host networking, privileged container, or mounted ServiceAccount token is required.
+
+## 12. Observability
+
+Published state includes phase, human-readable message, capabilities, discovery,
+network issues, inventory revision, versions, active connections, and timestamps.
+Metrics combine sing-box snapshots with feature-aware traffic tracking.
+
+The UI exposes:
+
+- connection duration and current phase;
+- upload/download, active TCP/UDP connections, and recent traffic;
+- Pod/Service/DNS discovery and conflict diagnostics;
+- active feature sessions;
+- connectivity-test result, error, and failed layer;
+- redacted structured logs and generated sing-box configuration.
+
+Diagnostic output excludes traffic payloads, Kubernetes Secrets, and raw kubeconfig
+content by default.
+
+## 13. Cross-platform and release design
+
+The Go control plane, React UI, Gateway protocol, and feature managers are shared.
+Only helper installation, process supervision, TUN, routes, DNS, packaging, and
+platform tests vary by operating system.
+
+| Platform | Packages |
+| --- | --- |
+| macOS | DMG and tar.gz for amd64/arm64; Homebrew Cask |
+| Windows | NSIS installer and portable zip for amd64/arm64 |
+| Linux | deb, rpm, and tar.gz for amd64/arm64 |
+
+Release tags build desktop artifacts, Gateway binaries, a multi-architecture Gateway
+image, and `SHA256SUMS`. Packages include a pinned sing-box binary and platform helper.
+
+## 14. Verification criteria
+
+A release is acceptable when:
+
+1. Pod IP, ClusterIP, and cluster DNS traffic work without per-app configuration.
+2. Non-cluster traffic keeps its normal route.
+3. Connect/disconnect and startup cancellation leave no TUN, route, DNS, process,
+   listener, or Kubernetes-resource leak.
+4. Exchange restores the original Service resources exactly.
+5. Preview deletes everything it created.
+6. Service Mirror Primary remains correct when Shadow fails or is slow.
+7. TCP and UDP feature data paths satisfy their documented semantics.
+8. TCP diagnostics report the correct layer and never claim untested topology passed.
+9. Restricted RBAC produces actionable capability errors and safe degradation.
+10. Unit, race, cross-platform build, and end-to-end suites pass.
+
+## 15. Related documents
+
+- [Unified Traffic Data Plane Design](singbox-traffic-dataplane.md)
+- [Product website architecture](../site/architecture.html)
+- [English README](../README.md)
+- [Simplified Chinese README](../README_zh-CN.md)

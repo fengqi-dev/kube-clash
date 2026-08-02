@@ -1,624 +1,370 @@
-# KubeLoop 桌面客户端设计
+# KubeLoop 系统设计
 
 [English](design.md) | [简体中文](design.zh-CN.md)
 
-> 状态：Draft v0.2（产品边界已确认）
-> 目标：让开发者像连接 VPN 一样连接 Kubernetes 集群，并从本机透明访问 Pod IP、Service IP 和集群域名。
+> 状态：KubeLoop v1.5.0 已实现基线
+> 读者：贡献者、评审者、运维人员和集成方
 
-## 0. 已确认的产品决策
+## 1. 目标
 
-- 产品目标为 macOS、Windows、Linux 多平台，优先交付 macOS；
-- Gateway 由桌面客户端自动检查、安装和升级；
-- 第一阶段只完成 Pod、Service 和集群 DNS 的透明访问；
-- M2 支持用本地服务替换集群 Service（TCP/UDP），断开时完整恢复 Endpoints。
-- 使用 sing-box 作为 TUN、DNS 和规则路由内核。
+KubeLoop 是面向 Kubernetes 开发的跨平台桌面网络客户端。它让工作站一次连接一个集群，
+使普通本地应用无需单独配置代理即可访问 Pod IP、ClusterIP Service 和集群 DNS。
 
-## 1. 产品定位
+设计遵循六项原则：
 
-KubeLoop 是桌面网络客户端，而不是命令行工具。用户不需要理解路由、TUN、端口转发或
-Kubernetes 网络细节，只需要选择集群并点击连接。
+1. **只接管集群流量。** 公网及无关私网流量继续使用工作站原有网络。
+2. **不暴露集群公网入口。** 数据面通过 Kubernetes API Server port-forward 访问集群内 Gateway。
+3. **最小权限。** kubeconfig 凭证留在桌面进程；系统网络交给受限的特权 Helper；Gateway 无特权。
+4. **资源变更事务化。** Exchange、Service Mirror、Preview 要么发布完整 runtime，要么回滚此前所有变更。
+5. **资源归属可恢复。** 进程、监听、路由、DNS 规则、Gateway 注册和 Kubernetes 资源都有唯一生命周期所有者。
+6. **诊断可解释。** UI 明确区分实际测试的路径和仅用于解释的拓扑。
 
-它提供熟悉的桌面网络客户端体验：
+## 2. 产品模型
 
-- 常驻系统托盘；
-- 一键连接和断开；
-- TUN 透明接管，无需给每个应用配置代理；
-- 实时展示连接状态、路由、请求和错误；
-- 自动检测网段冲突；
-- 设置开机启动和自动重连。
+### 2.1 用户能力
 
-它解决的是 Kubernetes 开发网络问题，而不是公网代理问题：
-
-- 访问 Pod IP；
-- 访问 ClusterIP Service；
-- 解析并访问 `*.svc.cluster.local`；
-- 将本地进程映射为集群内 Service 的目标（Service Local Intercept）。
-
-## 2. 首版范围
-
-### 2.1 MVP 包含
-
-1. 读取本机 kubeconfig，并展示 Context、集群和 Namespace。
-2. 通过 Kubernetes API 获取 Pod CIDR、Service IP 和集群 DNS 信息。
-3. 创建系统 TUN 设备，只接管目标集群网段。
-4. 自动安装或复用集群内 Gateway。
-5. 通过 Kubernetes API Server 的 port-forward 通道连接 Gateway，不暴露公网端口。
-6. 支持 TCP 和 UDP。
-7. 将 `cluster.local` DNS 查询转发给集群 CoreDNS。
-8. 展示连接时长、上下行流量、活动连接和诊断信息。
-9. 从 UI 完成连接、断开、Gateway 安装和卸载。
-
-### 2.2 M2：Service Local Intercept
-
-在已连接会话中，用户可将现有 ClusterIP Service 替换为本地进程：
-
-1. 桌面通过控制通道在 Gateway 上注册唯一 listen 端口（TCP/UDP）；
-2. 清空 Service selector，写入托管 EndpointSlice，后端指向 Gateway Pod IP:listenPort；
-3. 集群客户端仍使用原 ClusterIP / DNS；kube-proxy 将流量送到 Gateway；
-4. Gateway 发出 `InboundReady`，桌面 `Accept` 后转发到 `127.0.0.1`（或指定本地地址）；
-5. 停止拦截或断开连接时恢复 selector、删除托管 EndpointSlice，并注销 Gateway 监听。
-
-Gateway 仍无 kube API、无特权、无 hostNetwork。EndpointSlice 变更由桌面 kubeconfig 完成。
-
-### 2.3 MVP 暂不包含
-
-- 全局公网代理和规则订阅；
-- 多集群同时连接；
-- ICMP/Ping 的完整语义；
-- Headless / ExternalName Service 拦截；
-- Service Mesh 流量身份模拟；
-- Windows 客户端。
-
-产品架构从第一天保持跨平台，交付顺序为：
-
-1. macOS；
-2. Windows；
-3. Linux。
-
-核心网络栈、Kubernetes 访问、隧道协议和 Gateway 必须跨平台复用。系统网络配置由平台适配
-层实现，不允许平台逻辑进入通用连接流程。
-
-## 3. 用户体验
-
-### 3.1 首页
-
-```text
-┌──────────────────────────────────────────────────────┐
-│ KubeLoop                                设置  —  □ │
-├──────────────────────────────────────────────────────┤
-│                                                      │
-│             ● 已连接                                  │
-│             dev-cluster / default                    │
-│             00:42:18                                 │
-│                                                      │
-│               [ 断开连接 ]                            │
-│                                                      │
-│  Pod 网络         Service         DNS                │
-│  10.244.0.0/16    32 个 IP        cluster.local      │
-│                                                      │
-│  ↓ 18.2 MB        ↑ 4.7 MB        12 个活动连接       │
-├──────────────────────────────────────────────────────┤
-│  概览        连接        网络        日志              │
-└──────────────────────────────────────────────────────┘
-```
-
-未连接状态下，主区域展示：
-
-1. kubeconfig 选择；
-2. Context 选择；
-3. Namespace 选择；
-4. “连接”主按钮；
-5. 首次连接时的 Gateway 安装提示。
-
-### 3.2 连接状态
-
-状态机必须对用户可解释：
-
-```text
-未连接
-  → 检查 kubeconfig
-  → 检查集群权限
-  → 检查/安装 Gateway
-  → 发现 Pod 与 Service 网络
-  → 检查本地网段冲突
-  → 请求系统网络权限
-  → 创建安全通道
-  → 已连接
-```
-
-任何一步失败时，UI 展示：
-
-- 人能读懂的错误原因；
-- 受影响的能力；
-- “重试”按钮；
-- 可复制的诊断详情。
-
-### 3.3 系统托盘
-
-托盘菜单提供：
-
-- 当前连接状态；
-- 最近使用的集群；
-- 连接/断开；
-- 打开主窗口；
-- 退出。
-
-关闭主窗口不等于断开连接，退出应用时需要明确提示。
-
-## 4. 总体架构
-
-```text
-┌──────────────── macOS Desktop ─────────────────┐
-│                                                │
-│  ┌─────────────┐     ┌──────────────────────┐  │
-│  │ Desktop UI  │────▶│ Core Service         │  │
-│  │ React       │     │ Go                   │  │
-│  └─────────────┘     │ - kubeconfig/context │  │
-│                      │ - cluster discovery  │  │
-│                      │ - session lifecycle  │  │
-│                      │ - traffic metrics    │  │
-│                      └──────────┬───────────┘  │
-│                                 │ local IPC     │
-│                      ┌──────────▼───────────┐  │
-│                      │ Privileged Helper    │  │
-│                      │ - utun               │  │
-│                      │ - routes             │  │
-│                      │ - split DNS          │  │
-│                      └──────────┬───────────┘  │
-│                                 │ packets       │
-│                      ┌──────────▼───────────┐  │
-│                      │ sing-box Core          │  │
-│                      │ TUN / DNS / Rules    │  │
-│                      └──────────┬───────────┘  │
-└─────────────────────────────────┼──────────────┘
-                                  │ encrypted Kubernetes
-                                  │ port-forward channel
-                         ┌────────▼─────────┐
-                         │ In-cluster      │
-                         │ Gateway         │
-                         │ TCP/UDP dialer  │
-                         └────────┬─────────┘
-                                  │
-                         Pod / Service / CoreDNS
-```
-
-### 4.1 桌面 UI
-
-推荐使用 Wails + React：
-
-- Go 适合 Kubernetes 客户端、网络控制和并发任务；
-- UI 可以保持现代桌面客户端体验；
-- 相比 Electron，安装包和常驻内存更小；
-- 核心逻辑可以复用于 Windows 和 Linux。
-
-UI 进程不直接持有 root 权限。
-
-### 4.2 Core Service
-
-运行在普通用户权限下，负责：
-
-- kubeconfig 与 Context 管理；
-- 使用 Kubernetes API 做资源发现；
-- 安装、升级和检查 Gateway；
-- 建立 port-forward；
-- 管理连接状态机；
-- 运行用户态 TCP/IP 栈；
-- 汇总指标和结构化日志；
-- 通过本地 RPC 向 UI 推送状态。
-
-首版不调用外部 `kubectl`，直接使用 Kubernetes client-go，避免用户机器上的版本差异和
-命令行窗口闪烁。
-
-### 4.3 sing-box Core 与 Privileged Helper
-
-sing-box 作为客户端托管的独立进程随平台安装包分发，负责：
-
-- 创建 TUN 和接收目标集群流量；
-- DNS 劫持与 `cluster.local` nameserver policy；
-- 根据 Pod CIDR 和 Service IP 执行规则路由；
-- 将集群流量发送到本地 `KUBERNETES` SOCKS5 桥；
-- 让所有非集群流量保持 `DIRECT`。
-
-桌面客户端生成最小配置，不接受代理订阅，也不接管公网流量。sing-box 通过只监听
-`127.0.0.1` 的 External Controller 接受健康检查，Controller Secret 每个 Session 随机
-生成。
-
-Privileged Helper 是独立、最小权限的系统服务。本机 IPC 使用 Token 认证，只接受字段受限
-的 Session 描述，不接受命令或文件路径，负责：
-
-- 直接运行平台安装包内随附的固定版 sing-box（运行时不再复制或下载到系统目录）；
-- 在受保护的 Session 目录内重新生成 sing-box 配置；
-- 创建和销毁 utun/TUN；
-- 添加和删除明确的 Pod/Service 路由；
-- 配置 `cluster.local` split DNS；
-- 崩溃恢复时清理残留网络配置。
-
-Windows 安装布局为扁平的 `Program Files\KubeLoop\`：`sing-box.exe` 与主程序同级，
-`resources\` 下包含 `kubeloop-helper.exe` 以及独立的
-`kubeloop-helper-install.exe` / `kubeloop-helper-uninstall.exe`（用于 UAC 提权）。
-
-Helper 不读取 kubeconfig，也不持有 Kubernetes 凭证。
-
-sing-box 使用 GPLv3。分发安装包时必须同时保留许可证、版权声明，并按许可证要求提供对应
-源码。sing-box 保持为独立进程，不修改其源码；项目仍需在发布流程中生成第三方许可证和源码
-获取说明。
-
-平台实现：
-
-| 平台 | TUN | 权限服务 | DNS |
-| --- | --- | --- | --- |
-| macOS | Network Extension 或 utun | LaunchDaemon + Authorization Services | DNS Settings / split DNS |
-| Windows | Wintun | Windows Service | NRPT / DNS 配置 |
-| Linux | `/dev/net/tun` | systemd service 或 polkit | systemd-resolved |
-
-用户只在首次安装或升级 Helper 时授权，而不是每次连接都输入密码。
-
-macOS 原型阶段可以使用 utun 快速验证数据通路；正式发布前优先评估 Packet Tunnel Network
-Extension，以获得更稳定的系统生命周期和签名分发体验。
-
-### 4.4 In-cluster Gateway
-
-Gateway 是一个普通 Deployment：
-
-- 默认 1 个副本；
-- 不创建公网 LoadBalancer；
-- 只通过 Kubernetes API Server port-forward 访问；
-- 接收多路复用的 TCP/UDP 会话；
-- 在 Pod 网络内连接目标 Pod、Service 或 CoreDNS；
-- 暴露健康检查和协议版本；
-- 不需要 `hostNetwork`、`privileged` 或 `NET_ADMIN`。
-
-这比在集群内创建 TUN 并修改 iptables 更安全，也更容易被企业集群接受。
-
-### 4.5 跨平台边界
-
-通用模块：
-
-- Kubernetes API 与 kubeconfig；
-- Gateway 安装器；
-- 连接状态机；
-- 用户态 TCP/IP 栈；
-- 隧道协议；
-- 路由规划与冲突检测；
-- 指标、日志与诊断。
-
-平台模块仅实现以下接口：
-
-```text
-EnsureHelper()
-CreateTunnel(configuration)
-ApplyRoutes(routes)
-ConfigureSplitDNS(domains, server)
-WatchNetworkChanges()
-RestoreSystemNetwork()
-```
-
-平台模块返回结构化错误，UI 不直接解析系统命令输出。
-
-## 5. 数据通路
-
-### 5.1 Pod IP / Service IP
-
-1. 应用向 Pod IP 或 ClusterIP 发起连接。
-2. 系统路由将数据包送入 KubeLoop 的 TUN。
-3. sing-box 根据动态生成的 IP-CIDR 规则选择 `KUBERNETES` outbound。
-4. sing-box 将 TCP/UDP 会话发送到本地 SOCKS5 桥。
-5. SOCKS5 桥把 TCP 和 UDP 都封装进可靠的多路复用流。
-6. 流量通过 API Server port-forward 到 Gateway。
-7. Gateway 在集群内连接真实目标。
-8. 返回流量沿原通道和 sing-box TUN 返回应用。
-
-使用 sing-box 网络栈的好处：
-
-- 集群 Gateway 不需要网络管理权限；
-- 不依赖集群 CNI 的回程路由能力；
-- 本机真实 IP 不会泄漏到 Pod 网络；
-- TCP/UDP 的错误和超时可以正确返回给本地应用。
-
-### 5.2 DNS
-
-客户端使用 split DNS，只接管：
-
-- 已配置的集群域名（始终包含 `cluster.local`，可附加自定义域）；
-- 对应的 `svc.<domain>` / `<ns>.svc.<domain>` 后缀。
-
-查询通过现有隧道转发到 kube-system 中的 CoreDNS Service。其他域名继续使用用户原来的
-DNS。本地 DNS search proxy 同时监听 UDP 与 TCP；sing-box DNS 使用 `prefer_ipv4`，在双栈路由可用时允许 AAAA。
-
-短名称如 `my-service` 存在 Namespace 语义。搜索域使用连接时的 Namespace（UI 以 `default` 连接）：
-
-```text
-<namespace>.svc.<cluster-domain>
-svc.<cluster-domain>
-<cluster-domain>
-```
-
-UI 需要明确展示已配置的集群域名。
-
-#### 与其他 TUN / 系统 DNS 客户端共存
-
-KubeLoop **不会**劫持系统默认解析器，只安装选择性 split DNS。Clash Verge 等会接管 TUN 或强制系统 DNS 的客户端，可能导致集群域名到不了 KubeLoop。连接后会通过 split-DNS 端口探测 `kubernetes.default.svc.<cluster-domain>`，失败时给出告警。建议：避免同时开两套 TUN；必须并存时关闭对方的 TUN/系统 DNS，或最后再连接 KubeLoop。
-
-## 6. 集群网络发现
-
-### 6.1 Pod 网络
-
-优先读取 Node：
-
-- `spec.podCIDR`；
-- `spec.podCIDRs`（双栈）。
-
-如果 CNI 不写 Node PodCIDR，则回退为读取现有 Pod IP 并安装精确路由。UI 会提示这种模式
-无法自动覆盖尚未创建的新 Pod。
-
-### 6.2 Service 网络
-
-Kubernetes API 通常不直接暴露 Service CIDR。首版采用两级策略：
-
-1. 获取所有 Service 的 `clusterIPs`，安装精确 `/32` 或 `/128` 路由；
-2. 监听 Service 变更并增量更新路由。
-
-如果用户或集群元数据提供 Service CIDR，则可以直接安装网段路由。
-
-必须忽略：
-
-- Headless Service（`clusterIP: None`）；
-- ExternalName；
-- 空地址；
-- 用户明确排除的 Namespace。
-
-### 6.3 网段冲突
-
-连接前比较目标路由与本机：
-
-- LAN 路由；
-- VPN 路由；
-- Docker/虚拟机网络；
-- 其他已连接集群路由。
-
-发现冲突时不应静默覆盖。UI 展示冲突双方、可能影响，并提供：
-
-- 取消连接；
-- 只添加精确 Pod/Service IP 路由；
-- 用户确认后的强制优先路由。
-
-## 7. 隧道协议
-
-协议运行在单个可靠字节流上，使用多路复用减少 port-forward 数量。
-
-### 7.1 握手
-
-客户端发送：
-
-- 协议版本；
-- 客户端版本；
-- 集群 Session ID；
-- 支持的能力：TCP、UDP、IPv6、DNS；
-- 最大帧长度。
-
-Gateway 返回协商后的能力和限制。不兼容时返回明确的升级信息。
-
-### 7.2 帧类型
-
-- `OPEN_TCP`
-- `TCP_DATA`
-- `OPEN_UDP`
-- `UDP_DATA`
-- `CLOSE`
-- `RESET`
-- `PING` / `PONG`
-- `DNS_QUERY` / `DNS_RESPONSE`
-- `WINDOW_UPDATE`
-
-每个流包含独立 Stream ID。TCP 必须有流量控制，避免单个大下载阻塞全部连接。UDP 会话按
-源地址、目标地址和空闲时间管理。
-
-协议负载不自行加密，因为底层经过 Kubernetes API Server 的 TLS 通道，但每个会话仍需
-随机令牌，防止 Gateway Pod 内其他进程复用监听端口。
-
-## 8. Kubernetes 权限
-
-连接前客户端用 `SelfSubjectAccessReview` 探测能力，并按结果降级：
-
-| 能力 | 缺失时 |
+| 能力 | 效果 |
 | --- | --- |
-| Gateway 安装（`kubeloop-system` Deployment） | 只查找预装 Gateway；没有则展示可复制管理员 YAML |
-| Gateway `pods/portforward` | **硬失败**（无法建 TUN） |
-| list nodes / kube-dns / ServiceCIDR 源 | Overview 允许手动填写 Pod/Service CIDR 与 CoreDNS，按 Context 持久化 |
-| 全集群 list pods/services | 降级为可见 Namespace 列表（单/多 ns） |
-| Service update + EndpointSlice | Exchange 禁用 |
-| Service create + EndpointSlice | Preview 禁用 |
+| 集群连接 | 通过 TUN 透明访问 Pod、Service 和集群 DNS |
+| Port Forward | 将 Pod 或 Service 端口暴露为本地 TCP/UDP 监听 |
+| Exchange | 用本地进程替换现有 Service 后端 |
+| Service Mirror | 接管现有 Service，保留原始 Pod 作为 Primary，并将请求复制给本地进程 |
+| Preview | 创建由本地进程提供服务的临时 ClusterIP Service |
+| Session 诊断 | 测试活动 TCP Session 并定位失败诊断层 |
+| MCP | 可选地通过 localhost Streamable HTTP 控制同一个应用后端 |
 
-### 8.0 管理员预装 + 开发者最小权限示例
+桌面 UI、MCP Server 和持久化意图恢复都调用同一组 Go Manager；它们只是不同控制面，
+不是相互独立的实现。
 
-Gateway **始终**安装在 `kubeloop-system`（不按业务 Namespace 拆分）。开发者至少需要对 Gateway Pod `get/list` 与 `pods/portforward`。
+### 2.2 非目标
 
-开发者（单业务 Namespace，例如 `dev`）大致需要：
+KubeLoop 不是：
 
-```yaml
-# Gateway 通道（集群级或 kubeloop-system Role）
-- apiGroups: [""]
-  resources: ["pods"]
-  verbs: ["get", "list"]
-- apiGroups: [""]
-  resources: ["pods/portforward"]
-  verbs: ["create"]
-# 业务 Namespace
-- apiGroups: [""]
-  resources: ["pods", "services"]
-  verbs: ["get", "list", "watch"]
-# 强烈建议（否则需在 Overview 手动填 CIDR/DNS）
-- apiGroups: [""]
-  resources: ["nodes"]
-  verbs: ["list"]
-- apiGroups: [""]
-  resources: ["services"]
-  resourceNames: ["kube-dns", "coredns"]
-  verbs: ["get"]
-  # 作用域：kube-system
-# Exchange / Preview 另加 services update/create 与 endpointslices *
+- 通用 VPN 或公网代理；
+- Service Mesh 身份模拟器；
+- 具备完整 ping 语义的 ICMP 隧道；
+- 多集群并发路由器；
+- 应用层健康检查替代品；
+- 绕过 Kubernetes RBAC 的工具。
+
+系统支持 UDP 传输，但不提供通用 UDP 连通性测试，因为健康检查需要协议专用请求和响应。
+
+## 3. 系统上下文
+
+```mermaid
+flowchart LR
+    User["用户 / 本地应用"]
+    UI["Wails + React UI"]
+    MCP["可选 localhost MCP"]
+    Core["Go Core Service"]
+    Helper["Privileged Helper"]
+    SingBox["托管 sing-box"]
+    Bridge["SOCKS Bridge"]
+    API["Kubernetes API Server"]
+    Gateway["无特权 Gateway Pod"]
+    Targets["Pods / Services / CoreDNS"]
+    Local["本地开发进程"]
+
+    User --> UI
+    User --> SingBox
+    MCP --> Core
+    UI --> Core
+    Core --> Helper
+    Helper --> SingBox
+    SingBox --> Bridge
+    Bridge --> API
+    API --> Gateway
+    Gateway --> Targets
+    Gateway --> Core
+    SingBox --> Local
 ```
 
-客户端硬依赖（建连）：
+系统包含四个信任边界：
 
-- 读取 Gateway Pod；
-- 对 Gateway Pod 创建 port-forward。
+- **UI 边界：** React 只接收可展示状态并调用类型化 Wails binding，不接收原始 kubeconfig 凭证。
+- **桌面边界：** Go 进程持有 Kubernetes client、Session 状态、功能 registry、持久化和 Gateway 协议。
+- **特权边界：** Helper 只接受经过认证、字段受限的 Session 描述，不接受命令或调用方指定路径。
+- **集群边界：** Gateway 没有 ServiceAccount token、`hostNetwork`、`privileged` 或 `NET_ADMIN`，
+  也不通过 Service 或 Ingress 暴露。
 
-自动网络发现（有则填 Overview，无则手动）：
+## 4. 组件职责
 
-- 读取 Node（Pod CIDR）；
-- 读取 `kube-system` 的 kube-dns/coredns Service；
-- 读取 ServiceCIDR 源（如 servicecidrs / kubeadm-config）。
+| 组件 | 所有权 |
+| --- | --- |
+| React UI | 交互、本地化、渲染和客户端异步状态 |
+| Application binding | 基于相同后端契约的 Wails 与 MCP 薄适配层 |
+| `session.Manager` | 单个集群生命周期、发布状态、发现、指标和恢复 |
+| `portfwd.Manager` | 本地监听和活动 Port Forward runtime |
+| `intercept.Manager` | Exchange/Service Mirror/Preview registry、control session 和 host route |
+| Cluster provider | kubeconfig、RBAC 探测、inventory、Gateway 和 Service 变更 |
+| Privileged Helper | sing-box 进程、TUN、路由、split DNS 和受保护恢复状态 |
+| sing-box | 固定 inbound、策略路由、本地/集群 outbound 和核心指标 |
+| SOCKS Bridge | 将 `kubernetes-out` 适配为 Gateway 隧道协议 |
+| Gateway | 集群侧拨号、反向监听和 TCP/UDP 中继 |
+| Store | Context 偏好、手工网络信息、别名和恢复意图 |
 
-业务清单：
+高频指标和 inventory 更新通过 state hub 发布，避免与连接生命周期锁竞争。
 
-- 读取/监听允许 Namespace 内的 Pod 和 Service。
+## 5. 集群连接生命周期
 
-Service Local Intercept / Preview 额外需要目标 Namespace：
+### 5.1 状态机
 
-- 更新或创建 Service；
-- 创建、更新、删除 EndpointSlice。
+```mermaid
+stateDiagram-v2
+    [*] --> idle
+    idle --> checking: Connect
+    state "installing-gateway" as installing_gateway
+    state "discovering-network" as discovering_network
+    state "starting-tunnel" as starting_tunnel
+    checking --> installing_gateway
+    installing_gateway --> discovering_network
+    discovering_network --> starting_tunnel
+    starting_tunnel --> connected
+    checking --> error
+    installing_gateway --> error
+    discovering_network --> error
+    starting_tunnel --> error
+    connected --> error: core/control 恢复耗尽
+    connected --> idle: Disconnect
+    error --> idle: Disconnect
+    idle --> checking: Retry
+```
 
-安装 Gateway 还需要在 `kubeloop-system` 创建 Deployment / ServiceAccount / Role / RoleBinding。
-企业环境可由管理员预装；无安装权限的账号连接时复用已有 Gateway。
+任意时刻只允许一个 run。`Connect` 在启动异步工作前安装 cancel function 和 completion
+channel；`Disconnect` 取消该 run，并在有界超时内等待清理。只有所有 runtime 资源关闭后
+才能发布 Idle。
 
-Gateway 本身不需要读取 Kubernetes API，因此默认 ServiceAccount 不授予额外权限。
+### 5.2 启动顺序
 
-### 8.1 Gateway 自动安装流程
+1. 探测所选 Context 和有效 RBAC capability。
+2. 安装/升级 Gateway，或复用管理员预装的 Gateway。
+3. 发现 Pod route、Service route、DNS、Kubernetes 版本和权限范围内的 inventory，并合并手工配置。
+4. 建立到 Gateway 的 API Server port-forward。
+5. 启动 Gateway control channel。
+6. 启动本地 SOCKS Bridge 并安装 host-route handler。
+7. 请求 Helper 生成并启动 sing-box Session。
+8. 校验固定 feature inbound，绑定各功能 traffic dialer。
+9. 发布 Connected，探测集群 DNS，恢复持久化功能，并启动 inventory 与 metrics loop。
 
-1. 客户端检查 `kubeloop-system` Namespace；
-2. 使用 server-side apply 提交带版本标签的资源；
-3. 等待 Deployment Available；
-4. 校验镜像 digest、协议版本和健康状态；
-5. 建立 port-forward；
-6. 客户端升级时先判断协议兼容性，再决定是否滚动升级 Gateway。
+`sessionRuntime` 按创建顺序记录资源，按相反顺序关闭。清理是幂等的，因此启动失败、显式
+断开和应用退出可以安全汇合。
 
-自动安装必须是幂等的。客户端只管理带以下标识的资源：
+### 5.3 Connected loop 恢复
+
+Connected loop 处理取消、sing-box 退出、Gateway control 丢失和指标 tick。恢复首先重连
+当前 Gateway；后续尝试可寻找替代 Gateway Pod、建立新 API port-forward、更新 SOCKS
+Bridge 地址并重新注册活动监听。
+
+control generation 单调递增，用于拒绝过期恢复结果。五次有界尝试仍失败后进入 Error，
+不会让部分可用的数据面静默运行。
+
+## 6. 网络发现与透明数据通路
+
+### 6.1 发现
+
+Cluster provider 获取：
+
+- 来自 Node 和已观察 Pod 的 Pod CIDR；
+- 可获得时使用 Service CIDR，否则使用精确 Service IP route；
+- 集群 DNS server 和 search domain；
+- cluster-wide 或限定 Namespace 的 inventory；
+- 只禁用受影响功能的 capability issue。
+
+受限 RBAC 用户可按 Context 保存 Pod CIDR、Service CIDR、DNS server、DNS Namespace、
+cluster domain 和 host alias。手工值经过校验后与发现结果合并。
+
+TUN 启动前会比较集群 route 与本地 interface、VPN、Docker/VM 网络和默认路由，明确展示冲突。
+
+### 6.2 透明流量
 
 ```text
-app.kubernetes.io/managed-by: kube-loop
-app.kubernetes.io/part-of: kube-loop
+本地应用
+  → 平台 TUN
+  → sing-box tun-in
+  → kubernetes-out
+  → 本地 SOCKS Bridge
+  → Kubernetes API Server port-forward
+  → Gateway
+  → Pod / Service / CoreDNS
 ```
 
-如果用户没有安装权限，UI 展示缺少的 RBAC 权限和可复制的管理员安装清单，但不会降级为
-执行外部命令。
+sing-box 只为集群目标安装固定 route。集群流量进入 `kubernetes-out`，无关流量保持
+`direct-out`。最终连接由 Gateway 在集群内建立，因此目标看到的是集群侧流量。
 
-卸载 Gateway 是独立的设置操作。断开连接不会删除 Gateway，以便下次快速连接。
+### 6.3 DNS
 
-## 9. 安全设计
+Helper 为配置的集群域名安装平台对应的 split DNS。查询进入 `dns-in`，通过 Bridge 和
+Gateway 到达 CoreDNS；公网 DNS 继续使用操作系统正常 resolver。
 
-- kubeconfig 凭证只由 Core Service 在内存中读取，不传给 UI、Helper 或 Gateway；
-- 日志默认脱敏 token、证书和 kubeconfig 内容；
-- Gateway 不暴露 NodePort、LoadBalancer 或 Ingress；
-- Helper IPC 校验调用进程签名和用户身份；
-- Helper 只允许操作 KubeLoop 自己创建的接口、路由和 DNS 配置；
-- 网络配置写入恢复日志，应用异常退出后自动回滚；
-- Gateway 镜像固定 digest，并在 UI 中展示版本；
-- 支持管理员禁用任意目标访问，限制到集群 CIDR。
+平台 adapter 包含全部 route 和 DNS 变更逻辑。通用 Session 代码只处理已校验的网络描述和清理契约。
 
-## 10. 故障恢复
+## 7. 统一功能数据面
 
-客户端要处理：
+每个集群 Session 只创建一次固定 feature inbound；单个 mapping 的创建和停止不会重启 sing-box。
 
-- 电脑睡眠与唤醒；
-- Wi-Fi 切换；
-- API Server 短暂断线；
-- Gateway 重建；
-- kubeconfig 凭证刷新；
-- 应用崩溃；
-- Helper 或 Core Service 版本不一致。
+| Inbound/user | 目标类型 | 功能 |
+| --- | --- | --- |
+| `traffic-in` / `port-forward` | 经 `kubernetes-out` 到集群 | Port Forward |
+| `traffic-in` / `exchange` | 经 `local-out` 到授权本地目标 | Exchange |
+| `traffic-in` / `preview` | 经 `local-out` 到授权本地目标 | Preview |
+| `traffic-in` / `mirror-shadow` | 经 `local-out` 到授权本地目标 | Service Mirror Shadow |
 
-断线时先保留会话并指数退避重连。超过阈值后移除 TUN 路由，避免应用流量持续黑洞。
+共享 inbound 只监听 loopback，使用 Session 随机密码，并把 SOCKS username 作为功能染色。
+未知用户、本地类功能访问集群目标以及非法目标组合都会被拒绝。
 
-## 11. 可观测性
+协议适配、路由规则、背压和 UDP association 详见
+[统一流量数据面设计](singbox-traffic-dataplane.zh-CN.md)。
 
-UI 中展示：
+## 8. 功能 Session
 
-- 当前阶段和连接时长；
-- Gateway 版本与延迟；
-- Pod/Service 路由数量；
-- TCP/UDP 活动连接；
-- 上下行字节数；
-- DNS 成功率和最近错误；
-- 重连次数。
+### 8.1 Port Forward
 
-诊断包仅包含：
+Port Forward 把 Pod 或 Service 端口暴露为本地监听。集群 Session 已连接时，功能流量以
+`port-forward` 身份进入 sing-box，再经 Gateway 到达集群。成功启动后才持久化，成功停止后才删除意图。
 
-- 脱敏后的客户端日志；
-- 网络路由快照；
-- 版本和平台信息；
-- Gateway 状态；
-- 权限检查结果。
+### 8.2 Exchange
 
-默认不包含流量内容、DNS 查询明细或 Kubernetes Secret。
+Exchange 改写现有 ClusterIP Service：
 
-## 12. 版本里程碑
+1. 预留 `namespace/service`，注册 Gateway 反向监听端口。
+2. 快照 selector、classic Endpoints 和 EndpointSlices。
+3. 清空 selector，安装指向 Gateway 的托管 EndpointSlice。
+4. 将反向流量路由到配置的本地目标。
+5. 停止时恢复快照并注销监听。
 
-### M0：交互原型
+集群客户端继续使用原 ClusterIP 和 DNS 名称。
 
-- 首页、集群选择、连接状态、网络与日志页面；
-- 使用模拟数据验证产品流程；
-- 确定品牌、信息层级和错误体验。
+### 8.3 Preview
 
-### M1：开发者预览版
+Preview 创建新的无 selector ClusterIP Service 和指向 Gateway 监听的托管 EndpointSlice。
+停止时删除创建的资源和 host route，不修改已有 Service。
 
-- macOS arm64；
-- 单集群；
-- Pod/Service IPv4；
-- TCP、UDP 和 cluster.local DNS；
-- Gateway 自动安装；
-- 基础诊断和自动恢复。
+### 8.4 Service Mirror
 
-### M2：可试用版
+Service Mirror 的操作对象是一个现有 Kubernetes Service。它复用 Exchange 的 Service
+接管点和资源快照，然后把每个请求拆分为两条路径：
 
-- macOS amd64；
-- IPv6/双栈；
-- 系统托盘、开机启动、自动更新；
-- 企业预装 Gateway；
-- 性能和稳定性优化。
+- **Primary：** Gateway 连接拦截前快照中的原始 Pod，并把响应返回集群客户端。
+- **Shadow：** 请求数据复制给本地进程，其响应被丢弃。
 
-### M3：Windows
+Shadow 失败、变慢、断开或缓冲区压力都不能中断 Primary。
 
-- Windows 10/11；
-- Wintun 与 Windows Service；
-- NRPT split DNS；
-- 与 macOS 共用协议和 Gateway。
+### 8.5 事务式启动与停止
 
-### M4：Linux
+Exchange、Service Mirror、Preview 启动流程：
 
-- 主流桌面发行版；
-- `/dev/net/tun`；
-- systemd-resolved；
-- deb/rpm/AppImage 分发评估。
+1. 快照 control generation 并预留 feature key；
+2. 校验目标并注册 Gateway 端口；
+3. 应用 Kubernetes 变更；
+4. 安装 host route 并构造 runtime；
+5. 仅在生命周期快照仍有效时发布；
+6. commit 后才持久化。
 
-多集群和规则路由放在三平台基础访问能力稳定之后。Service Local Intercept 见 §2.2。
+deferred compensation 按相反顺序撤销已完成阶段。停止失败时保留 runtime 和恢复意图，
+允许重试；不能因为部分清理成功就报告已停止。
 
-## 13. MVP 验收标准
+## 9. 活动 Session 诊断
 
-在一个标准 Kubernetes 集群中，用户可从桌面 UI：
+Network 页面展示活动 Session，并提供 TCP 连通性测试。
 
-1. 选择 Context 并完成连接；
-2. 用浏览器或本地应用访问 Pod IP；
-3. 访问 ClusterIP Service；
-4. 访问 `service.namespace.svc.cluster.local`；
-5. 断开后系统路由和 DNS 完整恢复；
-6. 应用被强制结束后，Helper 能清理残留配置；
-7. 整个过程不打开终端、不要求用户安装 kubectl、不暴露集群公网端口。
+| Session | 探测 | 失败层 |
+| --- | --- | --- |
+| Port Forward | 连接活动本地监听 | `local-listener` |
+| Exchange/Service Mirror/Preview | 检查 control ready 和端口注册，再连接每个 TCP 本地目标 | `gateway-control`、`local-target` |
 
-性能初始目标：
+结果弹窗展示完整拓扑，但实际测试和仅拓扑线段使用不同视觉状态。
+Exchange/Service Mirror/Preview 测试不会创建集群工作负载、通过 Service 发送应用层负载，或验证业务
+响应语义。“重新测试”只会在当前测试完成后对同一个 Session 目标再次执行。
 
-- 新建 TCP 连接额外延迟低于 30 ms（不含集群基础网络延迟）；
-- 单连接吞吐达到 100 Mbps；
-- 空闲常驻内存低于 150 MB；
-- 1000 条并发 TCP 连接下客户端保持可操作。
+## 10. 持久化与失败语义
 
-## 14. 后续决策
+持久化内容包括 Context 选择、手工网络设置、host alias、UI 偏好、上次连接标记和功能恢复意图。
 
-以下问题不阻塞交互原型，但需要在 M1 开发前确认：
+必须满足：
 
-1. 是否需要兼容多个 kubeconfig 文件以及 `KUBECONFIG` 合并规则；
-2. macOS 正式版采用 Network Extension 还是独立 utun Helper；
-3. Gateway 镜像仓库和签名/供应链方案；
-4. 是否需要提供企业管理员离线安装清单；
-5. Service 数量很大时，使用精确路由还是要求管理员提供 Service CIDR；
-6. 客户端自动更新和代码签名渠道。
+- 启动取消回到 Idle，并允许立即重连；
+- 依赖数据面关闭前先恢复 Kubernetes 资源；
+- 恢复后的 control ready 前先重新注册活动 Gateway 监听；
+- sing-box 启动遇到本地 control/DNS 端口冲突时使用新端口有界重试；
+- 失败路径不能静默绕过 sing-box 或改变流量策略；
+- shutdown 保留下一次启动所需的恢复意图；
+- 显式 disconnect 在清理后清除 connected 标记。
+
+## 11. 安全与权限
+
+### 11.1 本地安全
+
+- kubeconfig 凭证留在 Go 桌面进程；
+- Helper IPC 认证调用方并校验每个字段；
+- Helper 状态和生成配置位于受保护系统目录；
+- feature inbound 和 MCP 只绑定 `127.0.0.1`；
+- MCP 默认关闭，可选启用 Bearer 认证；
+- 日志脱敏 kubeconfig、token、证书和 Secret。
+
+### 11.2 集群安全
+
+Gateway 是拨号器和反向监听中继，不是 Kubernetes controller。所有 Kubernetes 读取和变更
+都使用用户桌面 kubeconfig。
+
+| 权限 | 缺失时的行为 |
+| --- | --- |
+| Gateway 安装/更新 | 要求管理员预装 Gateway |
+| Gateway Pod port-forward | 无法建立连接 |
+| Node/CoreDNS/cluster-wide inventory | 使用限定范围发现和手工网络值 |
+| Service/Endpoints/EndpointSlice 写入 | 禁用 Exchange、Service Mirror、Preview |
+| Namespace inventory | 选择和 watch 限于授权 Namespace |
+
+Release 固定 Gateway 镜像版本，不需要 NodePort、LoadBalancer、Ingress、host network、
+privileged container 或挂载 ServiceAccount token。
+
+## 12. 可观测性
+
+发布状态包含 phase、可读消息、capability、discovery、网络问题、inventory revision、版本、
+活动连接和时间戳。指标合并 sing-box snapshot 与功能语义 traffic tracking。
+
+UI 展示：
+
+- 连接时长和当前 phase；
+- 上下行、活动 TCP/UDP 连接和近期流量；
+- Pod/Service/DNS 发现和冲突诊断；
+- 活动功能 Session；
+- 连通性测试结果、错误和失败层；
+- 脱敏结构化日志及生成的 sing-box 配置。
+
+默认诊断输出不包含流量 payload、Kubernetes Secret 或原始 kubeconfig。
+
+## 13. 跨平台与发布
+
+Go control plane、React UI、Gateway 协议和 feature manager 在三平台共享。只有 Helper 安装、
+进程监管、TUN、route、DNS、打包和平台测试因操作系统而异。
+
+| 平台 | 产物 |
+| --- | --- |
+| macOS | amd64/arm64 DMG、tar.gz 和 Homebrew Cask |
+| Windows | amd64/arm64 NSIS installer 和 portable zip |
+| Linux | amd64/arm64 deb、rpm 和 tar.gz |
+
+Release tag 构建桌面产物、Gateway binary、多架构 Gateway image 和 `SHA256SUMS`。安装包内包含
+固定版本 sing-box 和平台 Helper。
+
+## 14. 验证标准
+
+Release 必须满足：
+
+1. Pod IP、ClusterIP 和集群 DNS 无需单独配置应用即可访问。
+2. 非集群流量保持原有路由。
+3. Connect/disconnect 和启动取消不遗留 TUN、route、DNS、进程、监听或 Kubernetes 资源。
+4. Exchange 精确恢复原 Service 资源。
+5. Preview 删除自己创建的全部资源。
+6. Shadow 失败或缓慢时 Service Mirror Primary 仍保持正确。
+7. TCP/UDP 功能数据通路符合本文语义。
+8. TCP 诊断报告正确失败层，不把未测试拓扑宣称为成功。
+9. 受限 RBAC 返回可执行的 capability 错误并安全降级。
+10. unit、race、跨平台 build 和 E2E suite 全部通过。
+
+## 15. 相关文档
+
+- [统一流量数据面设计](singbox-traffic-dataplane.zh-CN.md)
+- [产品网站架构页](../site/architecture.html)
+- [English README](../README.md)
+- [简体中文 README](../README_zh-CN.md)
