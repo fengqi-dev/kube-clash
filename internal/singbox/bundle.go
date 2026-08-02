@@ -1,6 +1,7 @@
 package singbox
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -62,13 +63,17 @@ func BundleRelease(goos, goarch, outDir string) error {
 		return fmt.Errorf("sing-box archive does not contain sing-box binary")
 	}
 	binaryPath := filepath.Join(outDir, binaryName)
-	if err := os.WriteFile(binaryPath, executable, 0o755); err != nil {
+	if err := writeFileIfChanged(binaryPath, executable, 0o755); err != nil {
 		return fmt.Errorf("write bundled sing-box: %w", err)
 	}
 	if goos == "windows" {
 		for _, sidecar := range []string{"wintun.dll", "libcronet.dll"} {
 			if payload, ok := files[sidecar]; ok {
-				if err := os.WriteFile(filepath.Join(outDir, sidecar), payload, 0o644); err != nil {
+				if err := writeFileIfChanged(
+					filepath.Join(outDir, sidecar),
+					payload,
+					0o644,
+				); err != nil {
 					return fmt.Errorf("write bundled %s: %w", sidecar, err)
 				}
 			}
@@ -78,10 +83,22 @@ func BundleRelease(goos, goarch, outDir string) error {
 	if upstream, ok := files["license"]; ok && len(upstream) > 0 {
 		license = string(upstream) + "\n\n---\n\n" + license
 	}
-	if err := os.WriteFile(filepath.Join(outDir, "LICENSE.sing-box.txt"), []byte(license), 0o644); err != nil {
+	if err := writeFileIfChanged(
+		filepath.Join(outDir, "LICENSE.sing-box.txt"),
+		[]byte(license),
+		0o644,
+	); err != nil {
 		return fmt.Errorf("write sing-box license notice: %w", err)
 	}
 	return nil
+}
+
+func writeFileIfChanged(path string, content []byte, mode os.FileMode) error {
+	current, err := os.ReadFile(path)
+	if err == nil && bytes.Equal(current, content) {
+		return nil
+	}
+	return os.WriteFile(path, content, mode)
 }
 
 func bundledLicenseText() string {

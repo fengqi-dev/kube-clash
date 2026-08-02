@@ -164,6 +164,7 @@ export function OverviewView({
             <div className="flex flex-col items-center justify-center self-center px-2 text-center">
               <ConnectionOrb
                 phase={session.phase}
+                busy={busy}
                 disabled={loading || !contextName}
                 ariaLabel={
                   busy
