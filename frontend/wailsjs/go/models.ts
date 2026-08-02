@@ -615,16 +615,16 @@ export namespace portfwd {
 }
 
 export namespace session {
-
+	
 	export class ConnectivityTestResult {
 	    passed: boolean;
 	    failedLayer?: string;
 	    error?: string;
-
+	
 	    static createFrom(source: any = {}) {
 	        return new ConnectivityTestResult(source);
 	    }
-
+	
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.passed = source["passed"];
@@ -964,3 +964,4 @@ export namespace update {
 	}
 
 }
+

@@ -375,7 +375,7 @@ export function ActiveSessions({
                     </Button>
                     <Button
                       type="button"
-                      size="sm"
+                      size="icon-sm"
                       variant="ghost"
                       disabled={busy || testingSessionID !== ""}
                       aria-label={`${t("network.testSession")}: ${item.kind}/${item.namespace}/${item.name}`}
@@ -386,9 +386,6 @@ export function ActiveSessions({
                       ) : (
                         <Activity size={14} />
                       )}
-                      {testingSessionID === item.id
-                        ? t("network.testingSession")
-                        : t("network.testSession")}
                     </Button>
                     <Button
                       type="button"
@@ -424,9 +421,10 @@ export function ActiveSessions({
                   <div className="flex gap-1">
                     <Button
                       type="button"
-                      size="sm"
+                      size="icon-sm"
                       variant="ghost"
                       disabled={busy || testingSessionID !== ""}
+                      aria-label={`${t("network.testSession")}: ${item.namespace}/${item.service}`}
                       onClick={() => void testIntercept(item, "exchange")}
                     >
                       {testingSessionID === item.id ? (
@@ -434,9 +432,6 @@ export function ActiveSessions({
                       ) : (
                         <Activity size={14} />
                       )}
-                      {testingSessionID === item.id
-                        ? t("network.testingSession")
-                        : t("network.testSession")}
                     </Button>
                     <Button
                       type="button"
@@ -472,9 +467,10 @@ export function ActiveSessions({
                   <div className="flex gap-1">
                     <Button
                       type="button"
-                      size="sm"
+                      size="icon-sm"
                       variant="ghost"
                       disabled={busy || testingSessionID !== ""}
+                      aria-label={`${t("network.testSession")}: ${item.namespace}/${item.service}`}
                       onClick={() => void testIntercept(item, "mirror")}
                     >
                       {testingSessionID === item.id ? (
@@ -482,9 +478,6 @@ export function ActiveSessions({
                       ) : (
                         <Activity size={14} />
                       )}
-                      {testingSessionID === item.id
-                        ? t("network.testingSession")
-                        : t("network.testSession")}
                     </Button>
                     <Button
                       type="button"
@@ -525,9 +518,10 @@ export function ActiveSessions({
                   <div className="flex gap-1">
                     <Button
                       type="button"
-                      size="sm"
+                      size="icon-sm"
                       variant="ghost"
                       disabled={busy || testingSessionID !== ""}
+                      aria-label={`${t("network.testSession")}: ${item.namespace}/${item.service}`}
                       onClick={() => void testIntercept(item, "preview")}
                     >
                       {testingSessionID === item.id ? (
@@ -535,9 +529,6 @@ export function ActiveSessions({
                       ) : (
                         <Activity size={14} />
                       )}
-                      {testingSessionID === item.id
-                        ? t("network.testingSession")
-                        : t("network.testSession")}
                     </Button>
                     <Button
                       type="button"

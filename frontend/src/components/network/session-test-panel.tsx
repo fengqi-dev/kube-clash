@@ -44,7 +44,7 @@ export function SessionTestPanel({
       }}
     >
       <DialogContent
-        className="sm:max-w-2xl"
+        className="min-w-0 sm:max-w-2xl"
         showCloseButton={status !== "running"}
       >
         <DialogHeader>
@@ -57,15 +57,18 @@ export function SessionTestPanel({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 rounded-lg border bg-muted/20 p-4">
+        <div className="min-w-0 space-y-3 rounded-lg border bg-muted/20 p-4">
           {flow.routes.map((route, routeIndex) => (
-            <div key={`${route.label ?? "route"}-${routeIndex}`} className="space-y-2">
+            <div
+              key={`${route.label ?? "route"}-${routeIndex}`}
+              className="min-w-0 space-y-2"
+            >
               {route.label ? (
                 <div className="text-[10px] font-medium tracking-wide text-muted-foreground uppercase">
                   {route.label}
                 </div>
               ) : null}
-              <div className="overflow-x-auto pb-1">
+              <div className="max-w-full overflow-x-auto pb-1">
                 <div className="flex min-w-max items-center py-2">
                   {route.nodes.map((node, nodeIndex) => (
                     <div
