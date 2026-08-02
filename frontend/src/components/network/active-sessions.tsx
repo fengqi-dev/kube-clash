@@ -59,6 +59,7 @@ export function ActiveSessions({
   const [testFailure, setTestFailure] = useState<
     { route: number; segment: number } | undefined
   >();
+  const [retest, setRetest] = useState<null | (() => Promise<void>)>(null);
   const reloadGeneration = useRef(0);
   const podOnly = scope === "podPortForward";
 
@@ -175,17 +176,22 @@ export function ActiveSessions({
 
   async function testForward(item: PortForwardInfo) {
     const startedAt = Date.now();
+    setRetest(() => () => testForward(item));
     setTestingSessionID(item.id);
     setTestFlow({
       title: `${item.kind}/${item.namespace}/${item.name}`,
       description: `${(item.protocol || "tcp").toUpperCase()} ${item.address} → :${item.remotePort}`,
       routes: [
         {
+          testedSegments: [0],
           nodes: [
-            t("network.flowLocalClient"),
-            item.address,
-            t("network.flowDataPlane"),
-            `${item.kind}/${item.namespace}/${item.name}:${item.remotePort}`,
+            { label: t("network.flowLocalClient"), role: "user" },
+            { label: item.address, role: "accent" },
+            { label: t("network.flowDataPlane"), role: "accent" },
+            {
+              label: `${item.kind}/${item.namespace}/${item.name}:${item.remotePort}`,
+              role: "alt",
+            },
           ],
         },
       ],
@@ -213,6 +219,7 @@ export function ActiveSessions({
     kind: "exchange" | "mirror" | "preview",
   ) {
     const startedAt = Date.now();
+    setRetest(() => () => testIntercept(item, kind));
     setTestingSessionID(item.id);
     const localTargets = item.locals
       .map(
@@ -221,35 +228,43 @@ export function ActiveSessions({
       )
       .join(" · ");
     const service = `${item.namespace}/${item.service}`;
-    const routes =
+    const routes: SessionTestFlow["routes"] =
       kind === "mirror"
         ? [
             {
               label: t("network.flowPrimary"),
+              testedSegments: [1],
               nodes: [
-                t("network.flowClusterClient"),
-                service,
-                t("network.flowOriginalPods"),
+                { label: t("network.flowClusterClient"), role: "alt" },
+                { label: t("network.flowGatewayMirror"), role: "accent" },
+                { label: t("network.flowMirrorTee"), role: "accent" },
+                { label: t("network.flowOriginalPods"), role: "alt" },
               ],
             },
             {
               label: t("network.flowShadow"),
+              mode: "shadow",
+              branchFromPrevious: 2,
+              testedSegments: [0],
               nodes: [
-                service,
-                t("network.flowGatewayMirror"),
-                localTargets,
+                { label: localTargets, role: "user" },
               ],
             },
           ]
         : [
             {
+              testedSegments: [1, 2],
               nodes: [
-                t("network.flowClusterClient"),
-                service,
-                kind === "exchange"
-                  ? t("network.flowGatewayExchange")
-                  : t("network.flowGatewayPreview"),
-                localTargets,
+                { label: t("network.flowClusterClient"), role: "alt" },
+                { label: service, role: "alt" },
+                {
+                  label:
+                    kind === "exchange"
+                      ? t("network.flowGatewayExchange")
+                      : t("network.flowGatewayPreview"),
+                  role: "accent",
+                },
+                { label: localTargets, role: "user" },
               ],
             },
           ];
@@ -274,8 +289,8 @@ export function ActiveSessions({
         result,
         kind === "mirror"
           ? {
-              "gateway-control": { route: 1, segment: 0 },
-              "local-target": { route: 1, segment: 1 },
+              "gateway-control": { route: 0, segment: 1 },
+              "local-target": { route: 1, segment: 0 },
             }
           : {
               "gateway-control": { route: 0, segment: 1 },
@@ -552,14 +567,18 @@ export function ActiveSessions({
         status={testStatus}
         error={testError}
         failure={testFailure}
-        onClose={() => setTestFlow(null)}
+        onRetest={() => retest?.()}
+        onClose={() => {
+          setTestFlow(null);
+          setRetest(null);
+        }}
       />
     </section>
   );
 }
 
 async function waitForTestAnimation(startedAt: number) {
-  const remaining = 900 - (Date.now() - startedAt);
+  const remaining = 2000 - (Date.now() - startedAt);
   if (remaining > 0) {
     await new Promise((resolve) => window.setTimeout(resolve, remaining));
   }

@@ -5,18 +5,20 @@ import type { SessionState } from "@/types";
 
 export function ConnectionOrb({
   phase,
+  busy = false,
   disabled,
   ariaLabel,
   onClick,
 }: {
   phase: SessionState["phase"];
+  busy?: boolean;
   disabled?: boolean;
   ariaLabel: string;
   onClick(): void;
 }) {
-  const working = isBusyPhase(phase);
-  const ready = phase === "connected";
-  const error = phase === "error";
+  const working = busy || isBusyPhase(phase);
+  const ready = phase === "connected" && !working;
+  const error = phase === "error" && !working;
 
   return (
     <button
@@ -24,6 +26,7 @@ export function ConnectionOrb({
       disabled={disabled}
       onClick={onClick}
       aria-label={ariaLabel}
+      aria-busy={working}
       className={cn(
         "relative grid size-[72px] place-items-center rounded-full border transition-all outline-none",
         "focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50",
