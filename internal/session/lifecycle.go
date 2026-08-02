@@ -15,6 +15,9 @@ func (m *Manager) Disconnect() error {
 // Shutdown persists restore intents, then tears down runtime without clearing
 // the "was connected" flag used for next-launch recovery.
 func (m *Manager) Shutdown() error {
+	m.mu.Lock()
+	m.shuttingDown = true
+	m.mu.Unlock()
 	m.PersistShutdown()
 	m.StopAllPortForwards()
 	return m.disconnect(false)
