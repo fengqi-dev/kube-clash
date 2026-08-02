@@ -3,7 +3,14 @@ package intercept
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
+	"time"
+)
+
+const (
+	controlRedialAttempts   = 6
+	controlRedialRetryDelay = 25 * time.Millisecond
 )
 
 // controlSession owns the current Gateway control channel and its recovery
@@ -54,21 +61,56 @@ func (s *controlSession) redial(
 	address string,
 	registrations []controlRegistration,
 ) (*controlClient, chan struct{}, error) {
-	client, lost, err := s.open(ctx, address)
-	if err != nil {
-		return nil, nil, err
-	}
-	for _, registration := range registrations {
-		if err := client.register(
-			registration.id,
-			registration.network,
-			registration.listenPort,
-		); err != nil {
-			_ = client.close()
-			return nil, nil, fmt.Errorf("re-register %s: %w", registration.id, err)
+	var lastErr error
+	for attempt := 0; attempt < controlRedialAttempts; attempt++ {
+		if attempt > 0 {
+			delay := time.Duration(attempt) * controlRedialRetryDelay
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return nil, nil, ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		client, lost, err := s.open(ctx, address)
+		if err != nil {
+			return nil, nil, err
+		}
+		registered := make([]string, 0, len(registrations))
+		var registrationErr error
+		for _, registration := range registrations {
+			if err := client.register(
+				registration.id,
+				registration.network,
+				registration.listenPort,
+			); err != nil {
+				registrationErr = fmt.Errorf("re-register %s: %w", registration.id, err)
+				break
+			}
+			registered = append(registered, registration.id)
+		}
+		if registrationErr == nil {
+			return client, lost, nil
+		}
+
+		for index := len(registered) - 1; index >= 0; index-- {
+			_ = client.unregister(registered[index])
+		}
+		_ = client.close()
+		lastErr = registrationErr
+		if !isTransientControlRegistrationError(registrationErr) {
+			return nil, nil, registrationErr
 		}
 	}
-	return client, lost, nil
+	return nil, nil, lastErr
+}
+
+func isTransientControlRegistrationError(err error) bool {
+	message := err.Error()
+	return strings.Contains(message, "already registered") ||
+		strings.Contains(message, "already in use")
 }
 
 func (s *controlSession) attach(client *controlClient, lost chan struct{}) {

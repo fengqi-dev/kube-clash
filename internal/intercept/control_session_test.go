@@ -112,3 +112,86 @@ func TestControlSessionReportsImmediateConnectionLoss(t *testing.T) {
 		t.Fatal("immediate control close did not signal loss")
 	}
 }
+
+func TestControlSessionRedialRetriesStaleRegistration(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+
+	serverErr := make(chan error, 1)
+	release := make(chan struct{})
+	go func() {
+		for attempt := 1; attempt <= 2; attempt++ {
+			conn, err := listener.Accept()
+			if err != nil {
+				serverErr <- err
+				return
+			}
+			command, err := tunnel.ReadSessionHeader(conn)
+			if err != nil {
+				_ = conn.Close()
+				serverErr <- err
+				return
+			}
+			if command != tunnel.CommandControl {
+				_ = conn.Close()
+				serverErr <- fmt.Errorf("command = %d, want control", command)
+				return
+			}
+			if err := tunnel.WriteStatus(conn, nil); err != nil {
+				_ = conn.Close()
+				serverErr <- err
+				return
+			}
+			message, err := tunnel.ReadControlMessage(conn)
+			if err != nil {
+				_ = conn.Close()
+				serverErr <- err
+				return
+			}
+			if message.Type != tunnel.CtrlRegister {
+				_ = conn.Close()
+				serverErr <- fmt.Errorf("message type = %d, want register", message.Type)
+				return
+			}
+			if attempt == 1 {
+				err = tunnel.WriteControlMessage(conn, tunnel.ControlMessage{
+					Type:  tunnel.CtrlError,
+					Error: `intercept "default/api:tcp:80" already registered`,
+				})
+				_ = conn.Close()
+				if err != nil {
+					serverErr <- err
+					return
+				}
+				continue
+			}
+			if err := tunnel.WriteControlMessage(conn, tunnel.ControlMessage{Type: tunnel.CtrlAck}); err != nil {
+				_ = conn.Close()
+				serverErr <- err
+				return
+			}
+			<-release
+			_ = conn.Close()
+		}
+		serverErr <- nil
+	}()
+
+	session := newControlSession(nil)
+	client, _, err := session.redial(context.Background(), listener.Addr().String(), []controlRegistration{{
+		id:         "default/api:tcp:80",
+		network:    tunnel.NetworkTCP,
+		listenPort: 20001,
+	}})
+	if err != nil {
+		close(release)
+		t.Fatalf("redial: %v", err)
+	}
+	_ = client.close()
+	close(release)
+	if err := <-serverErr; err != nil {
+		t.Fatal(err)
+	}
+}
