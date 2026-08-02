@@ -1,4 +1,4 @@
-name: CI
+name: KubeLoop CI
 
 on:
   push:
@@ -20,7 +20,7 @@ permissions:
 
 jobs:
   frontend:
-    name: Frontend
+    name: Frontend Build
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
@@ -48,7 +48,7 @@ jobs:
           if-no-files-found: error
 
   go:
-    name: Go
+    name: "Go Build & Test"
     needs: frontend
     runs-on: ubuntu-24.04
     timeout-minutes: 20
@@ -126,7 +126,7 @@ jobs:
           done
 
   e2e:
-    name: E2E (Minikube)
+    name: Linux E2E (Minikube)
     needs: go
     runs-on: ubuntu-24.04
     timeout-minutes: 35
@@ -200,7 +200,7 @@ jobs:
         run: go run ./e2e/scripts/stop-helper.go || true
 
   windows-e2e:
-    name: Windows integration and helper E2E
+    name: Windows Helper E2E
     needs: go
     runs-on: windows-2025
     timeout-minutes: 40
@@ -272,7 +272,7 @@ jobs:
           --uninstall-tool "${{ github.workspace }}\build\embedded\kubeloop-helper-uninstall.exe"
 
   macos-e2e:
-    name: macOS helper E2E
+    name: macOS Helper E2E
     needs: go
     runs-on: macos-15
     timeout-minutes: 30
