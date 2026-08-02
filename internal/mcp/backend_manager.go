@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
@@ -69,6 +70,17 @@ func (b managerBackend) ProbeContext(ctx context.Context, contextName string) (c
 	result := b.provider.Probe(probeCtx, contextName)
 	if result.OK && result.Version != "" {
 		b.manager.SetKubernetesVersion(result.Version)
+	}
+	if result.OK {
+		b.appendLog("INFO", fmt.Sprintf(
+			"MCP cluster probe succeeded: context=%s version=%s latencyMs=%d",
+			contextName, result.Version, result.LatencyMs,
+		))
+	} else {
+		b.appendLog("WARN", fmt.Sprintf(
+			"MCP cluster probe failed: context=%s latencyMs=%d error=%s",
+			contextName, result.LatencyMs, result.Error,
+		))
 	}
 	return result, nil
 }
@@ -159,11 +171,23 @@ func (b managerBackend) HelperStatus(ctx context.Context) helper.Status {
 }
 
 func (b managerBackend) InstallHelper(ctx context.Context) error {
-	return helper.EnsureInstall(ctxOrBackground(ctx))
+	b.appendLog("INFO", "MCP requested privileged helper installation")
+	if err := helper.EnsureInstall(ctxOrBackground(ctx)); err != nil {
+		b.appendLog("ERROR", fmt.Sprintf("MCP install privileged helper: %v", err))
+		return err
+	}
+	b.appendLog("INFO", "MCP privileged helper installation complete")
+	return nil
 }
 
 func (b managerBackend) UninstallHelper(ctx context.Context) error {
-	return helper.Uninstall(ctxOrBackground(ctx))
+	b.appendLog("INFO", "MCP requested privileged helper uninstall")
+	if err := helper.Uninstall(ctxOrBackground(ctx)); err != nil {
+		b.appendLog("ERROR", fmt.Sprintf("MCP uninstall privileged helper: %v", err))
+		return err
+	}
+	b.appendLog("INFO", "MCP privileged helper uninstalled")
+	return nil
 }
 
 func (b managerBackend) SingBoxConfig() ([]byte, error) {
@@ -175,4 +199,10 @@ func ctxOrBackground(ctx context.Context) context.Context {
 		return context.Background()
 	}
 	return ctx
+}
+
+func (b managerBackend) appendLog(level, message string) {
+	if logger, ok := b.manager.(interface{ AppendLog(string, string) }); ok {
+		logger.AppendLog(level, message)
+	}
 }

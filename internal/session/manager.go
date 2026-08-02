@@ -195,7 +195,6 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 		catalog:    provider,
 		connection: provider,
 		gateway:    provider,
-		core:       newSingboxRuntime(),
 		bridgeFactory: func(ctx context.Context, gatewayAddress string) (net.Listener, error) {
 			return socksbridge.Listen(ctx, gatewayAddress)
 		},
@@ -206,6 +205,7 @@ func NewManager(provider ClusterProvider, options ...Option) *Manager {
 			Phase: PhaseIdle, Message: "Disconnected", CoreVersion: singbox.Version, UpdatedAt: time.Now(),
 		}),
 	}
+	manager.core = newSingboxRuntime(manager.AppendLog)
 	for _, option := range options {
 		option(manager)
 	}

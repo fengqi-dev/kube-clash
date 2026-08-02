@@ -63,6 +63,11 @@ func NewApp(version string, embeddedHelperFiles fs.FS) *App {
 		options = append(options, session.WithStore(stateStore))
 	}
 	manager := session.NewManager(provider, options...)
+	if err != nil {
+		manager.AppendLog("ERROR", "state store unavailable: "+err.Error())
+	} else {
+		manager.AppendLog("INFO", "state store loaded")
+	}
 	return &App{
 		provider: provider,
 		manager:  manager,
@@ -107,6 +112,7 @@ func (a *App) startup(ctx context.Context) {
 				runtime.EventsEmit(ctx, "session:metrics", metrics)
 			}
 		})
+		a.manager.AppendLog("INFO", "application startup initialized")
 		go func() {
 			state := a.checkForUpdates(ctx)
 			runtime.EventsEmit(ctx, "update:state", state)
@@ -132,5 +138,7 @@ func (a *App) shutdown(context.Context) {
 	if a.tray != nil {
 		a.tray.Stop()
 	}
-	_ = a.manager.Shutdown()
+	if err := a.manager.Shutdown(); err != nil {
+		log.Printf("application shutdown: %v", err)
+	}
 }

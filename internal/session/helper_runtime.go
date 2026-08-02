@@ -9,11 +9,17 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 )
 
-func newSingboxRuntime() *singbox.Runtime {
+func newSingboxRuntime(appendLog func(string, string)) *singbox.Runtime {
+	logEvent := func(level, message string) {
+		if appendLog != nil {
+			appendLog(level, message)
+		}
+	}
 	runtime := &singbox.Runtime{}
 	runtime.PrivilegedStart = func(
 		ctx context.Context, spec singbox.SessionSpec,
 	) (func(context.Context) error, error) {
+		logEvent("INFO", "ensuring privileged helper is ready")
 		if err := helper.EnsureInstall(ctx); err != nil {
 			return nil, fmt.Errorf("ensure privileged helper: %w", err)
 		}
@@ -26,6 +32,7 @@ func newSingboxRuntime() *singbox.Runtime {
 				return nil, fmt.Errorf("helper start session: %w", err)
 			}
 			// Crash/reload can leave a privileged TUN behind. Clear it once and retry.
+			logEvent("WARN", "leftover privileged TUN session detected; stopping it before retry")
 			if _, stopErr := client.StopAll(ctx); stopErr != nil {
 				return nil, fmt.Errorf("helper start session: %w (stop-all: %v)", err, stopErr)
 			}
@@ -33,6 +40,7 @@ func newSingboxRuntime() *singbox.Runtime {
 				return nil, fmt.Errorf("helper start session: %w", err)
 			}
 		}
+		logEvent("INFO", "privileged TUN session started")
 		return func(stopCtx context.Context) error {
 			_, err := client.Stop(stopCtx, spec.ID)
 			return err

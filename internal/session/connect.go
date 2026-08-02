@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"sync"
 	"time"
 
@@ -17,7 +16,9 @@ import (
 
 func (m *Manager) Connect(parent context.Context, request Request) error {
 	if request.Context == "" {
-		return errors.New("context is required")
+		err := errors.New("context is required")
+		m.AppendLog("ERROR", "connection request rejected: "+err.Error())
+		return err
 	}
 	if request.Namespace == "" {
 		request.Namespace = "default"
@@ -25,7 +26,9 @@ func (m *Manager) Connect(parent context.Context, request Request) error {
 	m.mu.Lock()
 	if m.cancel != nil {
 		m.mu.Unlock()
-		return errors.New("a connection is already active")
+		err := errors.New("a connection is already active")
+		m.AppendLog("WARN", "connection request rejected: "+err.Error())
+		return err
 	}
 	ctx, cancel := context.WithCancel(parent)
 	done := make(chan struct{})
@@ -41,7 +44,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	runtime := newSessionRuntime()
 	defer func() {
 		if err := runtime.Close(); err != nil {
-			log.Printf("close session runtime: %v", err)
+			m.recordLog("ERROR", fmt.Sprintf("close session runtime: %v", err))
 		}
 		m.mu.RLock()
 		currentRun := m.done == done
@@ -106,6 +109,18 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	} else {
 		m.AppendLog("INFO", "kubernetes version unavailable")
 	}
+	gatewayMode := "preinstalled"
+	if caps.GatewayInstall {
+		gatewayMode = "managed"
+	}
+	inventoryScope := "namespaced"
+	if caps.InventoryCluster {
+		inventoryScope = "cluster"
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"cluster access verified: gateway=%s inventory=%s",
+		gatewayMode, inventoryScope,
+	))
 	for _, issue := range caps.Issues {
 		m.AppendLog("INFO", issue)
 	}
@@ -136,6 +151,9 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	if ctx.Err() != nil {
 		return
 	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"gateway ready: pod=%s ip=%s", gateway.Name, gateway.IP,
+	))
 
 	state.Phase = PhaseDiscovering
 	state.Message = "Discovering Pods, Services, and cluster DNS"
@@ -169,6 +187,11 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.DNSNamespace = dnsNamespace
 	state.Network = inspectNetwork(discovery)
 	m.publish(state)
+	m.AppendLog("INFO", fmt.Sprintf(
+		"network discovered: podCIDRs=%d serviceCIDRs=%d serviceIPs=%d dns=%s",
+		len(discovery.PodCIDRs), len(discovery.ServiceCIDRs), len(discovery.ServiceIPs),
+		discovery.DNSServer,
+	))
 	for _, issue := range state.Network.Issues {
 		m.AppendLog("WARN", issue.Message)
 	}
@@ -181,6 +204,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("Gateway port-forward", forwarder)
+	m.AppendLog("INFO", "gateway channel established at "+forwarder.Address())
 	if ctx.Err() != nil {
 		return
 	}
@@ -189,6 +213,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		m.fail(ctx, state, "Could not start the Service Intercept control channel", err)
 		return
 	}
+	m.AppendLog("INFO", "service intercept control channel ready")
 	var interceptCloseOnce sync.Once
 	closeIntercept := closerFunc(func() {
 		interceptCloseOnce.Do(func() {
@@ -211,6 +236,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("SOCKS Bridge", bridge)
+	m.AppendLog("INFO", "local SOCKS bridge listening at "+bridge.Addr().String())
 	if ctx.Err() != nil {
 		return
 	}
@@ -235,6 +261,10 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("sing-box core", core)
+	m.AppendLog("INFO", fmt.Sprintf(
+		"sing-box TUN started: dnsNamespace=%s hostAliases=%d",
+		dnsNamespace, len(hosts),
+	))
 	if ctx.Err() != nil {
 		return
 	}
@@ -259,6 +289,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		request.Context,
 		trackedPortForwardDialer(trafficEndpoints.PortForward, tracker),
 	)
+	m.AppendLog("INFO", "feature traffic routes ready")
 	runtime.AddFunc("feature traffic bindings", func() {
 		m.intercept.SetTrafficDialers(intercept.TrafficDialers{})
 		m.portfwd.StopRouted()
@@ -291,7 +322,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	m.AppendLog("INFO", fmt.Sprintf("connected to context %s", request.Context))
 	if m.store != nil {
 		if err := m.store.SetConnected(request.Context, request.Namespace, true); err != nil {
-			log.Printf("persist connected state: %v", err)
+			m.AppendLog("ERROR", fmt.Sprintf("persist connected state: %v", err))
 		}
 	}
 	m.probeClusterDNS(ctx, state, core)
@@ -304,6 +335,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	runtime.Add("inventory watcher", inventory)
+	m.recordLog("INFO", "cluster inventory watcher started")
 
 	m.serveConnected(ctx, state, core, request.Context, bridge, runtime)
 }
