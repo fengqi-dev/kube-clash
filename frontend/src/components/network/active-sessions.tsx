@@ -176,7 +176,6 @@ export function ActiveSessions({
       description: `${(item.protocol || "tcp").toUpperCase()} ${item.address} → :${item.remotePort}`,
       routes: [
         {
-          testedSegments: [0],
           nodes: [
             { label: t("network.flowLocalClient"), role: "user" },
             { label: item.address, role: "accent" },
@@ -226,7 +225,6 @@ export function ActiveSessions({
         ? [
             {
               label: t("network.flowPrimary"),
-              testedSegments: [1],
               nodes: [
                 { label: t("network.flowClusterClient"), role: "alt" },
                 { label: t("network.flowGatewayMirror"), role: "accent" },
@@ -246,7 +244,6 @@ export function ActiveSessions({
           ]
         : [
             {
-              testedSegments: [1, 2],
               nodes: [
                 { label: t("network.flowClusterClient"), role: "alt" },
                 { label: service, role: "alt" },
@@ -361,7 +358,7 @@ export function ActiveSessions({
                   {t(
                     item.kind === "pod"
                       ? "network.typePodPortForward"
-                      : "network.typeNetworkPortForward",
+                      : "network.typeServicePortForward",
                   )}
                 </TableCell>
                 <TableCell className="font-medium">
