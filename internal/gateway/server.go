@@ -93,6 +93,12 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader) {
 	defer client.Close()
 	control, err := s.authorizeSession(header)
 	if err != nil {
+		// WriteOpen sends the header and open body together. Drain that bounded
+		// body before closing so Windows does not turn the close into a TCP RST
+		// that discards the status response.
+		_ = client.SetReadDeadline(time.Now().Add(time.Second))
+		_, _ = tunnel.ReadOpenBody(client, header.Command)
+		_ = client.SetReadDeadline(time.Time{})
 		_ = tunnel.WriteStatus(client, err)
 		return
 	}

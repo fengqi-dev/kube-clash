@@ -276,7 +276,7 @@ jobs:
           go test -tags=e2e ./e2e/platform ./internal/helper -count=1 -v
 
       - name: Uninstall helper
-        if: always()
+        if: always() && hashFiles('build/embedded/kubeloop-helper-uninstall.exe') != ''
         run: >
           go run ./e2e/scripts/manage-helper.go
           --operation uninstall
