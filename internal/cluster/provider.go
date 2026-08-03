@@ -127,28 +127,8 @@ func (p *Provider) Discover(ctx context.Context, contextName string, namespaces 
 	}
 
 	podCIDRs := make(map[string]struct{})
-	nodeIPs := make(map[netip.Addr]struct{})
 	if nodes, nodeErr := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); nodeErr == nil {
-		for _, node := range nodes.Items {
-			for _, cidr := range node.Spec.PodCIDRs {
-				if prefix, parseErr := netip.ParsePrefix(cidr); parseErr == nil {
-					podCIDRs[prefix.Masked().String()] = struct{}{}
-				}
-			}
-			if node.Spec.PodCIDR != "" {
-				if prefix, parseErr := netip.ParsePrefix(node.Spec.PodCIDR); parseErr == nil {
-					podCIDRs[prefix.Masked().String()] = struct{}{}
-				}
-			}
-			for _, addr := range node.Status.Addresses {
-				if addr.Type != corev1.NodeInternalIP && addr.Type != corev1.NodeExternalIP {
-					continue
-				}
-				if ip, parseErr := netip.ParseAddr(addr.Address); parseErr == nil {
-					nodeIPs[ip] = struct{}{}
-				}
-			}
-		}
+		podCIDRs = collectNodePodCIDRs(nodes.Items)
 	}
 
 	var pods []corev1.Pod
@@ -187,13 +167,6 @@ func (p *Provider) Discover(ctx context.Context, contextName string, namespaces 
 		}
 	}
 
-	// Node PodCIDRs can be narrower than the real pod network (common on
-	// Minikube). Always add host routes for observed Pod IPs that fall
-	// outside discovered prefixes so TUN + reverse DNS still cover them.
-	// Skip hostNetwork / node IPs: routing those into TUN hijacks the API
-	// server and other host-path traffic (e.g. minikube 192.168.64.x).
-	addObservedPodIPs(podCIDRs, pods, nodeIPs)
-
 	serviceIPs := make(map[string]struct{})
 	dnsServer := ""
 	for _, service := range services {
@@ -222,6 +195,23 @@ func (p *Provider) Discover(ctx context.Context, contextName string, namespaces 
 		Services:     len(services),
 		Deployments:  deployments,
 	}, nil
+}
+
+func collectNodePodCIDRs(nodes []corev1.Node) map[string]struct{} {
+	podCIDRs := make(map[string]struct{})
+	for _, node := range nodes {
+		for _, cidr := range node.Spec.PodCIDRs {
+			if prefix, parseErr := netip.ParsePrefix(cidr); parseErr == nil {
+				podCIDRs[prefix.Masked().String()] = struct{}{}
+			}
+		}
+		if node.Spec.PodCIDR != "" {
+			if prefix, parseErr := netip.ParsePrefix(node.Spec.PodCIDR); parseErr == nil {
+				podCIDRs[prefix.Masked().String()] = struct{}{}
+			}
+		}
+	}
+	return podCIDRs
 }
 
 func discoverServiceCIDRs(ctx context.Context, client kubernetes.Interface) []string {
@@ -265,43 +255,6 @@ func serviceSubnetFromKubeadm(ctx context.Context, client kubernetes.Interface) 
 		return "", err
 	}
 	return strings.TrimSpace(parsed.Networking.ServiceSubnet), nil
-}
-
-// addObservedPodIPs adds /32 (or /128) routes for Pod IPs outside known
-// node PodCIDRs. Host-network pods and node addresses are excluded so TUN
-// does not capture the Kubernetes API / node dataplane.
-func addObservedPodIPs(
-	podCIDRs map[string]struct{},
-	pods []corev1.Pod,
-	nodeIPs map[netip.Addr]struct{},
-) {
-	addPodIP := func(raw string) {
-		ip, parseErr := netip.ParseAddr(raw)
-		if parseErr != nil {
-			return
-		}
-		if _, isNode := nodeIPs[ip]; isNode {
-			return
-		}
-		for cidr := range podCIDRs {
-			prefix, prefixErr := netip.ParsePrefix(cidr)
-			if prefixErr == nil && prefix.Contains(ip) {
-				return
-			}
-		}
-		podCIDRs[netip.PrefixFrom(ip, ip.BitLen()).String()] = struct{}{}
-	}
-	for _, pod := range pods {
-		if pod.Spec.HostNetwork {
-			continue
-		}
-		for _, item := range pod.Status.PodIPs {
-			addPodIP(item.IP)
-		}
-		if pod.Status.PodIP != "" {
-			addPodIP(pod.Status.PodIP)
-		}
-	}
 }
 
 func sortedKeys(values map[string]struct{}) []string {
