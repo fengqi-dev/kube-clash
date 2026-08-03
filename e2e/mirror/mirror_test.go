@@ -22,7 +22,10 @@ func TestMain(m *testing.M) { harness.RunMain(m) }
 
 func TestTUNServiceMirrorTCPAndUDP(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 1*time.Minute)
+	// The test performs multiple cluster probes serially. Each mirror activation
+	// probe may take up to 90 seconds on a cold CI node, so keep the session
+	// context alive long enough for both TCP and UDP paths plus setup/cleanup.
+	ctx, cancel := harness.TestContext(t, 5*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)
@@ -129,6 +132,9 @@ func waitMirrorActive(
 	var lastProbe string
 	var lastProbeErr error
 	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%s mirror probe canceled: %w (last=%q)", protocol, err, lastProbe)
+		}
 		drainMirror(mirrored)
 		got, err := harness.ProbeFromCluster(ctx, client, clusterIP, port, protocol, payload)
 		lastProbe, lastProbeErr = got, err
@@ -142,7 +148,11 @@ func waitMirrorActive(
 			case <-time.After(2 * time.Second):
 			}
 		}
-		time.Sleep(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			return fmt.Errorf("%s mirror probe canceled: %w (last=%q)", protocol, ctx.Err(), lastProbe)
+		case <-time.After(2 * time.Second):
+		}
 	}
 	if lastProbeErr != nil {
 		return fmt.Errorf("%s mirror probe failed: %v (last=%q)", protocol, lastProbeErr, lastProbe)
