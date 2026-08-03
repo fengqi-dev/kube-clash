@@ -11,13 +11,15 @@ import (
 )
 
 const (
-	opPing     = "ping"
-	opStart    = "start"
-	opUpdate   = "update"
-	opStop     = "stop"
-	opDial     = "dial"
-	opEvents   = "events"
-	maxRPCSize = 64 << 10
+	opPing           = "ping"
+	opStart          = "start"
+	opUpdate         = "update"
+	opStop           = "stop"
+	opDial           = "dial"
+	opEvents         = "events"
+	opBridgeClient   = "bridge-client"
+	opBridgeUpstream = "bridge-upstream"
+	maxRPCSize       = 64 << 10
 )
 
 type request struct {
@@ -27,6 +29,7 @@ type request struct {
 	Targets       []tunnel.InspectorTarget `json:"targets,omitempty"`
 	Target        *tunnel.InspectorTarget  `json:"target,omitempty"`
 	TargetAddress string                   `json:"targetAddress,omitempty"`
+	PairID        string                   `json:"pairID,omitempty"`
 }
 
 type response struct {

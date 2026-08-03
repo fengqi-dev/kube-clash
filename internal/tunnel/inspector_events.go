@@ -11,13 +11,15 @@ import (
 const (
 	InspectorEventVersion1 byte = 1
 
-	InspectorEventFlowStart byte = 1
-	InspectorEventHeaders   byte = 2
-	InspectorEventBody      byte = 3
-	InspectorEventFlowEnd   byte = 4
-	InspectorEventError     byte = 5
+	InspectorEventFlowStart   byte = 1
+	InspectorEventHeaders     byte = 2
+	InspectorEventBody        byte = 3
+	InspectorEventFlowEnd     byte = 4
+	InspectorEventError       byte = 5
+	InspectorEventGRPCMessage byte = 6
 
-	maxInspectorEventFrameSize = 1 << 20
+	// A 1 MiB captured body expands to roughly 1.34 MiB in JSON base64.
+	maxInspectorEventFrameSize = 2 << 20
 	maxInspectorFlowIDSize     = 256
 )
 
@@ -33,7 +35,7 @@ func WriteInspectorEvent(w io.Writer, event InspectorEvent) error {
 	if event.Version != InspectorEventVersion1 {
 		return fmt.Errorf("unsupported Inspector event version %d", event.Version)
 	}
-	if event.Type < InspectorEventFlowStart || event.Type > InspectorEventError {
+	if event.Type < InspectorEventFlowStart || event.Type > InspectorEventGRPCMessage {
 		return fmt.Errorf("unsupported Inspector event type %d", event.Type)
 	}
 	if event.FlowID == "" || len(event.FlowID) > maxInspectorFlowIDSize {
@@ -77,7 +79,7 @@ func ReadInspectorEvent(r io.Reader) (InspectorEvent, error) {
 			"unsupported Inspector event version %d", event.Version,
 		)
 	}
-	if event.Type < InspectorEventFlowStart || event.Type > InspectorEventError {
+	if event.Type < InspectorEventFlowStart || event.Type > InspectorEventGRPCMessage {
 		return InspectorEvent{}, fmt.Errorf("unsupported Inspector event type %d", event.Type)
 	}
 	flowIDSize := int(binary.BigEndian.Uint16(frame[2:4]))

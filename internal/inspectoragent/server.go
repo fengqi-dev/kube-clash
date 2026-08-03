@@ -14,6 +14,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
@@ -22,6 +23,7 @@ import (
 const (
 	defaultMaxSessions = 16
 	eventQueueSize     = 512
+	maxEventQueueBytes = 50 << 20
 )
 
 type Server struct {
@@ -43,9 +45,13 @@ type agentSession struct {
 	targets     map[string]tunnel.InspectorTarget
 	tlsBypass   map[string]string
 	connections map[net.Conn]struct{}
+	bridges     map[string]*bridgePair
 	subscribed  bool
 	closed      bool
 	events      chan tunnel.InspectorEvent
+	eventBytes  atomic.Int64
+	dropped     atomic.Uint64
+	degraded    atomic.Bool
 	done        chan struct{}
 	closeOnce   sync.Once
 }
@@ -96,9 +102,159 @@ func (s *Server) handle(connection net.Conn) {
 		s.handleDial(connection, reader, value)
 	case opEvents:
 		s.handleEvents(connection, value.SessionID)
+	case opBridgeClient, opBridgeUpstream:
+		s.handleBridge(connection, reader, value)
 	default:
 		_ = writeJSON(connection, response{Error: "unsupported Inspector Agent operation"})
 	}
+}
+
+type bridgePair struct {
+	target         tunnel.InspectorTarget
+	client         net.Conn
+	clientReader   *bufio.Reader
+	upstream       net.Conn
+	upstreamReader *bufio.Reader
+	done           chan struct{}
+	started        chan struct{}
+	startOnce      sync.Once
+	doneOnce       sync.Once
+}
+
+func (s *Server) handleBridge(
+	connection net.Conn, reader *bufio.Reader, value request,
+) {
+	session := s.session(value.SessionID)
+	if session == nil || value.Target == nil || value.PairID == "" {
+		_ = writeJSON(connection, response{Error: "Inspector bridge request is invalid"})
+		return
+	}
+	target, err := session.authorizeLogicalTarget(*value.Target)
+	if err != nil {
+		_ = writeJSON(connection, response{Error: err.Error()})
+		return
+	}
+	if !session.attach(connection) {
+		_ = writeJSON(connection, response{Error: "Inspector worker is stopping"})
+		return
+	}
+	defer session.detach(connection)
+
+	session.mu.Lock()
+	pair := session.bridges[value.PairID]
+	if pair == nil {
+		pair = &bridgePair{
+			target: target, done: make(chan struct{}), started: make(chan struct{}),
+		}
+		session.bridges[value.PairID] = pair
+	}
+	if pair.target.ID != target.ID {
+		session.mu.Unlock()
+		_ = writeJSON(connection, response{Error: "Inspector bridge target mismatch"})
+		return
+	}
+	switch value.Op {
+	case opBridgeClient:
+		if pair.client != nil {
+			session.mu.Unlock()
+			_ = writeJSON(connection, response{Error: "Inspector bridge client already attached"})
+			return
+		}
+		pair.client, pair.clientReader = connection, reader
+	case opBridgeUpstream:
+		if pair.upstream != nil {
+			session.mu.Unlock()
+			_ = writeJSON(connection, response{Error: "Inspector bridge upstream already attached"})
+			return
+		}
+		pair.upstream, pair.upstreamReader = connection, reader
+	}
+	if pair.client != nil && pair.upstream != nil {
+		pair.startOnce.Do(func() {
+			close(pair.started)
+			go session.serveBridge(value.PairID, pair)
+		})
+	}
+	session.mu.Unlock()
+	if err := writeJSON(connection, response{OK: true}); err != nil {
+		return
+	}
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	select {
+	case <-pair.started:
+		select {
+		case <-pair.done:
+		case <-session.done:
+		}
+	case <-pair.done:
+	case <-session.done:
+	case <-timer.C:
+		select {
+		case <-pair.started:
+			select {
+			case <-pair.done:
+			case <-session.done:
+			}
+		default:
+			session.cancelBridge(value.PairID, pair)
+		}
+	}
+}
+
+func (p *bridgePair) finish() {
+	p.doneOnce.Do(func() { close(p.done) })
+}
+
+func (s *agentSession) cancelBridge(pairID string, pair *bridgePair) {
+	s.mu.Lock()
+	if s.bridges[pairID] == pair {
+		delete(s.bridges, pairID)
+	}
+	client := pair.client
+	upstream := pair.upstream
+	s.mu.Unlock()
+	if client != nil {
+		_ = client.Close()
+	}
+	if upstream != nil {
+		_ = upstream.Close()
+	}
+	pair.finish()
+}
+
+func (s *agentSession) authorizeLogicalTarget(
+	target tunnel.InspectorTarget,
+) (tunnel.InspectorTarget, error) {
+	s.mu.RLock()
+	expected, exists := s.targets[tunnel.InspectorTargetKey(target.Host, target.Port)]
+	closed := s.closed
+	s.mu.RUnlock()
+	if closed || !exists || expected.ID != target.ID {
+		return tunnel.InspectorTarget{}, errors.New("Inspector target is not authorized")
+	}
+	return expected, nil
+}
+
+func (s *agentSession) serveBridge(pairID string, pair *bridgePair) {
+	defer func() {
+		s.mu.Lock()
+		delete(s.bridges, pairID)
+		s.mu.Unlock()
+		pair.finish()
+	}()
+	target := pair.target
+	target.FlowSource = "cluster"
+	if target.Protocol == "https" || target.Protocol == "http2" ||
+		target.Protocol == "grpc" {
+		serveHTTPSConnection(
+			s, pair.client, pair.clientReader, pair.upstream, target,
+		)
+		return
+	}
+	serveHTTPConnection(
+		s, pair.client, pair.clientReader, pair.upstream, target, nil,
+	)
 }
 
 func (s *Server) start(value request) error {
@@ -127,6 +283,7 @@ func (s *Server) start(value request) error {
 		targets:     inspectorTargets(value.Config.Targets),
 		tlsBypass:   make(map[string]string),
 		connections: make(map[net.Conn]struct{}),
+		bridges:     make(map[string]*bridgePair),
 		events:      make(chan tunnel.InspectorEvent, eventQueueSize),
 		done:        make(chan struct{}),
 	}
@@ -158,7 +315,8 @@ func (s *Server) update(value request) error {
 	}
 	if session.tls == nil {
 		for _, target := range value.Targets {
-			if target.Protocol == "https" {
+			if target.Protocol == "https" || target.Protocol == "http2" ||
+				target.Protocol == "grpc" {
 				session.mu.Unlock()
 				return errors.New("adding HTTPS targets requires restarting Inspector with TLS")
 			}
@@ -185,7 +343,10 @@ func (s *Server) stop(sessionID string) error {
 		return nil
 	}
 	session.close()
-	s.logf("worker %s stopped", sessionID)
+	s.logf(
+		"worker %s stopped: dropped_events=%d",
+		sessionID, session.dropped.Load(),
+	)
 	return nil
 }
 
@@ -230,7 +391,8 @@ func (s *Server) handleDial(
 		return
 	}
 	defer session.detach(upstream)
-	if target.Protocol == "https" {
+	if target.Protocol == "https" || target.Protocol == "http2" ||
+		target.Protocol == "grpc" {
 		upstreamTLS, metadata, err := prepareHTTPSUpstream(session, upstream, target)
 		if err != nil {
 			_ = writeJSON(client, response{Error: err.Error()})
@@ -266,13 +428,20 @@ func (s *Server) handleEvents(connection net.Conn, sessionID string) {
 		session.mu.Lock()
 		session.subscribed = false
 		session.mu.Unlock()
+		s.logf("worker %s event subscriber disconnected", sessionID)
 	}()
 	if err := writeJSON(connection, response{OK: true}); err != nil {
 		return
 	}
+	s.logf("worker %s event subscriber connected", sessionID)
 	for {
 		select {
 		case event := <-session.events:
+			session.releaseEvent(event)
+			if session.eventBytes.Load() < maxEventQueueBytes/2 &&
+				session.degraded.CompareAndSwap(true, false) {
+				session.logf("worker %s event queue recovered", session.id)
+			}
 			_ = connection.SetWriteDeadline(time.Now().Add(5 * time.Second))
 			if err := tunnel.WriteInspectorEvent(connection, event); err != nil {
 				return
@@ -327,6 +496,17 @@ func (s *agentSession) authorizeTarget(
 		return tunnel.InspectorTarget{}, errors.New("Inspector target address must be an IP")
 	}
 	address = address.Unmap()
+	if len(expected.Addresses) > 0 {
+		for _, allowed := range expected.Addresses {
+			allowedAddress, parseErr := netip.ParseAddr(allowed)
+			if parseErr == nil && allowedAddress.Unmap() == address {
+				return expected, nil
+			}
+		}
+		return tunnel.InspectorTarget{}, errors.New(
+			"Inspector target address is outside the authorized Service",
+		)
+	}
 	if !address.IsPrivate() || address.IsLoopback() ||
 		address.IsLinkLocalUnicast() || address.IsMulticast() {
 		return tunnel.InspectorTarget{}, errors.New("Inspector target address is not private")
@@ -408,21 +588,75 @@ func (s *agentSession) close() {
 }
 
 func (s *agentSession) emit(event tunnel.InspectorEvent) {
+	if !s.reserveEvent(event) {
+		if event.Type == tunnel.InspectorEventBody ||
+			event.Type == tunnel.InspectorEventGRPCMessage {
+			s.recordEventDrop("memory-limit")
+			return
+		}
+		reserved := false
+		for !reserved {
+			select {
+			case discarded := <-s.events:
+				s.releaseEvent(discarded)
+				s.recordEventDrop("metadata-priority")
+				reserved = s.reserveEvent(event)
+			default:
+				s.recordEventDrop("memory-limit")
+				return
+			}
+		}
+	}
 	select {
 	case s.events <- event:
 	default:
-		if event.Type == tunnel.InspectorEventBody {
+		if event.Type == tunnel.InspectorEventBody ||
+			event.Type == tunnel.InspectorEventGRPCMessage {
+			s.releaseEvent(event)
+			s.recordEventDrop("queue-full")
 			return
 		}
 		select {
-		case <-s.events:
+		case discarded := <-s.events:
+			s.releaseEvent(discarded)
+			s.recordEventDrop("metadata-priority")
 		default:
 		}
 		select {
 		case s.events <- event:
 		default:
+			s.releaseEvent(event)
+			s.recordEventDrop("queue-race")
 		}
 	}
+}
+
+func (s *agentSession) recordEventDrop(reason string) {
+	s.dropped.Add(1)
+	if s.degraded.CompareAndSwap(false, true) && s.logf != nil {
+		s.logf("worker %s event queue degraded: reason=%s", s.id, reason)
+	}
+}
+
+func inspectorEventSize(event tunnel.InspectorEvent) int64 {
+	return int64(len(event.FlowID) + len(event.Payload) + 16)
+}
+
+func (s *agentSession) reserveEvent(event tunnel.InspectorEvent) bool {
+	size := inspectorEventSize(event)
+	for {
+		current := s.eventBytes.Load()
+		if current+size > maxEventQueueBytes {
+			return false
+		}
+		if s.eventBytes.CompareAndSwap(current, current+size) {
+			return true
+		}
+	}
+}
+
+func (s *agentSession) releaseEvent(event tunnel.InspectorEvent) {
+	s.eventBytes.Add(-inspectorEventSize(event))
 }
 
 func ListenUnix(ctx context.Context, socketPath string) (net.Listener, error) {

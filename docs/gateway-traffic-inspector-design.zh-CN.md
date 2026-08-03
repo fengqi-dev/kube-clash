@@ -1,8 +1,8 @@
 # Gateway Traffic Inspector 设计
 
-> 状态：Phase 0、Phase 1 已实现；Phase 2 HTTPS 基础链路已实现；Phase 3–5 为提案
+> 状态：Phase 0–5 已实现
 > 范围：HTTP/1.1、HTTPS、HTTP/2、gRPC
-> 当前实现：KCG2 + `native-http/1` 只读 Inspector Agent
+> 当前实现：KCG2 + Go 原生 HTTP/1.1、TLS、HTTP/2、gRPC 只读 Inspector Agent
 
 ## 1. 背景
 
@@ -29,8 +29,8 @@ Gateway 收到 TCP open 请求后解析目标地址，在集群内直接连接�
 本方案采用：
 
 1. **Inspector 位于 Gateway 层**，不在工作站额外创建 TUN 或透明代理。
-2. **Inspector Engine 可替换**，由独立 Inspector Agent sidecar 托管。Phase 1 使用
-   `native-http/1`；mitmproxy 保留为 Phase 2 以后 TLS/HTTP2/gRPC Engine 的候选实现。
+2. **Inspector Engine 可替换**，由独立 Inspector Agent sidecar 托管。当前使用 Go 原生
+   HTTP/1.1、TLS、HTTP/2 和 gRPC Engine；mitmproxy 仍可作为未来替换实现。
 3. **每个桌面 Session 使用隔离的 Inspector worker 和短期 Intermediate CA**。
 4. **Gateway 根据 Session、目标 IP 和端口显式选择 Inspector**，不自动接管全部集群流量。
 5. **其他 TCP/UDP 协议默认直接转发**，不经过 mitmproxy。
@@ -124,7 +124,7 @@ flowchart LR
         Gateway["Gateway"]
         Router["Inspector Router"]
         Agent["Inspector Agent"]
-        Worker["Session mitmproxy Worker"]
+        Worker["Session Native Inspector Worker"]
     end
 
     Target["Pod / Service"]
@@ -174,7 +174,7 @@ TUN
   → sing-box
   → SOCKS Bridge
   → Gateway(session token, target)
-  → Session mitmproxy SOCKS5 listener
+  → Session Inspector worker
   → Target
 ```
 
@@ -198,13 +198,11 @@ Gateway 作为 SOCKS5 client，把原始目标交给 worker。worker 在集群�
 
 ### 7.4 反向 Service Intercept
 
-第一阶段只覆盖工作站通过 TUN 发起的 outbound 连接。
+当前实现同时覆盖工作站 TUN outbound 和 Gateway `interceptListener` 收到的集群客户端连接。
+反向连接使用 listener 所属 control session 的 Inspector Policy，并将 Flow 标记为
+`source=cluster`。
 
-第二阶段可在 Gateway `interceptListener` 接收集群客户端连接后，使用 listener 所属
-control session 的 Inspector Policy，将流量送入相同 worker。该路径适用于观察集群内客户端
-访问 Exchange/Mirror Service 的请求。
-
-第二阶段不得改变 Mirror 的 Primary/Shadow 语义；Inspector 位于 Primary 主路径前，Mirror
+该路径不改变 Mirror 的 Primary/Shadow 语义；Inspector 位于 Primary 主路径前，Mirror
 仍由现有 Mirror Engine 决定是否复制本机 Shadow。worker 的 upstream 必须使用 Mirror
 已经保存的原始 Pod `primaryAddrs`，不能重新连接被改写后的 Service ClusterIP，否则流量会
 再次回到 Gateway listener 形成循环。
@@ -423,7 +421,7 @@ Agent 只监听共享 Unix Socket，不监听 Pod IP。职责：
 1. 验证来自 Gateway 的 Session 操作；
 2. 为 Session 创建独立 worker、监听端口和临时目录；
 3. 安装 Session Intermediate CA；
-4. 启动和健康检查 mitmdump；
+4. 启动和健康检查原生协议 worker；
 5. 将 addon event 标记 Session 后发送给 Gateway；
 6. enforce CPU、内存、body、Flow 和 worker 数量限制；
 7. control 断开或 idle timeout 后清理；
@@ -813,8 +811,8 @@ Minikube E2E 覆盖。真实 macOS/Windows TUN + Inspector 可由 self-hosted ru
 
 ### Phase 2：HTTPS
 
-状态：基础链路已完成；已加入 learned pinning fallback、真实 macOS/Windows CA
-Helper E2E 与 Minikube HTTPS E2E。
+状态：已完成；已加入 learned pinning fallback、真实 macOS/Windows CA Helper E2E 与
+Minikube HTTPS E2E。
 
 - Root CA 管理；
 - Intermediate CA；
@@ -825,6 +823,8 @@ Helper E2E 与 Minikube HTTPS E2E。
 
 ### Phase 3：HTTP/2 和 gRPC Unary
 
+状态：已完成。
+
 - HTTP/2 Flow；
 - gRPC framing；
 - metadata/trailers/status；
@@ -833,12 +833,16 @@ Helper E2E 与 Minikube HTTPS E2E。
 
 ### Phase 4：gRPC Streaming
 
+状态：已完成。
+
 - 四类 streaming；
 - 增量 message event；
 - sampling/backpressure；
 - 长连接和 worker recovery。
 
 ### Phase 5：反向 Service 流量
+
+状态：已完成。
 
 - interceptListener Inspector；
 - Exchange/Mirror 语义验证；
@@ -860,20 +864,10 @@ Helper E2E 与 Minikube HTTPS E2E。
 9. gRPC streaming 不需要等待 RPC 结束即可逐条展示 message。
 10. 所有 body 和 Flow 均遵守大小、内存和脱敏限制。
 
-## 26. 待验证事项
+## 26. 后续优化
 
-实现前需要通过 Spike 验证：
-
-1. mitmproxy 使用短期 Intermediate CA 和完整 chain 的行为；
-2. 一个 Agent 管理多个隔离 worker 的实际空闲内存；
-3. mitmproxy addon 对 gRPC streaming chunk 的稳定性；
-4. h2c、TLS ALPN 和 upstream HTTP/2 保真；
-5. Gateway SOCKS client 到 worker 的 half-close 行为；
-6. event channel 在高吞吐 streaming 下的背压参数；
-7. sidecar image 体积和多架构构建；
-8. read-only root filesystem + memory emptyDir 的运行要求；
-9. 共享 Gateway 并发 Session 的容量上限；
-10. mitmproxy 及其依赖的发布许可和 SBOM 要求。
-
-若 Spike 证明多 worker 资源或 gRPC streaming 不满足要求，应保持 Gateway、tunnel 和 UI 契约，
-将 Agent Engine 替换为 Go 原生 HTTP/2/gRPC inspector，而不是修改整体架构。
+1. 在真实高吞吐 streaming 场景继续校准事件采样和队列大小；
+2. 根据生产负载测量一个原生 Session worker 的空闲内存与 CPU；
+3. 增加 self-hosted runner 上的真实 macOS/Windows TUN + Inspector 数据路径；
+4. 评估 gRPC Server Reflection，当前 descriptor 由用户显式上传；
+5. 为指标接入统一的 Prometheus/OpenTelemetry 导出面。

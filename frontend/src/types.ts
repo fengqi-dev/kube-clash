@@ -70,8 +70,13 @@ export interface InspectorTarget {
   id: string;
   host: string;
   port: number;
-  protocol: "http" | "https";
+  protocol: "http" | "https" | "http2" | "grpc";
   captureBody?: boolean;
+  descriptorSet?: string;
+  namespace?: string;
+  service?: string;
+  serviceUID?: string;
+  addresses?: string[];
 }
 
 export interface InspectorConfig {
@@ -228,6 +233,7 @@ export interface ServicePortInfo {
 export interface ServiceInfo {
   name: string;
   namespace: string;
+  uid: string;
   clusterIP: string;
   ports: ServicePortInfo[];
 }

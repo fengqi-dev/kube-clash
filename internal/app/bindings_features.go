@@ -42,9 +42,9 @@ func (a *App) ListMirrors() []intercept.Info {
 func (a *App) StartInspector(config tunnel.InspectorConfig) error {
 	needsTLS := false
 	for _, target := range config.Targets {
-		if strings.EqualFold(strings.TrimSpace(target.Protocol), "https") {
+		switch strings.ToLower(strings.TrimSpace(target.Protocol)) {
+		case "https", "http2", "grpc":
 			needsTLS = true
-			break
 		}
 	}
 	if needsTLS {

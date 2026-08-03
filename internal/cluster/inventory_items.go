@@ -33,6 +33,7 @@ func serviceInfoFromCore(service *corev1.Service) (ServiceInfo, bool) {
 	return ServiceInfo{
 		Name:      service.Name,
 		Namespace: service.Namespace,
+		UID:       string(service.UID),
 		ClusterIP: service.Spec.ClusterIP,
 		Ports:     ports,
 	}, true

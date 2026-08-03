@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bufio"
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -41,14 +42,15 @@ type interceptListener struct {
 }
 
 type pendingStream struct {
-	id        uint64
-	network   byte
-	control   *controlSession
-	ready     chan net.Conn
-	tcpConn   net.Conn
-	udpPacket net.PacketConn
-	assoc     *udpAssociation
-	timer     *time.Timer
+	id          uint64
+	network     byte
+	interceptID string
+	control     *controlSession
+	ready       chan net.Conn
+	tcpConn     net.Conn
+	udpPacket   net.PacketConn
+	assoc       *udpAssociation
+	timer       *time.Timer
 }
 
 type udpAssociation struct {
@@ -282,11 +284,12 @@ func (l *interceptListener) acceptTCP() {
 		}
 		streamID := l.server.nextStream.Add(1)
 		pending := &pendingStream{
-			id:      streamID,
-			network: tunnel.NetworkTCP,
-			control: l.control,
-			ready:   make(chan net.Conn, 1),
-			tcpConn: conn,
+			id:          streamID,
+			network:     tunnel.NetworkTCP,
+			interceptID: l.id,
+			control:     l.control,
+			ready:       make(chan net.Conn, 1),
+			tcpConn:     conn,
 		}
 		if !l.server.offerPending(pending) {
 			_ = conn.Close()
@@ -504,12 +507,45 @@ func (p *pendingStream) serve(tunnelConn net.Conn) {
 	case tunnel.NetworkTCP:
 		defer tunnelConn.Close()
 		defer p.tcpConn.Close()
+		if target, endpoint, ok := p.control.reverseInspectorTarget(p.interceptID); ok {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			clientSide, upstreamSide, err := endpoint.BridgeContext(ctx, target)
+			cancel()
+			if err == nil {
+				relayInspectedReverse(
+					p.tcpConn, tunnelConn, clientSide, upstreamSide,
+				)
+				return
+			}
+			p.control.server.logf(
+				"Inspector reverse fail-open for %s: %v", p.interceptID, err,
+			)
+		}
 		relayTCP(tunnelConn, p.tcpConn)
 	case tunnel.NetworkUDP:
 		p.serveUDP(tunnelConn)
 	default:
 		_ = tunnelConn.Close()
 	}
+}
+
+func relayInspectedReverse(
+	clusterClient, desktopTarget, inspectorClient, inspectorUpstream net.Conn,
+) {
+	defer inspectorClient.Close()
+	defer inspectorUpstream.Close()
+	done := make(chan struct{}, 2)
+	go func() {
+		relayTCP(clusterClient, inspectorClient)
+		done <- struct{}{}
+	}()
+	go func() {
+		relayTCP(desktopTarget, inspectorUpstream)
+		done <- struct{}{}
+	}()
+	<-done
+	_ = clusterClient.Close()
+	_ = desktopTarget.Close()
 }
 
 func (p *pendingStream) serveUDP(tunnelConn net.Conn) {

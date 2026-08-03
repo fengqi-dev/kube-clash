@@ -127,11 +127,15 @@ func prepareHTTPSUpstream(
 	}
 	timeout := 10 * time.Second
 	_ = upstream.SetDeadline(time.Now().Add(timeout))
+	nextProtos := []string{"http/1.1"}
+	if target.Protocol == "http2" || target.Protocol == "grpc" {
+		nextProtos = []string{"h2"}
+	}
 	upstreamTLS := tls.Client(upstream, &tls.Config{
 		MinVersion: tls.VersionTLS12,
 		ServerName: target.Host,
 		RootCAs:    session.tls.upstreamCAs,
-		NextProtos: []string{"http/1.1"},
+		NextProtos: nextProtos,
 	})
 	if err := upstreamTLS.Handshake(); err != nil {
 		return nil, nil, fmt.Errorf("verify upstream TLS: %w", err)
@@ -164,10 +168,14 @@ func serveHTTPSClient(
 	}
 	buffered := &bufferedConn{Conn: client, reader: clientReader}
 	_ = client.SetDeadline(time.Now().Add(timeout))
+	nextProtos := []string{"http/1.1"}
+	if target.Protocol == "http2" || target.Protocol == "grpc" {
+		nextProtos = []string{"h2"}
+	}
 	clientTLS := tls.Server(buffered, &tls.Config{
 		MinVersion:   tls.VersionTLS12,
 		Certificates: []tls.Certificate{*leaf},
-		NextProtos:   []string{"http/1.1"},
+		NextProtos:   nextProtos,
 	})
 	if err := clientTLS.Handshake(); err != nil {
 		session.learnTLSBypass(target)
@@ -179,6 +187,10 @@ func serveHTTPSClient(
 	metadata.Version = tlsVersionName(clientState.Version)
 	metadata.CipherSuite = tls.CipherSuiteName(clientState.CipherSuite)
 	metadata.ALPN = clientState.NegotiatedProtocol
+	if clientState.NegotiatedProtocol == "h2" {
+		serveHTTP2Connection(session, clientTLS, upstreamTLS, target, metadata)
+		return
+	}
 	serveHTTPConnection(
 		session, clientTLS, bufio.NewReader(clientTLS), upstreamTLS, target, metadata,
 	)

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
@@ -22,9 +24,38 @@ type InspectorEndpoint interface {
 	DialContext(
 		context.Context, tunnel.InspectorTarget, string,
 	) (net.Conn, error)
+	BridgeContext(
+		context.Context, tunnel.InspectorTarget,
+	) (net.Conn, net.Conn, error)
 	UpdateTargets(context.Context, []tunnel.InspectorTarget) error
 	Events() <-chan tunnel.InspectorEvent
 	Close() error
+}
+
+func (c *controlSession) reverseInspectorTarget(
+	interceptID string,
+) (tunnel.InspectorTarget, InspectorEndpoint, bool) {
+	parts := strings.Split(interceptID, ":")
+	if len(parts) != 3 || parts[1] != "tcp" {
+		return tunnel.InspectorTarget{}, nil, false
+	}
+	port, err := strconv.ParseUint(parts[2], 10, 16)
+	if err != nil {
+		return tunnel.InspectorTarget{}, nil, false
+	}
+	service := strings.Split(parts[0], "/")
+	if len(service) != 2 {
+		return tunnel.InspectorTarget{}, nil, false
+	}
+	host := fmt.Sprintf("%s.%s.svc", service[1], service[0])
+	c.inspectorMu.RLock()
+	defer c.inspectorMu.RUnlock()
+	if c.inspector == nil {
+		return tunnel.InspectorTarget{}, nil, false
+	}
+	key := tunnel.InspectorTargetKey(host, uint16(port))
+	target, ok := c.inspector.targets[key]
+	return target, c.inspector.endpoint, ok
 }
 
 type inspectorSession struct {
@@ -43,7 +74,7 @@ func (s *Server) SetInspectorEngine(engine InspectorEngine, name string) {
 		s.Capabilities.MaxTargets = 0
 		s.Capabilities.Engine = ""
 	} else {
-		s.Capabilities.Protocols = []string{"http", "https"}
+		s.Capabilities.Protocols = []string{"http", "https", "http2", "grpc"}
 		s.Capabilities.MaxBodySize = 1 << 20
 		s.Capabilities.MaxTargets = tunnel.MaxInspectorTargets
 		s.Capabilities.Engine = name
@@ -189,9 +220,22 @@ func (c *controlSession) writeInspectorEvent(event tunnel.InspectorEvent) {
 func inspectorTargetMap(
 	targets []tunnel.InspectorTarget,
 ) map[string]tunnel.InspectorTarget {
-	result := make(map[string]tunnel.InspectorTarget, len(targets))
+	result := make(map[string]tunnel.InspectorTarget, len(targets)*2)
 	for _, target := range targets {
 		result[tunnel.InspectorTargetKey(target.Host, target.Port)] = target
+		if len(target.Addresses) > 0 {
+			for _, address := range target.Addresses {
+				result[tunnel.InspectorTargetKey(address, target.Port)] = target
+			}
+			continue
+		}
+		addresses, err := net.LookupHost(target.Host)
+		if err != nil {
+			continue
+		}
+		for _, address := range addresses {
+			result[tunnel.InspectorTargetKey(address, target.Port)] = target
+		}
 	}
 	return result
 }

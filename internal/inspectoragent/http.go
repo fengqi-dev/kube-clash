@@ -54,6 +54,37 @@ func serveHTTPConnection(
 	target tunnel.InspectorTarget,
 	tlsMetadata *tlsFlowMetadata,
 ) {
+	if target.Protocol == "http2" || target.Protocol == "grpc" {
+		serveHTTP2Connection(
+			session,
+			&bufferedConn{Conn: client, reader: clientReader},
+			upstream,
+			target,
+			tlsMetadata,
+		)
+		return
+	}
+	if target.Protocol == "http" {
+		_ = client.SetReadDeadline(time.Now().Add(2 * time.Second))
+		prefix, err := clientReader.Peek(8)
+		_ = client.SetReadDeadline(time.Time{})
+		if err != nil || !isHTTP1Prefix(prefix) {
+			relayInspectorConnections(
+				&bufferedConn{Conn: client, reader: clientReader}, upstream,
+			)
+			return
+		}
+		if string(prefix[:3]) == "PRI" {
+			serveHTTP2Connection(
+				session,
+				&bufferedConn{Conn: client, reader: clientReader},
+				upstream,
+				target,
+				tlsMetadata,
+			)
+			return
+		}
+	}
 	upstreamReader := bufio.NewReader(upstream)
 	for {
 		request, err := http.ReadRequest(clientReader)
@@ -71,6 +102,7 @@ func serveHTTPConnection(
 			"authority":   request.Host,
 			"path":        request.URL.EscapedPath(),
 			"startedAt":   startedAt.UTC(),
+			"source":      inspectorFlowSource(target),
 		}
 		if tlsMetadata != nil {
 			start["tls"] = tlsMetadata
@@ -158,6 +190,40 @@ func serveHTTPConnection(
 	}
 }
 
+func isHTTP1Prefix(prefix []byte) bool {
+	value := string(prefix)
+	for _, method := range []string{
+		"GET ", "POST ", "PUT ", "PATCH ", "DELETE ", "HEAD ",
+		"OPTIONS ", "CONNECT ", "TRACE ", "PRI ",
+	} {
+		if strings.HasPrefix(value, method) {
+			return true
+		}
+	}
+	return false
+}
+
+func relayInspectorConnections(left, right net.Conn) {
+	done := make(chan struct{}, 2)
+	copyStream := func(destination, source net.Conn) {
+		_, _ = io.Copy(destination, source)
+		if value, ok := destination.(interface{ CloseWrite() error }); ok {
+			_ = value.CloseWrite()
+		}
+		done <- struct{}{}
+	}
+	go copyStream(left, right)
+	go copyStream(right, left)
+	<-done
+}
+
+func inspectorFlowSource(target tunnel.InspectorTarget) string {
+	if target.FlowSource != "" {
+		return target.FlowSource
+	}
+	return "workstation"
+}
+
 func emitBody(
 	session *agentSession,
 	flowID string,
@@ -210,7 +276,11 @@ func redactHeaders(headers http.Header) http.Header {
 }
 
 func sensitiveHeader(name string) bool {
-	switch strings.ToLower(strings.TrimSpace(name)) {
+	normalized := strings.ToLower(strings.TrimSpace(name))
+	if strings.HasSuffix(normalized, "-bin") {
+		return true
+	}
+	switch normalized {
 	case "authorization", "proxy-authorization", "cookie", "set-cookie",
 		"x-api-key", "x-auth-token":
 		return true

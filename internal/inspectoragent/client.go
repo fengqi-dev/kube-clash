@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"net"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
+
+var nextBridgeID atomic.Uint64
 
 type Client struct {
 	SocketPath string
@@ -91,6 +94,52 @@ func (e *Endpoint) DialContext(
 	return connection, nil
 }
 
+func (e *Endpoint) BridgeContext(
+	ctx context.Context, target tunnel.InspectorTarget,
+) (net.Conn, net.Conn, error) {
+	client, err := e.client.dial(ctx)
+	if err != nil {
+		return nil, nil, err
+	}
+	upstream, err := e.client.dial(ctx)
+	if err != nil {
+		_ = client.Close()
+		return nil, nil, err
+	}
+	closeBoth := func() {
+		_ = client.Close()
+		_ = upstream.Close()
+	}
+	setConnectionDeadline(client, ctx, 10*time.Second)
+	setConnectionDeadline(upstream, ctx, 10*time.Second)
+	pairID := fmt.Sprintf("%s-%d", e.sessionID, nextBridgeID.Add(1))
+	if err := writeJSON(client, request{
+		Op: opBridgeClient, SessionID: e.sessionID,
+		PairID: pairID, Target: &target,
+	}); err != nil {
+		closeBoth()
+		return nil, nil, err
+	}
+	if err := writeJSON(upstream, request{
+		Op: opBridgeUpstream, SessionID: e.sessionID,
+		PairID: pairID, Target: &target,
+	}); err != nil {
+		closeBoth()
+		return nil, nil, err
+	}
+	if err := readResponse(bufio.NewReader(client)); err != nil {
+		closeBoth()
+		return nil, nil, err
+	}
+	if err := readResponse(bufio.NewReader(upstream)); err != nil {
+		closeBoth()
+		return nil, nil, err
+	}
+	_ = client.SetDeadline(time.Time{})
+	_ = upstream.SetDeadline(time.Time{})
+	return client, upstream, nil
+}
+
 func (e *Endpoint) UpdateTargets(
 	ctx context.Context, targets []tunnel.InspectorTarget,
 ) error {
@@ -128,31 +177,58 @@ func setConnectionDeadline(
 
 func (e *Endpoint) readEvents() {
 	defer close(e.events)
+	for attempt := 0; ; attempt++ {
+		if attempt > 0 {
+			if attempt > 8 {
+				return
+			}
+			delay := time.Duration(1<<min(attempt-1, 5)) * 50 * time.Millisecond
+			timer := time.NewTimer(delay)
+			select {
+			case <-timer.C:
+			case <-e.done:
+				timer.Stop()
+				return
+			}
+		}
+		if err := e.consumeEvents(); err == nil {
+			return
+		}
+		select {
+		case <-e.done:
+			return
+		default:
+		}
+	}
+}
+
+func (e *Endpoint) consumeEvents() error {
 	connection, err := e.client.dial(context.Background())
 	if err != nil {
-		return
+		return err
 	}
 	defer connection.Close()
 	if err := writeJSON(connection, request{
 		Op: opEvents, SessionID: e.sessionID,
 	}); err != nil {
-		return
+		return err
 	}
 	reader := bufio.NewReader(connection)
 	if err := readResponse(reader); err != nil {
-		return
+		return err
 	}
 	for {
 		event, err := tunnel.ReadInspectorEvent(reader)
 		if err != nil {
-			return
+			return err
 		}
 		select {
 		case e.events <- event:
 		case <-e.done:
-			return
+			return nil
 		default:
-			if event.Type != tunnel.InspectorEventBody {
+			if event.Type != tunnel.InspectorEventBody &&
+				event.Type != tunnel.InspectorEventGRPCMessage {
 				select {
 				case <-e.events:
 				default:

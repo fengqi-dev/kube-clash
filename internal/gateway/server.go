@@ -214,9 +214,11 @@ func (s *Server) handleInspectorEvents(client net.Conn, header tunnel.SessionHea
 		_ = client.Close()
 		return
 	}
+	s.logf("Inspector event channel connected")
 	_, _ = io.Copy(io.Discard, client)
 	control.detachEvents(client)
 	_ = client.Close()
+	s.logf("Inspector event channel disconnected")
 }
 
 func (s *Server) relayUDP(client, target net.Conn) {

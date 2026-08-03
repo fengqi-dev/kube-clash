@@ -328,6 +328,7 @@ export namespace cluster {
 	export class ServiceInfo {
 	    name: string;
 	    namespace: string;
+	    uid: string;
 	    clusterIP: string;
 	    ports: ServicePortInfo[];
 
@@ -339,6 +340,7 @@ export namespace cluster {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.name = source["name"];
 	        this.namespace = source["namespace"];
+	        this.uid = source["uid"];
 	        this.clusterIP = source["clusterIP"];
 	        this.ports = this.convertValues(source["ports"], ServicePortInfo);
 	    }
@@ -969,6 +971,11 @@ export namespace tunnel {
 	    port: number;
 	    protocol: string;
 	    captureBody?: boolean;
+	    descriptorSet?: string;
+	    namespace?: string;
+	    service?: string;
+	    serviceUID?: string;
+	    addresses?: string[];
 
 	    static createFrom(source: any = {}) {
 	        return new InspectorTarget(source);
@@ -981,6 +988,11 @@ export namespace tunnel {
 	        this.port = source["port"];
 	        this.protocol = source["protocol"];
 	        this.captureBody = source["captureBody"];
+	        this.descriptorSet = source["descriptorSet"];
+	        this.namespace = source["namespace"];
+	        this.service = source["service"];
+	        this.serviceUID = source["serviceUID"];
+	        this.addresses = source["addresses"];
 	    }
 	}
 	export class InspectorConfig {

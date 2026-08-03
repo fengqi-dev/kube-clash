@@ -37,6 +37,7 @@ type ServicePortInfo struct {
 type ServiceInfo struct {
 	Name      string            `json:"name"`
 	Namespace string            `json:"namespace"`
+	UID       string            `json:"uid"`
 	ClusterIP string            `json:"clusterIP"`
 	Ports     []ServicePortInfo `json:"ports"`
 }

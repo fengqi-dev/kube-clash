@@ -38,3 +38,24 @@ func TestInspectorTLSConfigRejectsOversizedPEM(t *testing.T) {
 		t.Fatal("expected oversized upstream CA PEM to fail")
 	}
 }
+
+func TestInspectorServicePolicyValidationAndNormalization(t *testing.T) {
+	targets := []InspectorTarget{{
+		ID: "api", Host: "api.default.svc", Port: 443, Protocol: "https",
+		Namespace: "DEFAULT", Service: "API", ServiceUID: "uid-1",
+		Addresses: []string{"10.96.0.1", "::ffff:10.96.0.1", "fd00::1"},
+	}}
+	if err := ValidateInspectorTargets(targets); err != nil {
+		t.Fatal(err)
+	}
+	if targets[0].Host != "api.default.svc" ||
+		len(targets[0].Addresses) != 2 ||
+		targets[0].Addresses[0] != "10.96.0.1" ||
+		targets[0].Addresses[1] != "fd00::1" {
+		t.Fatalf("normalized target = %#v", targets[0])
+	}
+	targets[0].ServiceUID = ""
+	if err := ValidateInspectorTargets(targets); err == nil {
+		t.Fatal("expected incomplete Service policy to fail")
+	}
+}

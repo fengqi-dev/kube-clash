@@ -7,12 +7,16 @@ import (
 	"io"
 	"log"
 	"net"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/gateway"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 type managerInspectorEngine struct {
@@ -58,6 +62,12 @@ func (e *managerInspectorEndpoint) DialContext(
 	return nil, fmt.Errorf("not used")
 }
 
+func (e *managerInspectorEndpoint) BridgeContext(
+	context.Context, tunnel.InspectorTarget,
+) (net.Conn, net.Conn, error) {
+	return nil, nil, fmt.Errorf("not used")
+}
+
 func (e *managerInspectorEndpoint) UpdateTargets(
 	context.Context, []tunnel.InspectorTarget,
 ) error {
@@ -76,6 +86,45 @@ func (e *managerInspectorEndpoint) Close() error {
 		close(e.events)
 	})
 	return nil
+}
+
+func TestPrepareInspectorTargetsValidatesServiceIdentity(t *testing.T) {
+	service := &corev1.Service{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "api", Namespace: "default", UID: types.UID("service-v2"),
+		},
+		Spec: corev1.ServiceSpec{
+			ClusterIP:  "10.96.1.10",
+			ClusterIPs: []string{"10.96.1.10", "fd00::10"},
+			Ports: []corev1.ServicePort{{
+				Name: "https", Port: 443, Protocol: corev1.ProtocolTCP,
+			}},
+		},
+	}
+	manager := NewManager(&fakeCluster{service: service})
+	manager.active = true
+	manager.contextName = "minikube"
+	target := tunnel.InspectorTarget{
+		ID: "api", Host: "api.default.svc", Port: 443, Protocol: "https",
+		Namespace: "default", Service: "api", ServiceUID: "service-v1",
+		Addresses: []string{"10.96.1.9"},
+	}
+	if _, err := manager.prepareInspectorTargets(
+		context.Background(), []tunnel.InspectorTarget{target},
+	); err == nil || !strings.Contains(err.Error(), "identity changed") {
+		t.Fatalf("stale Service UID error = %v", err)
+	}
+	target.ServiceUID = "service-v2"
+	prepared, err := manager.prepareInspectorTargets(
+		context.Background(), []tunnel.InspectorTarget{target},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := prepared[0].Addresses; len(got) != 2 ||
+		got[0] != "10.96.1.10" || got[1] != "fd00::10" {
+		t.Fatalf("Service addresses = %v", got)
+	}
 }
 
 func TestManagerInspectorLifecycleAndRecovery(t *testing.T) {
@@ -129,6 +178,41 @@ func TestManagerInspectorLifecycleAndRecovery(t *testing.T) {
 		}
 	case <-time.After(3 * time.Second):
 		t.Fatal("timed out waiting for Inspector event")
+	}
+
+	manager.mu.Lock()
+	oldEvents := manager.inspectorConn
+	manager.mu.Unlock()
+	if oldEvents == nil {
+		t.Fatal("Inspector event connection is unavailable")
+	}
+	if err := oldEvents.Close(); err != nil {
+		t.Fatal(err)
+	}
+	reconnectDeadline := time.Now().Add(8 * time.Second)
+	for {
+		manager.mu.Lock()
+		reconnected := manager.inspectorConn != nil &&
+			manager.inspectorConn != oldEvents
+		manager.mu.Unlock()
+		if reconnected {
+			break
+		}
+		if time.Now().After(reconnectDeadline) {
+			t.Fatal("Inspector event channel did not reconnect")
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	reconnectedEvent := firstEvent
+	reconnectedEvent.FlowID = "flow-after-event-reconnect"
+	engine.current().events <- reconnectedEvent
+	select {
+	case got := <-manager.InspectorEvents():
+		if got.FlowID != reconnectedEvent.FlowID {
+			t.Fatalf("reconnected event flow ID = %q", got.FlowID)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for reconnected Inspector event")
 	}
 
 	if err := manager.control.close(); err != nil {

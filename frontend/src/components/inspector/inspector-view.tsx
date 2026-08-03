@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { ScanSearch, Trash2 } from "lucide-react";
+import { Download, ScanSearch, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { backend } from "@/backend";
 import { PageShell } from "@/components/shared/page-shell";
@@ -26,12 +26,22 @@ interface Flow {
   authority?: string;
   path?: string;
   statusCode?: number;
+  grpcStatus?: string;
+  requestMessages?: number;
+  responseMessages?: number;
   durationMs?: number;
   error?: string;
+  source?: string;
+  bytes: number;
   events: InspectorEvent[];
 }
 
 const maxFlows = 500;
+const maxFlowBytes = 50 * 1024 * 1024;
+
+function requiresInspectorCA(protocol: InspectorTarget["protocol"]) {
+  return protocol !== "http";
+}
 
 export function InspectorView({
   ready,
@@ -43,18 +53,35 @@ export function InspectorView({
   const { t } = useI18n();
   const [host, setHost] = useState("");
   const [port, setPort] = useState("80");
-  const [protocol, setProtocol] = useState<"http" | "https">("http");
+  const [serviceTarget, setServiceTarget] = useState("");
+  const [protocol, setProtocol] = useState<InspectorTarget["protocol"]>("http");
   const [captureBody, setCaptureBody] = useState(false);
+  const [descriptorSet, setDescriptorSet] = useState("");
   const [targets, setTargets] = useState<InspectorTarget[]>([]);
   const [active, setActive] = useState(false);
   const [busy, setBusy] = useState(false);
   const [flows, setFlows] = useState<Record<string, Flow>>({});
   const [selected, setSelected] = useState("");
+  const [filter, setFilter] = useState("");
   const [caState, setCAState] = useState<InspectorCAState>({
     present: false,
     trusted: false,
   });
   const supported = ready && session.gatewayCapabilities?.inspector === true;
+  const serviceTargets = useMemo(
+    () =>
+      (session.services ?? []).flatMap((service) =>
+        service.ports
+          .filter((item) => item.protocol.toUpperCase() === "TCP")
+          .map((item) => ({
+            key: `${service.namespace}/${service.name}:${item.port}`,
+            label: `${service.namespace}/${service.name}:${item.port}`,
+            service,
+            port: item.port,
+          })),
+      ),
+    [session.services],
+  );
 
   useEffect(
     () =>
@@ -62,6 +89,7 @@ export function InspectorView({
         setFlows((current) => {
           const previous = current[event.flowId] ?? {
             id: event.flowId,
+            bytes: 0,
             events: [],
           };
           const payload = event.payload ?? {};
@@ -83,6 +111,18 @@ export function InspectorView({
               typeof payload.statusCode === "number"
                 ? payload.statusCode
                 : previous.statusCode,
+            grpcStatus:
+              typeof payload.grpcStatus === "string"
+                ? payload.grpcStatus
+                : previous.grpcStatus,
+            requestMessages:
+              event.type === 6 && payload.direction === "request"
+                ? (previous.requestMessages ?? 0) + 1
+                : previous.requestMessages,
+            responseMessages:
+              event.type === 6 && payload.direction === "response"
+                ? (previous.responseMessages ?? 0) + 1
+                : previous.responseMessages,
             durationMs:
               typeof payload.durationMs === "number"
                 ? payload.durationMs
@@ -91,10 +131,21 @@ export function InspectorView({
               event.type === 5 && typeof payload.error === "string"
                 ? payload.error
                 : previous.error,
-            events: [...previous.events, event],
+            source:
+              event.type === 1 && typeof payload.source === "string"
+                ? payload.source
+                : previous.source,
+            bytes: previous.bytes + JSON.stringify(event).length * 2,
+            events: [...previous.events.slice(-255), event],
           };
-          const entries = Object.entries({ ...current, [event.flowId]: next });
-          return Object.fromEntries(entries.slice(-maxFlows));
+          const entries = Object.entries({ ...current, [event.flowId]: next }).slice(
+            -maxFlows,
+          );
+          let totalBytes = entries.reduce((sum, [, flow]) => sum + flow.bytes, 0);
+          while (entries.length > 1 && totalBytes > maxFlowBytes) {
+            totalBytes -= entries.shift()?.[1].bytes ?? 0;
+          }
+          return Object.fromEntries(entries);
         });
       }),
     [],
@@ -128,14 +179,33 @@ export function InspectorView({
     }
   }, [ready]);
 
-  const rows = useMemo(() => Object.values(flows).reverse(), [flows]);
+  const rows = useMemo(() => {
+    const query = filter.trim().toLowerCase();
+    return Object.values(flows)
+      .filter((flow) =>
+        query
+          ? [
+              flow.method,
+              flow.authority,
+              flow.path,
+              flow.source,
+              flow.grpcStatus,
+              flow.statusCode,
+              flow.error,
+            ]
+              .filter((value) => value !== undefined)
+              .some((value) => String(value).toLowerCase().includes(query))
+          : true,
+      )
+      .reverse();
+  }, [filter, flows]);
   const selectedFlow = selected ? flows[selected] : undefined;
 
   async function applyTargets(next: InspectorTarget[]) {
     if (active) {
       const needsTLSRestart =
-        next.some((target) => target.protocol === "https") &&
-        !targets.some((target) => target.protocol === "https");
+        next.some((target) => requiresInspectorCA(target.protocol)) &&
+        !targets.some((target) => requiresInspectorCA(target.protocol));
       if (needsTLSRestart) {
         if (!caState.trusted) throw new Error(t("inspector.caRequired"));
         await backend.stopInspector();
@@ -176,12 +246,30 @@ export function InspectorView({
         port: numericPort,
         protocol,
         captureBody,
+        descriptorSet: protocol === "grpc" && descriptorSet ? descriptorSet : undefined,
+        ...(serviceTarget
+          ? (() => {
+              const selectedService = serviceTargets.find(
+                (item) => item.key === serviceTarget,
+              );
+              return selectedService
+                ? {
+                    namespace: selectedService.service.namespace,
+                    service: selectedService.service.name,
+                    serviceUID: selectedService.service.uid,
+                    addresses: [selectedService.service.clusterIP],
+                  }
+                : {};
+            })()
+          : {}),
       },
     ];
     setBusy(true);
     try {
       await applyTargets(next);
       setHost("");
+      setServiceTarget("");
+      setDescriptorSet("");
     } catch (error) {
       toast.error(t("inspector.updateFailed"), { description: String(error) });
     } finally {
@@ -208,7 +296,7 @@ export function InspectorView({
         setActive(false);
       } else {
         if (
-          targets.some((target) => target.protocol === "https") &&
+          targets.some((target) => requiresInspectorCA(target.protocol)) &&
           !caState.trusted
         ) {
           throw new Error(t("inspector.caRequired"));
@@ -239,7 +327,7 @@ export function InspectorView({
   async function removeCA() {
     setBusy(true);
     try {
-      if (active && targets.some((target) => target.protocol === "https")) {
+      if (active && targets.some((target) => requiresInspectorCA(target.protocol))) {
         await backend.stopInspector();
         setActive(false);
       }
@@ -251,6 +339,24 @@ export function InspectorView({
     } finally {
       setBusy(false);
     }
+  }
+
+  function clearFlows() {
+    setFlows({});
+    setSelected("");
+  }
+
+  function exportFlows() {
+    const value = selectedFlow ? [selectedFlow] : rows;
+    const blob = new Blob([JSON.stringify(value, null, 2)], {
+      type: "application/json",
+    });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `kube-loop-inspector-${new Date().toISOString()}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
   }
 
   return (
@@ -314,22 +420,54 @@ export function InspectorView({
         </div>
         <div className="flex items-center gap-2">
           <select
+            className="h-9 max-w-56 rounded-md border border-input bg-background px-2 text-sm"
+            value={serviceTarget}
+            onChange={(event) => {
+              const value = event.target.value;
+              setServiceTarget(value);
+              const selectedService = serviceTargets.find(
+                (item) => item.key === value,
+              );
+              if (selectedService) {
+                setHost(
+                  `${selectedService.service.name}.${selectedService.service.namespace}.svc`,
+                );
+                setPort(String(selectedService.port));
+              }
+            }}
+            disabled={busy}
+          >
+            <option value="">Service / manual host</option>
+            {serviceTargets.map((item) => (
+              <option key={item.key} value={item.key}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+          <select
             className="h-9 rounded-md border border-input bg-background px-2 text-sm"
             value={protocol}
             onChange={(event) => {
-              const value = event.target.value as "http" | "https";
+              const value = event.target.value as InspectorTarget["protocol"];
               setProtocol(value);
-              if (port === "80" || port === "443") setPort(value === "https" ? "443" : "80");
+              if (port === "80" || port === "443") {
+                setPort(value === "http" ? "80" : "443");
+              }
             }}
             disabled={busy}
           >
             <option value="http">HTTP</option>
             <option value="https">HTTPS</option>
+            <option value="http2">HTTP/2</option>
+            <option value="grpc">gRPC</option>
           </select>
           <input
             className="h-9 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
             value={host}
-            onChange={(event) => setHost(event.target.value)}
+            onChange={(event) => {
+              setHost(event.target.value);
+              setServiceTarget("");
+            }}
             placeholder={t("inspector.host")}
             disabled={busy}
           />
@@ -351,6 +489,37 @@ export function InspectorView({
             />
             {t("inspector.captureBody")}
           </label>
+          {protocol === "grpc" ? (
+            <label className="shrink-0 text-xs text-muted-foreground">
+              <span className="sr-only">FileDescriptorSet</span>
+              <input
+                className="max-w-44 text-xs"
+                type="file"
+                accept=".protoset,.pb,application/octet-stream"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) {
+                    setDescriptorSet("");
+                    return;
+                  }
+                  if (file.size > 32 * 1024) {
+                    toast.error(t("inspector.invalidTarget"), {
+                      description: "FileDescriptorSet must not exceed 32 KiB",
+                    });
+                    event.target.value = "";
+                    setDescriptorSet("");
+                    return;
+                  }
+                  void file.arrayBuffer().then((value) => {
+                    setDescriptorSet(
+                      btoa(String.fromCharCode(...new Uint8Array(value))),
+                    );
+                  });
+                }}
+              />
+            </label>
+          ) : null}
           <Button type="button" variant="outline" disabled={busy} onClick={() => void addTarget()}>
             {t("inspector.add")}
           </Button>
@@ -384,6 +553,22 @@ export function InspectorView({
 
       <div className="grid min-h-0 grid-cols-[minmax(0,1fr)_minmax(280px,0.42fr)] gap-4">
         <div className="overflow-hidden rounded-lg border bg-card">
+          <div className="flex items-center gap-2 border-b p-2">
+            <input
+              className="h-8 min-w-0 flex-1 rounded-md border border-input bg-background px-3 text-xs outline-none focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/40"
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Filter method, target, path, status, or source"
+            />
+            <Button type="button" size="sm" variant="outline" onClick={exportFlows}>
+              <Download className="size-3.5" />
+              Export
+            </Button>
+            <Button type="button" size="sm" variant="outline" onClick={clearFlows}>
+              <Trash2 className="size-3.5" />
+              Clear
+            </Button>
+          </div>
           <Table>
             <TableHeader>
               <TableRow>
@@ -418,7 +603,11 @@ export function InspectorView({
                       {flow.path ?? "—"}
                     </TableCell>
                     <TableCell>
-                      {flow.error ? t("inspector.tlsBypass") : (flow.statusCode ?? "…")}
+                      {flow.error
+                        ? t("inspector.tlsBypass")
+                        : flow.grpcStatus !== undefined
+                          ? `gRPC ${flow.grpcStatus}`
+                          : (flow.statusCode ?? "…")}
                     </TableCell>
                     <TableCell className="text-right font-mono text-xs">
                       {flow.durationMs === undefined ? "…" : `${flow.durationMs} ms`}

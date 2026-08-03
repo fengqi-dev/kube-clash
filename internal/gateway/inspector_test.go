@@ -57,6 +57,16 @@ func (e *fakeInspectorEndpoint) DialContext(
 	return left, nil
 }
 
+func (e *fakeInspectorEndpoint) BridgeContext(
+	_ context.Context, _ tunnel.InspectorTarget,
+) (net.Conn, net.Conn, error) {
+	clientLeft, clientRight := net.Pipe()
+	upstreamLeft, upstreamRight := net.Pipe()
+	_ = clientRight.Close()
+	_ = upstreamRight.Close()
+	return clientLeft, upstreamLeft, nil
+}
+
 func (e *fakeInspectorEndpoint) UpdateTargets(
 	_ context.Context, targets []tunnel.InspectorTarget,
 ) error {
@@ -81,7 +91,7 @@ func TestInspectorSessionPolicyEventsAndCleanup(t *testing.T) {
 	server.SetInspectorEngine(engine, "fake")
 	if !server.Capabilities.Inspector ||
 		server.Capabilities.Engine != "fake" ||
-		len(server.Capabilities.Protocols) != 2 {
+		len(server.Capabilities.Protocols) != 4 {
 		t.Fatalf("unexpected capabilities %#v", server.Capabilities)
 	}
 
@@ -173,6 +183,24 @@ func TestInspectorSessionPolicyEventsAndCleanup(t *testing.T) {
 		"10.0.0.10:80",
 	); err != nil || matched || connection != nil {
 		t.Fatalf("stopped Inspector still matched: conn=%v matched=%t err=%v", connection, matched, err)
+	}
+}
+
+func TestReverseInspectorTargetMatchesServiceRegistration(t *testing.T) {
+	target := tunnel.InspectorTarget{
+		ID: "default/api", Host: "api.default.svc", Port: 8080, Protocol: "http",
+	}
+	endpoint := &fakeInspectorEndpoint{}
+	control := &controlSession{inspector: &inspectorSession{
+		endpoint: endpoint,
+		targets:  inspectorTargetMap([]tunnel.InspectorTarget{target}),
+	}}
+	got, gotEndpoint, ok := control.reverseInspectorTarget("default/api:tcp:8080")
+	if !ok || got.ID != target.ID || gotEndpoint != endpoint {
+		t.Fatalf("reverse target=%+v endpoint=%T matched=%v", got, gotEndpoint, ok)
+	}
+	if _, _, ok := control.reverseInspectorTarget("default/api:udp:8080"); ok {
+		t.Fatal("UDP reverse registration unexpectedly matched Inspector")
 	}
 }
 

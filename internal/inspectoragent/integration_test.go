@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"testing"
@@ -20,7 +21,12 @@ import (
 func TestAgentHTTPFlowAndRedaction(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	socketPath := t.TempDir() + "/agent.sock"
+	socketDir, err := os.MkdirTemp("", "ki-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	socketPath := socketDir + "/agent.sock"
 	listener, err := ListenUnix(ctx, socketPath)
 	if err != nil {
 		t.Fatal(err)
@@ -150,6 +156,98 @@ func TestAgentHTTPFlowAndRedaction(t *testing.T) {
 			}
 		case <-deadline:
 			t.Fatal("timed out waiting for Inspector events")
+		}
+	}
+}
+
+func TestAgentReverseBridgeHTTPFlow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	socketDir, err := os.MkdirTemp("", "ki-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(socketDir) })
+	socketPath := socketDir + "/agent.sock"
+	listener, err := ListenUnix(ctx, socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	server := NewServer(log.New(io.Discard, "", 0))
+	defer server.Close()
+	go func() { _ = server.Serve(listener) }()
+
+	client := &Client{SocketPath: socketPath}
+	target := tunnel.InspectorTarget{
+		ID: "default/api", Host: "api.default.svc", Port: 8080,
+		Protocol: "http", CaptureBody: true,
+	}
+	rawEndpoint, err := client.StartSession(
+		ctx, "0123456789abcdef0123456789abcdef",
+		tunnel.InspectorConfig{
+			MaxBodySize: 1024, Targets: []tunnel.InspectorTarget{target},
+		},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	endpoint := rawEndpoint.(*Endpoint)
+	defer endpoint.Close()
+	clusterSide, desktopSide, err := endpoint.BridgeContext(ctx, target)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clusterSide.Close()
+	defer desktopSide.Close()
+	go func() {
+		request, readErr := http.ReadRequest(bufio.NewReader(desktopSide))
+		if readErr != nil {
+			return
+		}
+		_, _ = io.Copy(io.Discard, request.Body)
+		_ = request.Body.Close()
+		response := &http.Response{
+			StatusCode: http.StatusOK, Status: "200 OK",
+			Proto: "HTTP/1.1", ProtoMajor: 1, ProtoMinor: 1,
+			Header:        http.Header{"Content-Type": {"text/plain"}},
+			Body:          io.NopCloser(strings.NewReader("local-response")),
+			ContentLength: int64(len("local-response")), Close: true,
+		}
+		_ = response.Write(desktopSide)
+	}()
+	_, err = fmt.Fprint(
+		clusterSide,
+		"GET /reverse HTTP/1.1\r\nHost: api.default.svc\r\nConnection: close\r\n\r\n",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response, err := http.ReadResponse(bufio.NewReader(clusterSide), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, err := io.ReadAll(response.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = response.Body.Close()
+	if string(body) != "local-response" {
+		t.Fatalf("response=%q", body)
+	}
+	deadline := time.After(5 * time.Second)
+	for {
+		select {
+		case event := <-endpoint.Events():
+			if event.Type == tunnel.InspectorEventFlowStart &&
+				!strings.Contains(string(event.Payload), `"source":"cluster"`) {
+				t.Fatalf("missing cluster source: %s", event.Payload)
+			}
+			if event.Type == tunnel.InspectorEventFlowEnd {
+				return
+			}
+		case <-deadline:
+			t.Fatal("timed out waiting for reverse Inspector FlowEnd")
 		}
 	}
 }
