@@ -36,6 +36,7 @@ type Server struct {
 type agentSession struct {
 	id          string
 	maxBodySize int64
+	tls         *tlsAuthority
 
 	mu          sync.RWMutex
 	targets     map[string]tunnel.InspectorTarget
@@ -108,6 +109,10 @@ func (s *Server) start(value request) error {
 	if err := value.Config.Validate(); err != nil {
 		return err
 	}
+	authority, err := newTLSAuthority(value.Config.TLS)
+	if err != nil {
+		return fmt.Errorf("prepare Inspector TLS: %w", err)
+	}
 	maxSessions := s.MaxSessions
 	if maxSessions <= 0 {
 		maxSessions = defaultMaxSessions
@@ -115,6 +120,7 @@ func (s *Server) start(value request) error {
 	session := &agentSession{
 		id:          value.SessionID,
 		maxBodySize: value.Config.MaxBodySize,
+		tls:         authority,
 		targets:     inspectorTargets(value.Config.Targets),
 		connections: make(map[net.Conn]struct{}),
 		events:      make(chan tunnel.InspectorEvent, eventQueueSize),
@@ -205,7 +211,11 @@ func (s *Server) handleDial(
 	if err := writeJSON(client, response{OK: true}); err != nil {
 		return
 	}
-	serveHTTPConnection(session, client, reader, upstream, target)
+	if target.Protocol == "https" {
+		serveHTTPSConnection(session, client, reader, upstream, target)
+		return
+	}
+	serveHTTPConnection(session, client, reader, upstream, target, nil)
 }
 
 func (s *Server) handleEvents(connection net.Conn, sessionID string) {

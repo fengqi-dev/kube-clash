@@ -52,6 +52,7 @@ func serveHTTPConnection(
 	clientReader *bufio.Reader,
 	upstream net.Conn,
 	target tunnel.InspectorTarget,
+	tlsMetadata *tlsFlowMetadata,
 ) {
 	upstreamReader := bufio.NewReader(upstream)
 	for {
@@ -62,19 +63,24 @@ func serveHTTPConnection(
 		startedAt := time.Now()
 		flowID := fmt.Sprintf("%s-%d", session.id, nextFlowID.Add(1))
 		sequence := uint64(1)
+		start := map[string]any{
+			"targetID":    target.ID,
+			"protocol":    target.Protocol,
+			"httpVersion": request.Proto,
+			"method":      request.Method,
+			"authority":   request.Host,
+			"path":        request.URL.EscapedPath(),
+			"startedAt":   startedAt.UTC(),
+		}
+		if tlsMetadata != nil {
+			start["tls"] = tlsMetadata
+		}
 		emitJSON(session, tunnel.InspectorEvent{
 			Version:  tunnel.InspectorEventVersion1,
 			Type:     tunnel.InspectorEventFlowStart,
 			FlowID:   flowID,
 			Sequence: sequence,
-		}, map[string]any{
-			"targetID":  target.ID,
-			"protocol":  "http",
-			"method":    request.Method,
-			"authority": request.Host,
-			"path":      request.URL.EscapedPath(),
-			"startedAt": startedAt.UTC(),
-		})
+		}, start)
 		sequence++
 		emitJSON(session, tunnel.InspectorEvent{
 			Version:  tunnel.InspectorEventVersion1,

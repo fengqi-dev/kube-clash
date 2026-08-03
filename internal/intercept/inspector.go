@@ -60,8 +60,7 @@ func (m *Manager) UpdateInspectorTargets(
 ) error {
 	m.inspectorOp.Lock()
 	defer m.inspectorOp.Unlock()
-	config := tunnel.InspectorConfig{Targets: targets}
-	if err := config.Validate(); err != nil {
+	if err := tunnel.ValidateInspectorTargets(targets); err != nil {
 		return err
 	}
 	m.mu.Lock()
