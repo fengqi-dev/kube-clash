@@ -493,7 +493,10 @@ mitmproxy 使用 Intermediate CA 动态签发目标 leaf certificate。客户端
 
 ### 13.4 mTLS 和 Pinning
 
-- Certificate Pinning：标记为 `tls-pinning-or-untrusted-ca`，允许用户切换 passthrough；
+- Certificate Pinning 或自定义客户端信任库：首次客户端 TLS 握手拒绝后记录诊断，并将该
+  Session 内同一 Target 标记为 learned passthrough；后续新连接在交给 worker 前
+  fail-open。由于首次连接已经看到 Inspector 证书，不能在同一连接内重放；
+- 用户移除并重新添加 Target 后清除 learned passthrough，可显式重试检查；
 - mTLS：只有用户显式提供该 Target 的客户端证书时才支持；
 - 不复制 kubeconfig client certificate 作为应用 mTLS certificate；
 - 不提供绕过 Pinning 的功能。
@@ -606,6 +609,7 @@ body 捕获、Protobuf decode 和 UI 序列化必须设置独立预算。
 - worker 启动失败；
 - SOCKS listener 建连失败；
 - Policy 尚未 ready。
+- Agent 已学习到该 HTTPS Target 的客户端证书拒绝；仅后续新连接旁路。
 
 Gateway 记录警告后直接连接 Target。
 
@@ -809,8 +813,8 @@ Minikube E2E 覆盖。真实 macOS/Windows TUN + Inspector 可由 self-hosted ru
 
 ### Phase 2：HTTPS
 
-状态：基础链路已完成；证书固定应用自动回退、真实 macOS/Windows CA Helper E2E 与
-Minikube HTTPS E2E 待补。
+状态：基础链路已完成；已加入 learned pinning fallback、真实 macOS/Windows CA
+Helper E2E 与 Minikube HTTPS E2E。
 
 - Root CA 管理；
 - Intermediate CA；

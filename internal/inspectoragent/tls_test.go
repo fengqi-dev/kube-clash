@@ -255,6 +255,61 @@ func TestPrepareHTTPSUpstreamRejectsUntrustedCertificate(t *testing.T) {
 	}
 }
 
+func TestLearnTLSBypassFallsBackAfterClientRejection(t *testing.T) {
+	target := tunnel.InspectorTarget{
+		ID: "pinned-api", Host: "api.default.svc", Port: 443, Protocol: "https",
+	}
+	key := tunnel.InspectorTargetKey(target.Host, target.Port)
+	session := &agentSession{
+		id: "session-pinning",
+		targets: map[string]tunnel.InspectorTarget{
+			key: target,
+		},
+		tlsBypass:   make(map[string]string),
+		connections: make(map[net.Conn]struct{}),
+		events:      make(chan tunnel.InspectorEvent, eventQueueSize),
+		done:        make(chan struct{}),
+	}
+	session.learnTLSBypass(target)
+	if reason := session.tlsBypassReason(target); reason == "" {
+		t.Fatal("expected subsequent connections to use TLS bypass")
+	}
+	event := <-session.events
+	if event.Type != tunnel.InspectorEventError {
+		t.Fatalf("event type=%d want error", event.Type)
+	}
+	var payload struct {
+		TargetID        string `json:"targetID"`
+		Stage           string `json:"stage"`
+		PossiblePinning bool   `json:"possiblePinning"`
+		Fallback        string `json:"fallback"`
+	}
+	if err := json.Unmarshal(event.Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.TargetID != target.ID ||
+		payload.Stage != "client-tls-handshake" ||
+		!payload.PossiblePinning ||
+		payload.Fallback != "subsequent-connections" {
+		t.Fatalf("unexpected TLS bypass event: %+v", payload)
+	}
+	session.learnTLSBypass(target)
+	select {
+	case duplicate := <-session.events:
+		t.Fatalf("unexpected duplicate TLS bypass event: %+v", duplicate)
+	default:
+	}
+
+	server := NewServer(nil)
+	server.sessions[session.id] = session
+	if err := server.update(request{SessionID: session.id}); err != nil {
+		t.Fatal(err)
+	}
+	if reason := session.tlsBypassReason(target); reason != "" {
+		t.Fatal("removing target did not clear learned TLS bypass")
+	}
+}
+
 func newUpstreamCertificate(
 	t *testing.T, now time.Time, host string,
 ) (tls.Certificate, []byte) {

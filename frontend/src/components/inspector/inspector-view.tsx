@@ -27,6 +27,7 @@ interface Flow {
   path?: string;
   statusCode?: number;
   durationMs?: number;
+  error?: string;
   events: InspectorEvent[];
 }
 
@@ -86,6 +87,10 @@ export function InspectorView({
               typeof payload.durationMs === "number"
                 ? payload.durationMs
                 : previous.durationMs,
+            error:
+              event.type === 5 && typeof payload.error === "string"
+                ? payload.error
+                : previous.error,
             events: [...previous.events, event],
           };
           const entries = Object.entries({ ...current, [event.flowId]: next });
@@ -412,7 +417,9 @@ export function InspectorView({
                     <TableCell className="max-w-56 truncate font-mono text-xs">
                       {flow.path ?? "—"}
                     </TableCell>
-                    <TableCell>{flow.statusCode ?? "…"}</TableCell>
+                    <TableCell>
+                      {flow.error ? t("inspector.tlsBypass") : (flow.statusCode ?? "…")}
+                    </TableCell>
                     <TableCell className="text-right font-mono text-xs">
                       {flow.durationMs === undefined ? "…" : `${flow.durationMs} ms`}
                     </TableCell>

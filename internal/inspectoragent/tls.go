@@ -170,6 +170,7 @@ func serveHTTPSClient(
 		NextProtos:   []string{"http/1.1"},
 	})
 	if err := clientTLS.Handshake(); err != nil {
+		session.learnTLSBypass(target)
 		return
 	}
 	_ = client.SetDeadline(time.Time{})

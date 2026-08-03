@@ -37,9 +37,11 @@ type agentSession struct {
 	id          string
 	maxBodySize int64
 	tls         *tlsAuthority
+	logf        func(string, ...any)
 
 	mu          sync.RWMutex
 	targets     map[string]tunnel.InspectorTarget
+	tlsBypass   map[string]string
 	connections map[net.Conn]struct{}
 	subscribed  bool
 	closed      bool
@@ -121,7 +123,9 @@ func (s *Server) start(value request) error {
 		id:          value.SessionID,
 		maxBodySize: value.Config.MaxBodySize,
 		tls:         authority,
+		logf:        s.logf,
 		targets:     inspectorTargets(value.Config.Targets),
+		tlsBypass:   make(map[string]string),
 		connections: make(map[net.Conn]struct{}),
 		events:      make(chan tunnel.InspectorEvent, eventQueueSize),
 		done:        make(chan struct{}),
@@ -160,7 +164,13 @@ func (s *Server) update(value request) error {
 			}
 		}
 	}
-	session.targets = inspectorTargets(value.Targets)
+	nextTargets := inspectorTargets(value.Targets)
+	for key := range session.tlsBypass {
+		if _, exists := nextTargets[key]; !exists {
+			delete(session.tlsBypass, key)
+		}
+	}
+	session.targets = nextTargets
 	session.mu.Unlock()
 	s.logf("worker %s applied %d targets", value.SessionID, len(value.Targets))
 	return nil
@@ -194,6 +204,10 @@ func (s *Server) handleDial(
 	target, err := session.authorizeTarget(*value.Target, value.TargetAddress)
 	if err != nil {
 		_ = writeJSON(client, response{Error: err.Error()})
+		return
+	}
+	if reason := session.tlsBypassReason(target); reason != "" {
+		_ = writeJSON(client, response{Error: reason})
 		return
 	}
 	timeout := s.DialTimeout
@@ -318,6 +332,46 @@ func (s *agentSession) authorizeTarget(
 		return tunnel.InspectorTarget{}, errors.New("Inspector target address is not private")
 	}
 	return expected, nil
+}
+
+func (s *agentSession) tlsBypassReason(target tunnel.InspectorTarget) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.tlsBypass[tunnel.InspectorTargetKey(target.Host, target.Port)]
+}
+
+func (s *agentSession) learnTLSBypass(target tunnel.InspectorTarget) {
+	key := tunnel.InspectorTargetKey(target.Host, target.Port)
+	reason := "Inspector TLS was rejected by the client; using direct passthrough for subsequent connections"
+	s.mu.Lock()
+	if s.tlsBypass == nil {
+		s.tlsBypass = make(map[string]string)
+	}
+	_, exists := s.tlsBypass[key]
+	s.tlsBypass[key] = reason
+	s.mu.Unlock()
+	if exists {
+		return
+	}
+	if s.logf != nil {
+		s.logf(
+			"worker %s learned TLS passthrough for %s after client certificate rejection",
+			s.id, key,
+		)
+	}
+	flowID := fmt.Sprintf("%s-tls-%d", s.id, nextFlowID.Add(1))
+	emitJSON(s, tunnel.InspectorEvent{
+		Version:  tunnel.InspectorEventVersion1,
+		Type:     tunnel.InspectorEventError,
+		FlowID:   flowID,
+		Sequence: 1,
+	}, map[string]any{
+		"targetID":        target.ID,
+		"stage":           "client-tls-handshake",
+		"error":           "client rejected Inspector TLS certificate",
+		"possiblePinning": true,
+		"fallback":        "subsequent-connections",
+	})
 }
 
 func (s *agentSession) attach(connection net.Conn) bool {
