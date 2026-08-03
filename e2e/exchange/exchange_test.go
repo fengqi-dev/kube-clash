@@ -18,7 +18,10 @@ func TestMain(m *testing.M) { harness.RunMain(m) }
 
 func TestTUNServiceExchangeTCPAndUDP(t *testing.T) {
 	harness.RequireE2E(t)
-	ctx, cancel := harness.TestContext(t, 1*time.Minute)
+	// This scenario includes an optional 45-second kube-proxy UDP conntrack
+	// compatibility probe before verifying that the original Service is
+	// restored. Leave enough budget for slower hosted Minikube runners.
+	ctx, cancel := harness.TestContext(t, 3*time.Minute)
 	defer cancel()
 
 	provider := harness.NewProvider(t)

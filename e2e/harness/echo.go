@@ -247,12 +247,27 @@ func waitClusterProbe(
 	var last string
 	var lastErr error
 	for time.Now().Before(deadline) {
+		if err := ctx.Err(); err != nil {
+			return last, fmt.Errorf(
+				"probe %s %s:%d canceled: %w (last=%q)",
+				protocol, host, port, err, last,
+			)
+		}
 		got, err := ProbeFromCluster(ctx, client, host, port, protocol, payload)
 		if err == nil && strings.HasPrefix(got, prefix) {
 			return got, nil
 		}
 		last, lastErr = got, err
-		time.Sleep(2 * time.Second)
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return last, fmt.Errorf(
+				"probe %s %s:%d canceled: %w (last=%q)",
+				protocol, host, port, ctx.Err(), last,
+			)
+		case <-timer.C:
+		}
 	}
 	if lastErr != nil {
 		return last, fmt.Errorf("probe %s %s:%d failed: %w (last=%q)", protocol, host, port, lastErr, last)

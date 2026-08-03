@@ -286,7 +286,11 @@ func TestReverseServiceInspectorDataPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	interceptStopped := false
 	t.Cleanup(func() {
+		if interceptStopped {
+			return
+		}
 		if err := live.Manager.StopIntercept(context.Background(), info.ID); err != nil {
 			t.Logf("stop reverse Inspector intercept: %v", err)
 		}
@@ -324,6 +328,7 @@ func TestReverseServiceInspectorDataPath(t *testing.T) {
 					if err := live.Manager.StopIntercept(ctx, info.ID); err != nil {
 						t.Fatal(err)
 					}
+					interceptStopped = true
 					return
 				}
 			}
