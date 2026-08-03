@@ -98,6 +98,52 @@ func TestMaterializeBundledHelper(t *testing.T) {
 	}
 }
 
+func TestBundledToolCandidatesExcludeInstalledHelperOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows packages intentionally install the helper inside application resources")
+	}
+
+	name := helperBinaryName(helperServiceName)
+	candidates := bundledToolCandidates(
+		"/Applications/KubeLoop.app/Contents/MacOS/KubeLoop",
+		"/tmp/kubeloop-source",
+		name,
+	)
+	installed := filepath.Clean(BinaryInstallPath())
+	for _, candidate := range candidates {
+		absolute, err := filepath.Abs(candidate)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if filepath.Clean(absolute) == installed {
+			t.Fatalf("installed helper %q must not be a bundled source candidate", installed)
+		}
+	}
+}
+
+func TestLocateBundledToolPrefersEmbeddedHelperOnUnix(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Windows packages intentionally use on-disk application resources")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	name := helperBinaryName(helperServiceName)
+	SetBundledFile(name, []byte("current embedded helper"))
+	t.Cleanup(func() { SetBundledFile(name, nil) })
+
+	path, err := locateBundledTool(helperServiceName)
+	if err != nil {
+		t.Fatalf("locate bundled helper: %v", err)
+	}
+	want := filepath.Join(home, ".kubeloop", "helper", "resources", name)
+	if path != want {
+		t.Fatalf("bundled helper path = %q, want materialized path %q", path, want)
+	}
+	assertFileContent(t, path, "current embedded helper")
+}
+
 func assertFileContent(t *testing.T, path, want string) {
 	t.Helper()
 	content, err := os.ReadFile(path)
