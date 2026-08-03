@@ -49,6 +49,24 @@ func (c *Client) UpdateDNS(ctx context.Context, sessionID string, dns singbox.DN
 	return c.roundTrip(ctx, Request{Op: OpUpdateDNS, SessionID: sessionID, DNS: &dns})
 }
 
+func (c *Client) InstallInspectorCA(ctx context.Context, certificatePEM []byte) (Response, error) {
+	return c.roundTrip(ctx, Request{
+		Op: OpInstallInspectorCA, CertificatePEM: certificatePEM,
+	})
+}
+
+func (c *Client) RemoveInspectorCA(ctx context.Context, certificatePEM []byte) (Response, error) {
+	return c.roundTrip(ctx, Request{
+		Op: OpRemoveInspectorCA, CertificatePEM: certificatePEM,
+	})
+}
+
+func (c *Client) InspectorCAStatus(ctx context.Context, certificatePEM []byte) (Response, error) {
+	return c.roundTrip(ctx, Request{
+		Op: OpInspectorCAStatus, CertificatePEM: certificatePEM,
+	})
+}
+
 func (c *Client) roundTrip(ctx context.Context, request Request) (Response, error) {
 	if c.Token == "" {
 		return Response{}, fmt.Errorf("helper token is required")

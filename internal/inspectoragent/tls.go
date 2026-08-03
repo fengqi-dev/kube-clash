@@ -110,8 +110,20 @@ func serveHTTPSConnection(
 	upstream net.Conn,
 	target tunnel.InspectorTarget,
 ) {
-	if session.tls == nil {
+	upstreamTLS, metadata, err := prepareHTTPSUpstream(session, upstream, target)
+	if err != nil {
 		return
+	}
+	serveHTTPSClient(session, client, clientReader, upstreamTLS, target, metadata)
+}
+
+func prepareHTTPSUpstream(
+	session *agentSession,
+	upstream net.Conn,
+	target tunnel.InspectorTarget,
+) (*tls.Conn, *tlsFlowMetadata, error) {
+	if session.tls == nil {
+		return nil, nil, errors.New("Inspector TLS authority is unavailable")
 	}
 	timeout := 10 * time.Second
 	_ = upstream.SetDeadline(time.Now().Add(timeout))
@@ -122,10 +134,30 @@ func serveHTTPSConnection(
 		NextProtos: []string{"http/1.1"},
 	})
 	if err := upstreamTLS.Handshake(); err != nil {
-		return
+		return nil, nil, fmt.Errorf("verify upstream TLS: %w", err)
 	}
 	_ = upstream.SetDeadline(time.Time{})
 
+	upstreamState := upstreamTLS.ConnectionState()
+	metadata := &tlsFlowMetadata{
+		ServerName:       target.Host,
+		UpstreamVerified: len(upstreamState.VerifiedChains) > 0,
+	}
+	if len(upstreamState.PeerCertificates) > 0 {
+		metadata.UpstreamSubject = upstreamState.PeerCertificates[0].Subject.String()
+	}
+	return upstreamTLS, metadata, nil
+}
+
+func serveHTTPSClient(
+	session *agentSession,
+	client net.Conn,
+	clientReader *bufio.Reader,
+	upstreamTLS *tls.Conn,
+	target tunnel.InspectorTarget,
+	metadata *tlsFlowMetadata,
+) {
+	timeout := 10 * time.Second
 	leaf, err := session.tls.leaf(target.Host)
 	if err != nil {
 		return
@@ -143,17 +175,9 @@ func serveHTTPSConnection(
 	_ = client.SetDeadline(time.Time{})
 
 	clientState := clientTLS.ConnectionState()
-	upstreamState := upstreamTLS.ConnectionState()
-	metadata := &tlsFlowMetadata{
-		ServerName:       target.Host,
-		Version:          tlsVersionName(clientState.Version),
-		CipherSuite:      tls.CipherSuiteName(clientState.CipherSuite),
-		ALPN:             clientState.NegotiatedProtocol,
-		UpstreamVerified: len(upstreamState.VerifiedChains) > 0,
-	}
-	if len(upstreamState.PeerCertificates) > 0 {
-		metadata.UpstreamSubject = upstreamState.PeerCertificates[0].Subject.String()
-	}
+	metadata.Version = tlsVersionName(clientState.Version)
+	metadata.CipherSuite = tls.CipherSuiteName(clientState.CipherSuite)
+	metadata.ALPN = clientState.NegotiatedProtocol
 	serveHTTPConnection(
 		session, clientTLS, bufio.NewReader(clientTLS), upstreamTLS, target, metadata,
 	)

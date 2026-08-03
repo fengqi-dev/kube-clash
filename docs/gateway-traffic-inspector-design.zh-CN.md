@@ -1,6 +1,6 @@
 # Gateway Traffic Inspector 设计
 
-> 状态：Phase 0、Phase 1 已实现；Phase 2–5 为提案
+> 状态：Phase 0、Phase 1 已实现；Phase 2 HTTPS 基础链路已实现；Phase 3–5 为提案
 > 范围：HTTP/1.1、HTTPS、HTTP/2、gRPC
 > 当前实现：KCG2 + `native-http/1` 只读 Inspector Agent
 
@@ -808,6 +808,9 @@ Minikube E2E 覆盖。真实 macOS/Windows TUN + Inspector 可由 self-hosted ru
 - 其他协议 direct passthrough。
 
 ### Phase 2：HTTPS
+
+状态：基础链路已完成；证书固定应用自动回退、真实 macOS/Windows CA Helper E2E 与
+Minikube HTTPS E2E 待补。
 
 - Root CA 管理；
 - Intermediate CA；

@@ -214,6 +214,47 @@ func TestNewTLSAuthorityRejectsUntrustedIntermediate(t *testing.T) {
 	}
 }
 
+func TestPrepareHTTPSUpstreamRejectsUntrustedCertificate(t *testing.T) {
+	now := time.Now().UTC()
+	manager := &inspectorca.Manager{
+		Secrets: &testSecretStore{},
+		Now:     func() time.Time { return now },
+	}
+	if _, err := manager.EnsureRoot(); err != nil {
+		t.Fatal(err)
+	}
+	material, err := manager.IssueIntermediate("session-untrusted", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	authority, err := newTLSAuthority(&material)
+	if err != nil {
+		t.Fatal(err)
+	}
+	upstreamCertificate, _ := newUpstreamCertificate(t, now, "api.default.svc")
+	agentUpstream, serverUpstream := net.Pipe()
+	defer agentUpstream.Close()
+	serverDone := make(chan error, 1)
+	go func() {
+		defer serverUpstream.Close()
+		serverDone <- tls.Server(serverUpstream, &tls.Config{
+			MinVersion:   tls.VersionTLS12,
+			Certificates: []tls.Certificate{upstreamCertificate},
+			NextProtos:   []string{"http/1.1"},
+		}).Handshake()
+	}()
+	session := &agentSession{tls: authority}
+	if _, _, err := prepareHTTPSUpstream(
+		session, agentUpstream,
+		tunnel.InspectorTarget{Host: "api.default.svc", Port: 443, Protocol: "https"},
+	); err == nil {
+		t.Fatal("expected untrusted upstream TLS certificate to be rejected")
+	}
+	if err := <-serverDone; err == nil {
+		t.Fatal("expected upstream server to observe a rejected handshake")
+	}
+}
+
 func newUpstreamCertificate(
 	t *testing.T, now time.Time, host string,
 ) (tls.Certificate, []byte) {

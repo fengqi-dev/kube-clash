@@ -58,6 +58,14 @@ export function InstallHelper() {
   return window['go']['app']['App']['InstallHelper']();
 }
 
+export function InspectorCAStatus() {
+  return window['go']['app']['App']['InspectorCAStatus']();
+}
+
+export function InstallInspectorCA() {
+  return window['go']['app']['App']['InstallInspectorCA']();
+}
+
 export function InstallMCPClient(arg1) {
   return window['go']['app']['App']['InstallMCPClient'](arg1);
 }
@@ -112,6 +120,10 @@ export function RememberSelection(arg1, arg2) {
 
 export function RemoveKubeconfig(arg1) {
   return window['go']['app']['App']['RemoveKubeconfig'](arg1);
+}
+
+export function RemoveInspectorCA() {
+  return window['go']['app']['App']['RemoveInspectorCA']();
 }
 
 export function ResetSessions() {

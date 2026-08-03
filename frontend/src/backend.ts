@@ -7,6 +7,7 @@ import type {
   InterceptInfo,
   InterceptMapping,
   InspectorConfig,
+  InspectorCAState,
   InspectorEvent,
   InspectorState,
   InspectorTarget,
@@ -59,6 +60,9 @@ declare global {
           UpdateInspectorTargets(targets: InspectorTarget[]): Promise<void>;
           StopInspector(): Promise<void>;
           GetInspectorState(): Promise<InspectorState>;
+          InspectorCAStatus(): Promise<InspectorCAState>;
+          InstallInspectorCA(): Promise<InspectorCAState>;
+          RemoveInspectorCA(): Promise<void>;
           StartPreview(request: PreviewRequest): Promise<PreviewInfo>;
           StopPreview(id: string): Promise<void>;
           ListPreviews(): Promise<PreviewInfo[]>;
@@ -144,6 +148,9 @@ export const backend = {
     Promise.resolve().then(() => api().UpdateInspectorTargets(targets)),
   stopInspector: () => Promise.resolve().then(() => api().StopInspector()),
   getInspectorState: () => Promise.resolve().then(() => api().GetInspectorState()),
+  inspectorCAStatus: () => Promise.resolve().then(() => api().InspectorCAStatus()),
+  installInspectorCA: () => Promise.resolve().then(() => api().InstallInspectorCA()),
+  removeInspectorCA: () => Promise.resolve().then(() => api().RemoveInspectorCA()),
   startPreview: (request: PreviewRequest) =>
     Promise.resolve().then(() => api().StartPreview(request)),
   stopPreview: (id: string) => Promise.resolve().then(() => api().StopPreview(id)),

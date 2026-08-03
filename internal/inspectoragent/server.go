@@ -152,6 +152,14 @@ func (s *Server) update(value request) error {
 		session.mu.Unlock()
 		return errors.New("Inspector worker is not active")
 	}
+	if session.tls == nil {
+		for _, target := range value.Targets {
+			if target.Protocol == "https" {
+				session.mu.Unlock()
+				return errors.New("adding HTTPS targets requires restarting Inspector with TLS")
+			}
+		}
+	}
 	session.targets = inspectorTargets(value.Targets)
 	session.mu.Unlock()
 	s.logf("worker %s applied %d targets", value.SessionID, len(value.Targets))
@@ -208,11 +216,19 @@ func (s *Server) handleDial(
 		return
 	}
 	defer session.detach(upstream)
-	if err := writeJSON(client, response{OK: true}); err != nil {
+	if target.Protocol == "https" {
+		upstreamTLS, metadata, err := prepareHTTPSUpstream(session, upstream, target)
+		if err != nil {
+			_ = writeJSON(client, response{Error: err.Error()})
+			return
+		}
+		if err := writeJSON(client, response{OK: true}); err != nil {
+			return
+		}
+		serveHTTPSClient(session, client, reader, upstreamTLS, target, metadata)
 		return
 	}
-	if target.Protocol == "https" {
-		serveHTTPSConnection(session, client, reader, upstream, target)
+	if err := writeJSON(client, response{OK: true}); err != nil {
 		return
 	}
 	serveHTTPConnection(session, client, reader, upstream, target, nil)

@@ -155,6 +155,33 @@ func (s *Server) dispatch(request Request) Response {
 		}
 		s.Log.Printf("split DNS updated for session %s", request.SessionID)
 		return Response{OK: true, Version: Version, Protocol: ProtocolVersion}
+	case OpInstallInspectorCA, OpRemoveInspectorCA, OpInspectorCAStatus:
+		certificate, err := validateInspectorRootCertificate(request.CertificatePEM)
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		switch request.Op {
+		case OpInstallInspectorCA:
+			s.Log.Printf("installing Inspector Root CA %s", certificate.sha256)
+			if err := installInspectorRootCertificate(certificate); err != nil {
+				s.Log.Printf("install Inspector Root CA: %v", err)
+				return Response{OK: false, Error: err.Error()}
+			}
+		case OpRemoveInspectorCA:
+			s.Log.Printf("removing Inspector Root CA %s", certificate.sha256)
+			if err := removeInspectorRootCertificate(certificate); err != nil {
+				s.Log.Printf("remove Inspector Root CA: %v", err)
+				return Response{OK: false, Error: err.Error()}
+			}
+		}
+		trusted, err := inspectorRootCertificateTrusted(certificate)
+		if err != nil {
+			return Response{OK: false, Error: err.Error()}
+		}
+		return Response{
+			OK: true, Version: Version, Protocol: ProtocolVersion,
+			CertificateTrusted: trusted,
+		}
 	default:
 		return Response{OK: false, Error: fmt.Sprintf("unsupported op %q", request.Op)}
 	}

@@ -70,7 +70,7 @@ export interface InspectorTarget {
   id: string;
   host: string;
   port: number;
-  protocol: "http";
+  protocol: "http" | "https";
   captureBody?: boolean;
 }
 
@@ -81,6 +81,14 @@ export interface InspectorConfig {
 
 export interface InspectorState extends InspectorConfig {
   active: boolean;
+}
+
+export interface InspectorCAState {
+  present: boolean;
+  trusted: boolean;
+  fingerprint?: string;
+  notAfter?: string;
+  trustError?: string;
 }
 
 export interface InspectorEvent {

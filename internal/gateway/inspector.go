@@ -43,7 +43,7 @@ func (s *Server) SetInspectorEngine(engine InspectorEngine, name string) {
 		s.Capabilities.MaxTargets = 0
 		s.Capabilities.Engine = ""
 	} else {
-		s.Capabilities.Protocols = []string{"http"}
+		s.Capabilities.Protocols = []string{"http", "https"}
 		s.Capabilities.MaxBodySize = 1 << 20
 		s.Capabilities.MaxTargets = tunnel.MaxInspectorTargets
 		s.Capabilities.Engine = name

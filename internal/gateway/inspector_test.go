@@ -81,7 +81,7 @@ func TestInspectorSessionPolicyEventsAndCleanup(t *testing.T) {
 	server.SetInspectorEngine(engine, "fake")
 	if !server.Capabilities.Inspector ||
 		server.Capabilities.Engine != "fake" ||
-		len(server.Capabilities.Protocols) != 1 {
+		len(server.Capabilities.Protocols) != 2 {
 		t.Fatalf("unexpected capabilities %#v", server.Capabilities)
 	}
 

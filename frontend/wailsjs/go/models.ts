@@ -43,6 +43,27 @@ export namespace app {
 		}
 	}
 
+	export class InspectorCAState {
+	    present: boolean;
+	    trusted: boolean;
+	    fingerprint?: string;
+	    notAfter?: string;
+	    trustError?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new InspectorCAState(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.present = source["present"];
+	        this.trusted = source["trusted"];
+	        this.fingerprint = source["fingerprint"];
+	        this.notAfter = source["notAfter"];
+	        this.trustError = source["trustError"];
+	    }
+	}
+
 }
 
 export namespace cluster {

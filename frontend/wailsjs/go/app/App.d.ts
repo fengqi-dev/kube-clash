@@ -39,6 +39,10 @@ export function HelperStatus():Promise<helperapi.Status>;
 
 export function InstallHelper():Promise<void>;
 
+export function InspectorCAStatus():Promise<app.InspectorCAState>;
+
+export function InstallInspectorCA():Promise<app.InspectorCAState>;
+
 export function InstallMCPClient(arg1:string):Promise<mcp.InstallResult>;
 
 export function ListIntercepts():Promise<Array<intercept.Info>>;
@@ -66,6 +70,8 @@ export function ReloadContexts():Promise<cluster.ClusterInventory>;
 export function RememberSelection(arg1:string,arg2:string):Promise<void>;
 
 export function RemoveKubeconfig(arg1:string):Promise<cluster.ClusterInventory>;
+
+export function RemoveInspectorCA():Promise<void>;
 
 export function ResetSessions():Promise<void>;
 
