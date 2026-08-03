@@ -1,0 +1,6 @@
+.codegraph/
+.git/
+build/bin/*
+!build/bin/kube-loop-gateway
+!build/bin/kube-loop-inspector-agent
+frontend/node_modules/
