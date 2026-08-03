@@ -32,6 +32,13 @@ func TestTUNConnectClusterIP(t *testing.T) {
 	if live.State.Network == nil {
 		t.Fatal("connected session is missing network diagnostics")
 	}
+	if !live.State.GatewayCapabilities.Inspector ||
+		live.State.GatewayCapabilities.Engine != "native-http/1" {
+		t.Fatalf(
+			"Inspector Agent capability is unavailable: %#v",
+			live.State.GatewayCapabilities,
+		)
+	}
 	if live.State.Network.RoutingMode != "native" {
 		t.Fatalf("routing mode = %q, want native", live.State.Network.RoutingMode)
 	}

@@ -110,12 +110,14 @@ fi
 if [[ -z "${GATEWAY_IMAGE}" ]]; then
   GATEWAY_IMAGE="kube-loop-gateway:e2e-local-$$"
 fi
+INSPECTOR_IMAGE="${GATEWAY_IMAGE/gateway/inspector-agent}"
 
 MAIN_LOG="${ROOT}/e2e-local.log"
 PLATFORM_LOG="${ROOT}/e2e-platform.log"
 SINGBOX="${ROOT}/build/bin/sing-box"
 HELPER_SOURCE="${ROOT}/build/embedded/kubeloop-helper"
 GATEWAY_BINARY="${ROOT}/build/bin/kube-loop-gateway"
+INSPECTOR_BINARY="${ROOT}/build/bin/kube-loop-inspector-agent"
 CACHE="$(mktemp -d "${TMPDIR:-/tmp}/kubeloop-e2e-cache.XXXXXX")"
 export GOCACHE="${CACHE}"
 : >"${MAIN_LOG}"
@@ -251,18 +253,23 @@ host_docker_ok() {
 load_minikube_image_if_needed() {
   if using_minikube && host_docker_ok; then
     require_command minikube
-    log "Loading Gateway image into minikube profile ${MINIKUBE_PROFILE}"
+    log "Loading Gateway component images into minikube profile ${MINIKUBE_PROFILE}"
     minikube -p "${MINIKUBE_PROFILE}" image load "${GATEWAY_IMAGE}"
+    minikube -p "${MINIKUBE_PROFILE}" image load "${INSPECTOR_IMAGE}"
   fi
 }
 
 build_gateway_image() {
-  log "Building Gateway image ${GATEWAY_IMAGE}"
+  log "Building Gateway component images ${GATEWAY_IMAGE} and ${INSPECTOR_IMAGE}"
   mkdir -p build/bin
   CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" \
     go build -trimpath -ldflags="-s -w" \
       -o "${GATEWAY_BINARY}" ./cmd/kubeloop-gateway
+  CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" \
+    go build -trimpath -ldflags="-s -w" \
+      -o "${INSPECTOR_BINARY}" ./cmd/kubeloop-inspector-agent
   chmod 755 "${GATEWAY_BINARY}"
+  chmod 755 "${INSPECTOR_BINARY}"
 
   if using_minikube; then
     require_command minikube
@@ -272,13 +279,23 @@ build_gateway_image() {
       -t "${GATEWAY_IMAGE}" \
       -f build/gateway.e2e.Dockerfile \
       . || true
+    minikube -p "${MINIKUBE_PROFILE}" image build \
+      -t "${INSPECTOR_IMAGE}" \
+      -f build/inspector-agent.e2e.Dockerfile \
+      . || true
     if ! minikube -p "${MINIKUBE_PROFILE}" image ls |
       grep -F "${GATEWAY_IMAGE}" >/dev/null 2>&1; then
       echo "error: minikube image build failed for ${GATEWAY_IMAGE}" >&2
       return 1
     fi
+    if ! minikube -p "${MINIKUBE_PROFILE}" image ls |
+      grep -F "${INSPECTOR_IMAGE}" >/dev/null 2>&1; then
+      echo "error: minikube image build failed for ${INSPECTOR_IMAGE}" >&2
+      return 1
+    fi
   elif host_docker_ok; then
     docker build -t "${GATEWAY_IMAGE}" -f build/gateway.e2e.Dockerfile .
+    docker build -t "${INSPECTOR_IMAGE}" -f build/inspector-agent.e2e.Dockerfile .
   else
     echo "error: host Docker unavailable and context ${CONTEXT} is not minikube" >&2
     echo "hint: pass --context minikube, or start Docker Desktop / a Docker daemon" >&2
@@ -394,8 +411,10 @@ cleanup() {
             sleep 2
           fi
         done
+        minikube -p "${MINIKUBE_PROFILE}" image rm "${INSPECTOR_IMAGE}" || true
       elif host_docker_ok; then
         docker image rm "${GATEWAY_IMAGE}" --force || true
+        docker image rm "${INSPECTOR_IMAGE}" --force || true
       fi
     fi
     uninstall_temporary_helper

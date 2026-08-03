@@ -6,6 +6,10 @@ import type {
   HostAlias,
   InterceptInfo,
   InterceptMapping,
+  InspectorConfig,
+  InspectorEvent,
+  InspectorState,
+  InspectorTarget,
   ManualNetwork,
   MCPInstallResult,
   MCPStatus,
@@ -51,6 +55,10 @@ declare global {
           TestIntercept(id: string): Promise<ConnectivityTestResult>;
           ListIntercepts(): Promise<InterceptInfo[]>;
           ListMirrors(): Promise<InterceptInfo[]>;
+          StartInspector(config: InspectorConfig): Promise<void>;
+          UpdateInspectorTargets(targets: InspectorTarget[]): Promise<void>;
+          StopInspector(): Promise<void>;
+          GetInspectorState(): Promise<InspectorState>;
           StartPreview(request: PreviewRequest): Promise<PreviewInfo>;
           StopPreview(id: string): Promise<void>;
           ListPreviews(): Promise<PreviewInfo[]>;
@@ -130,6 +138,12 @@ export const backend = {
     Promise.resolve().then(() => api().TestIntercept(id)),
   listIntercepts: () => Promise.resolve().then(() => api().ListIntercepts()),
   listMirrors: () => Promise.resolve().then(() => api().ListMirrors()),
+  startInspector: (config: InspectorConfig) =>
+    Promise.resolve().then(() => api().StartInspector(config)),
+  updateInspectorTargets: (targets: InspectorTarget[]) =>
+    Promise.resolve().then(() => api().UpdateInspectorTargets(targets)),
+  stopInspector: () => Promise.resolve().then(() => api().StopInspector()),
+  getInspectorState: () => Promise.resolve().then(() => api().GetInspectorState()),
   startPreview: (request: PreviewRequest) =>
     Promise.resolve().then(() => api().StartPreview(request)),
   stopPreview: (id: string) => Promise.resolve().then(() => api().StopPreview(id)),
@@ -165,6 +179,13 @@ export const backend = {
     return window.runtime.EventsOn(
       "session:metrics",
       callback as (metrics: never) => void,
+    );
+  },
+  onInspectorEvent: (callback: (event: InspectorEvent) => void) => {
+    if (!window.runtime) return () => undefined;
+    return window.runtime.EventsOn(
+      "inspector:flow",
+      callback as (event: never) => void,
     );
   },
   onUpdate: (callback: (state: UpdateInfo) => void) => {

@@ -7,6 +7,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 func (a *App) StartIntercept(mapping intercept.Mapping) (intercept.Info, error) {
@@ -31,6 +32,22 @@ func (a *App) ListIntercepts() []intercept.Info {
 
 func (a *App) ListMirrors() []intercept.Info {
 	return a.manager.ListMirrors()
+}
+
+func (a *App) StartInspector(config tunnel.InspectorConfig) error {
+	return a.manager.StartInspector(a.context(), config)
+}
+
+func (a *App) UpdateInspectorTargets(targets []tunnel.InspectorTarget) error {
+	return a.manager.UpdateInspectorTargets(targets)
+}
+
+func (a *App) StopInspector() error {
+	return a.manager.StopInspector()
+}
+
+func (a *App) GetInspectorState() tunnel.InspectorState {
+	return a.manager.InspectorState()
 }
 
 func (a *App) StartPreview(request intercept.PreviewRequest) (intercept.Info, error) {

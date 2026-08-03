@@ -22,7 +22,11 @@ type controlSession struct {
 	version byte
 	token   tunnel.SessionToken
 	mu      sync.Mutex
+	eventMu sync.Mutex
 	events  net.Conn
+
+	inspectorMu sync.RWMutex
+	inspector   *inspectorSession
 }
 
 type interceptListener struct {
@@ -79,7 +83,10 @@ func (s *Server) handleControl(client net.Conn, header tunnel.SessionHeader) {
 		return
 	}
 	if header.Version == tunnel.ProtocolV2 {
-		if err := tunnel.WriteCapabilities(client, s.Capabilities); err != nil {
+		s.mu.Lock()
+		capabilities := s.Capabilities
+		s.mu.Unlock()
+		if err := tunnel.WriteCapabilities(client, capabilities); err != nil {
 			return
 		}
 	}
@@ -98,6 +105,30 @@ func (s *Server) handleControl(client net.Conn, header tunnel.SessionHeader) {
 		case tunnel.CtrlUnregister:
 			s.unregisterIntercept(message.InterceptID)
 			_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlAck})
+		case tunnel.CtrlInspectorStart:
+			if session.version != tunnel.ProtocolV2 {
+				_ = session.reply(tunnel.ControlMessage{
+					Type: tunnel.CtrlError, Error: "Inspector requires KCG2",
+				})
+				continue
+			}
+			if err := s.startInspector(session, *message.Inspector); err != nil {
+				_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlError, Error: err.Error()})
+				continue
+			}
+			_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlAck})
+		case tunnel.CtrlInspectorUpdateTargets:
+			if err := s.updateInspectorTargets(session, message.Targets); err != nil {
+				_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlError, Error: err.Error()})
+				continue
+			}
+			_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlAck})
+		case tunnel.CtrlInspectorStop:
+			if err := s.stopInspector(session); err != nil {
+				_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlError, Error: err.Error()})
+				continue
+			}
+			_ = session.reply(tunnel.ControlMessage{Type: tunnel.CtrlAck})
 		default:
 			_ = session.reply(tunnel.ControlMessage{
 				Type: tunnel.CtrlError, Error: fmt.Sprintf("unsupported control type %d", message.Type),
@@ -113,8 +144,8 @@ func (c *controlSession) reply(message tunnel.ControlMessage) error {
 }
 
 func (c *controlSession) attachEvents(connection net.Conn) error {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.eventMu.Lock()
+	defer c.eventMu.Unlock()
 	if c.events != nil {
 		return errors.New("Inspector event channel is already connected")
 	}
@@ -123,18 +154,19 @@ func (c *controlSession) attachEvents(connection net.Conn) error {
 }
 
 func (c *controlSession) detachEvents(connection net.Conn) {
-	c.mu.Lock()
+	c.eventMu.Lock()
 	if c.events == connection {
 		c.events = nil
 	}
-	c.mu.Unlock()
+	c.eventMu.Unlock()
 }
 
 func (s *Server) removeControl(session *controlSession) {
-	session.mu.Lock()
+	_ = s.stopInspector(session)
+	session.eventMu.Lock()
 	events := session.events
 	session.events = nil
-	session.mu.Unlock()
+	session.eventMu.Unlock()
 	if events != nil {
 		_ = events.Close()
 	}

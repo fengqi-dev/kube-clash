@@ -9,6 +9,7 @@ const headerKeys: Record<AppView, TranslationKey> = {
   overview: "header.overview",
   clusters: "header.clusters",
   connections: "header.connections",
+  inspector: "header.inspector",
   workload: "header.workload",
   network: "header.network",
   "host-aliases": "header.hostAliases",

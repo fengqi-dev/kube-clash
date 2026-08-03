@@ -167,7 +167,7 @@ jobs:
           if-no-files-found: error
 
   gateway:
-    name: Gateway (linux/${{ matrix.arch }})
+    name: Gateway components (linux/${{ matrix.arch }})
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     strategy:
@@ -199,6 +199,11 @@ jobs:
             -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
             -o "dist/kubeloop-gateway-${version}-linux-${GOARCH}" \
             ./cmd/kubeloop-gateway
+          CGO_ENABLED=0 GOOS=linux go build \
+            -trimpath \
+            -ldflags="-s -w -X main.version=${GITHUB_REF_NAME}" \
+            -o "dist/kubeloop-inspector-agent-${version}-linux-${GOARCH}" \
+            ./cmd/kubeloop-inspector-agent
 
       - name: Upload Gateway artifact
         uses: actions/upload-artifact@v7
@@ -208,7 +213,7 @@ jobs:
           if-no-files-found: error
 
   gateway-image:
-    name: Publish Gateway image
+    name: Publish Gateway component images
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -247,6 +252,27 @@ jobs:
           push: true
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            VERSION=${{ github.ref_name }}
+
+      - name: Generate Inspector Agent image metadata
+        id: inspector-metadata
+        uses: docker/metadata-action@v6
+        with:
+          images: ghcr.io/${{ github.repository }}/inspector-agent
+          tags: |
+            type=ref,event=tag
+            type=raw,value=latest
+
+      - name: Build and push Inspector Agent image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: build/inspector-agent.Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.inspector-metadata.outputs.tags }}
+          labels: ${{ steps.inspector-metadata.outputs.labels }}
           build-args: |
             VERSION=${{ github.ref_name }}
 

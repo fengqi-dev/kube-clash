@@ -7,6 +7,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
 	"github.com/fengqi-dev/kube-loop/internal/store"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 const (
@@ -88,6 +89,55 @@ func (m *Manager) ListIntercepts() []intercept.Info {
 
 func (m *Manager) ListMirrors() []intercept.Info {
 	return m.intercept.ListMirrors()
+}
+
+func (m *Manager) StartInspector(
+	ctx context.Context, config tunnel.InspectorConfig,
+) error {
+	m.AppendLog("INFO", fmt.Sprintf(
+		"starting traffic Inspector: targets=%d maxBodySize=%d",
+		len(config.Targets), config.MaxBodySize,
+	))
+	if err := m.intercept.StartInspector(ctx, config); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("start traffic Inspector: %v", err))
+		return err
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"traffic Inspector started: targets=%d", len(config.Targets),
+	))
+	return nil
+}
+
+func (m *Manager) UpdateInspectorTargets(targets []tunnel.InspectorTarget) error {
+	m.AppendLog("INFO", fmt.Sprintf(
+		"updating traffic Inspector targets: targets=%d", len(targets),
+	))
+	if err := m.intercept.UpdateInspectorTargets(targets); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("update traffic Inspector targets: %v", err))
+		return err
+	}
+	m.AppendLog("INFO", fmt.Sprintf(
+		"traffic Inspector targets updated: targets=%d", len(targets),
+	))
+	return nil
+}
+
+func (m *Manager) StopInspector() error {
+	m.AppendLog("INFO", "stopping traffic Inspector")
+	if err := m.intercept.StopInspector(); err != nil {
+		m.AppendLog("ERROR", fmt.Sprintf("stop traffic Inspector: %v", err))
+		return err
+	}
+	m.AppendLog("INFO", "traffic Inspector stopped")
+	return nil
+}
+
+func (m *Manager) InspectorEvents() <-chan tunnel.InspectorEvent {
+	return m.intercept.InspectorEvents()
+}
+
+func (m *Manager) InspectorState() tunnel.InspectorState {
+	return m.intercept.InspectorState()
 }
 
 func (m *Manager) StartPreview(ctx context.Context, request intercept.PreviewRequest) (intercept.Info, error) {

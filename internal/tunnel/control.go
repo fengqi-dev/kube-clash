@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"encoding/binary"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -16,6 +17,8 @@ const (
 
 	NetworkTCP byte = 1
 	NetworkUDP byte = 2
+
+	maxControlPayloadSize = 60 << 10
 )
 
 type ControlMessage struct {
@@ -25,12 +28,17 @@ type ControlMessage struct {
 	ListenPort  uint16
 	StreamID    uint64
 	Error       string
+	Inspector   *InspectorConfig
+	Targets     []InspectorTarget
 }
 
 func WriteControlMessage(w io.Writer, message ControlMessage) error {
 	payload, err := encodeControlPayload(message)
 	if err != nil {
 		return err
+	}
+	if len(payload) > maxControlPayloadSize {
+		return errors.New("control message is too large")
 	}
 	header := make([]byte, 3)
 	header[0] = message.Type
@@ -48,7 +56,7 @@ func ReadControlMessage(r io.Reader) (ControlMessage, error) {
 	}
 	messageType := header[0]
 	size := int(binary.BigEndian.Uint16(header[1:3]))
-	if size > maxHostSize+maxIDSize+32 {
+	if size > maxControlPayloadSize {
 		return ControlMessage{}, errors.New("control message is too large")
 	}
 	payload := make([]byte, size)
@@ -113,6 +121,21 @@ func encodeControlPayload(message ControlMessage) ([]byte, error) {
 			message.Error = message.Error[:maxErrorSize]
 		}
 		return []byte(message.Error), nil
+	case CtrlInspectorStart:
+		if message.Inspector == nil {
+			return nil, errors.New("Inspector config is required")
+		}
+		if err := message.Inspector.Validate(); err != nil {
+			return nil, err
+		}
+		return json.Marshal(message.Inspector)
+	case CtrlInspectorUpdateTargets:
+		if err := ValidateInspectorTargets(message.Targets); err != nil {
+			return nil, err
+		}
+		return json.Marshal(message.Targets)
+	case CtrlInspectorStop:
+		return nil, nil
 	default:
 		return nil, fmt.Errorf("unsupported control message type %d", message.Type)
 	}
@@ -180,6 +203,35 @@ func decodeControlPayload(messageType byte, payload []byte) (ControlMessage, err
 			return ControlMessage{}, errors.New("error message is required")
 		}
 		message.Error = string(payload)
+		return message, nil
+	case CtrlInspectorStart:
+		if len(payload) == 0 {
+			return ControlMessage{}, errors.New("Inspector config is required")
+		}
+		var config InspectorConfig
+		if err := json.Unmarshal(payload, &config); err != nil {
+			return ControlMessage{}, fmt.Errorf("decode Inspector config: %w", err)
+		}
+		if err := config.Validate(); err != nil {
+			return ControlMessage{}, err
+		}
+		message.Inspector = &config
+		return message, nil
+	case CtrlInspectorUpdateTargets:
+		if len(payload) == 0 {
+			return ControlMessage{}, errors.New("Inspector targets are required")
+		}
+		if err := json.Unmarshal(payload, &message.Targets); err != nil {
+			return ControlMessage{}, fmt.Errorf("decode Inspector targets: %w", err)
+		}
+		if err := ValidateInspectorTargets(message.Targets); err != nil {
+			return ControlMessage{}, err
+		}
+		return message, nil
+	case CtrlInspectorStop:
+		if len(payload) != 0 {
+			return ControlMessage{}, errors.New("invalid Inspector stop payload")
+		}
 		return message, nil
 	default:
 		return ControlMessage{}, fmt.Errorf("unsupported control message type %d", messageType)

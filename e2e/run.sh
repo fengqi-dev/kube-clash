@@ -7,10 +7,13 @@ cd "${ROOT}"
 
 CONTEXT="${KUBELOOP_E2E_CONTEXT:-minikube}"
 IMAGE="${KUBELOOP_GATEWAY_IMAGE:-kube-loop-gateway:dev}"
+INSPECTOR_IMAGE="${IMAGE/gateway/inspector-agent}"
 ARCH="$(go env GOARCH)"
 
 BINARY="build/bin/kube-loop-gateway"
+INSPECTOR_BINARY="build/bin/kube-loop-inspector-agent"
 DOCKERFILE="build/gateway.e2e.Dockerfile"
+INSPECTOR_DOCKERFILE="build/inspector-agent.e2e.Dockerfile"
 GATEWAY_NS="kubeloop-system"
 GATEWAY_LABEL="app.kubernetes.io/name=kubeloop-gateway"
 HELPER_SRC="build/embedded/kubeloop-helper"
@@ -29,6 +32,10 @@ build_gateway() {
     -trimpath -ldflags="-s -w" \
     -o "${BINARY}" \
     ./cmd/kubeloop-gateway
+  CGO_ENABLED=0 GOOS=linux GOARCH="${ARCH}" go build \
+    -trimpath -ldflags="-s -w" \
+    -o "${INSPECTOR_BINARY}" \
+    ./cmd/kubeloop-inspector-agent
 }
 
 host_docker_ok() {
@@ -40,6 +47,7 @@ load_image_docker() {
     eval "$(minikube docker-env --shell bash)"
   fi
   docker build -t "${IMAGE}" -f "${DOCKERFILE}" .
+  docker build -t "${INSPECTOR_IMAGE}" -f "${INSPECTOR_DOCKERFILE}" .
 }
 
 load_image_minikube() {
@@ -47,19 +55,25 @@ load_image_minikube() {
   local remote="/tmp/gwbuild"
 
   minikube cp "${BINARY}" /tmp/kube-loop-gateway
+  minikube cp "${INSPECTOR_BINARY}" /tmp/kube-loop-inspector-agent
   minikube cp "${DOCKERFILE}" /tmp/Dockerfile.e2e
+  minikube cp "${INSPECTOR_DOCKERFILE}" /tmp/Dockerfile.inspector-e2e
   minikube ssh -- "
     set -e
     sudo mkdir -p ${remote}/build/bin
     sudo cp /tmp/kube-loop-gateway ${remote}/build/bin/kube-loop-gateway
+    sudo cp /tmp/kube-loop-inspector-agent ${remote}/build/bin/kube-loop-inspector-agent
     sudo cp /tmp/Dockerfile.e2e ${remote}/Dockerfile
+    sudo cp /tmp/Dockerfile.inspector-e2e ${remote}/Dockerfile.inspector
     sudo chmod 755 ${remote}/build/bin/kube-loop-gateway
+    sudo chmod 755 ${remote}/build/bin/kube-loop-inspector-agent
     cd ${remote} && sudo docker build -t ${IMAGE} -f Dockerfile .
+    cd ${remote} && sudo docker build -t ${INSPECTOR_IMAGE} -f Dockerfile.inspector .
   "
 }
 
 load_gateway_image() {
-  log "Loading Gateway image (${IMAGE})"
+  log "Loading Gateway component images (${IMAGE}, ${INSPECTOR_IMAGE})"
   if host_docker_ok; then
     load_image_docker
   else

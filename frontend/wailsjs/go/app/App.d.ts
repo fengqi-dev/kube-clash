@@ -4,6 +4,7 @@ import {cluster} from '../models';
 import {app} from '../models';
 import {update} from '../models';
 import {store} from '../models';
+import {tunnel} from '../models';
 import {mcp} from '../models';
 import {helperapi} from '../models';
 import {intercept} from '../models';
@@ -25,6 +26,8 @@ export function Disconnect():Promise<void>;
 export function GatewayInstallManifest():Promise<string>;
 
 export function GetHostAliases(arg1:string):Promise<Array<store.HostAliasSpec>>;
+
+export function GetInspectorState():Promise<tunnel.InspectorState>;
 
 export function GetMCPStatus():Promise<mcp.Status>;
 
@@ -80,6 +83,8 @@ export function SetMCPTokenEnabled(arg1:boolean):Promise<void>;
 
 export function SetManualNetwork(arg1:string,arg2:cluster.ManualNetwork):Promise<void>;
 
+export function StartInspector(arg1:tunnel.InspectorConfig):Promise<void>;
+
 export function StartIntercept(arg1:intercept.Mapping):Promise<intercept.Info>;
 
 export function StartMirror(arg1:intercept.Mapping):Promise<intercept.Info>;
@@ -87,6 +92,8 @@ export function StartMirror(arg1:intercept.Mapping):Promise<intercept.Info>;
 export function StartPortForward(arg1:portfwd.Request):Promise<portfwd.Info>;
 
 export function StartPreview(arg1:intercept.PreviewRequest):Promise<intercept.Info>;
+
+export function StopInspector():Promise<void>;
 
 export function StopIntercept(arg1:string):Promise<void>;
 
@@ -99,3 +106,5 @@ export function TestIntercept(arg1:string):Promise<session.ConnectivityTestResul
 export function TestPortForward(arg1:string):Promise<session.ConnectivityTestResult>;
 
 export function UninstallHelper():Promise<void>;
+
+export function UpdateInspectorTargets(arg1:Array<tunnel.InspectorTarget>):Promise<void>;

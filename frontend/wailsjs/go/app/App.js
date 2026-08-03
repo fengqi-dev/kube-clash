@@ -34,6 +34,10 @@ export function GetHostAliases(arg1) {
   return window['go']['app']['App']['GetHostAliases'](arg1);
 }
 
+export function GetInspectorState() {
+  return window['go']['app']['App']['GetInspectorState']();
+}
+
 export function GetMCPStatus() {
   return window['go']['app']['App']['GetMCPStatus']();
 }
@@ -142,6 +146,10 @@ export function SetManualNetwork(arg1, arg2) {
   return window['go']['app']['App']['SetManualNetwork'](arg1, arg2);
 }
 
+export function StartInspector(arg1) {
+  return window['go']['app']['App']['StartInspector'](arg1);
+}
+
 export function StartIntercept(arg1) {
   return window['go']['app']['App']['StartIntercept'](arg1);
 }
@@ -156,6 +164,10 @@ export function StartPortForward(arg1) {
 
 export function StartPreview(arg1) {
   return window['go']['app']['App']['StartPreview'](arg1);
+}
+
+export function StopInspector() {
+  return window['go']['app']['App']['StopInspector']();
 }
 
 export function StopIntercept(arg1) {
@@ -180,4 +192,8 @@ export function TestPortForward(arg1) {
 
 export function UninstallHelper() {
   return window['go']['app']['App']['UninstallHelper']();
+}
+
+export function UpdateInspectorTargets(arg1) {
+  return window['go']['app']['App']['UpdateInspectorTargets'](arg1);
 }

@@ -3,19 +3,18 @@ ARG VERSION=dev
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
-COPY cmd/kubeloop-gateway ./cmd/kubeloop-gateway
+COPY cmd/kubeloop-inspector-agent ./cmd/kubeloop-inspector-agent
 COPY internal/gateway ./internal/gateway
 COPY internal/inspectoragent ./internal/inspectoragent
 COPY internal/tunnel ./internal/tunnel
 RUN CGO_ENABLED=0 go build -trimpath \
   -ldflags="-s -w -X main.version=${VERSION}" \
-  -o /out/kube-loop-gateway ./cmd/kubeloop-gateway
+  -o /out/kube-loop-inspector-agent ./cmd/kubeloop-inspector-agent
 
 FROM scratch
 ARG VERSION=dev
-LABEL org.opencontainers.image.title="KubeLoop Gateway" \
+LABEL org.opencontainers.image.title="KubeLoop Inspector Agent" \
       org.opencontainers.image.version="${VERSION}"
-COPY --from=build /out/kube-loop-gateway /kube-loop-gateway
+COPY --from=build /out/kube-loop-inspector-agent /kube-loop-inspector-agent
 USER 65532:65532
-EXPOSE 1080
-ENTRYPOINT ["/kube-loop-gateway"]
+ENTRYPOINT ["/kube-loop-inspector-agent"]

@@ -22,11 +22,11 @@ const (
 )
 
 type InspectorEvent struct {
-	Version  byte
-	Type     byte
-	FlowID   string
-	Sequence uint64
-	Payload  json.RawMessage
+	Version  byte            `json:"version"`
+	Type     byte            `json:"type"`
+	FlowID   string          `json:"flowId"`
+	Sequence uint64          `json:"sequence"`
+	Payload  json.RawMessage `json:"payload"`
 }
 
 func WriteInspectorEvent(w io.Writer, event InspectorEvent) error {

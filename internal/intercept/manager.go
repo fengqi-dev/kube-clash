@@ -69,19 +69,23 @@ type TrafficDialers struct {
 type Manager struct {
 	cluster ClusterAPI
 
-	mu             sync.Mutex
-	active         bool
-	stopping       bool
-	ctx            context.Context
-	contextName    string
-	gatewayIP      string
-	gatewayAddress string
-	sessionToken   tunnel.SessionToken
-	control        *controlSession
-	nextPort       uint32
-	registry       *runtimeRegistry
-	routes         *hostRouteRegistry
-	traffic        TrafficDialers
+	mu              sync.Mutex
+	inspectorOp     sync.Mutex
+	active          bool
+	stopping        bool
+	ctx             context.Context
+	contextName     string
+	gatewayIP       string
+	gatewayAddress  string
+	sessionToken    tunnel.SessionToken
+	control         *controlSession
+	inspector       *tunnel.InspectorConfig
+	inspectorConn   net.Conn
+	inspectorEvents chan tunnel.InspectorEvent
+	nextPort        uint32
+	registry        *runtimeRegistry
+	routes          *hostRouteRegistry
+	traffic         TrafficDialers
 }
 
 type controlRegistration struct {
@@ -111,10 +115,11 @@ type runtimeIntercept struct {
 
 func NewManager(api ClusterAPI) *Manager {
 	manager := &Manager{
-		cluster:  api,
-		nextPort: 20000,
-		registry: newRuntimeRegistry(),
-		routes:   newHostRouteRegistry(),
+		cluster:         api,
+		nextPort:        20000,
+		registry:        newRuntimeRegistry(),
+		routes:          newHostRouteRegistry(),
+		inspectorEvents: make(chan tunnel.InspectorEvent, 256),
 	}
 	manager.control = newControlSession(manager.handleReady)
 	return manager
@@ -206,6 +211,8 @@ func (m *Manager) RecoverControlAt(
 func (m *Manager) recoverControlAt(
 	ctx context.Context, gatewayIP, gatewayAddress string,
 ) error {
+	m.inspectorOp.Lock()
+	defer m.inspectorOp.Unlock()
 	m.mu.Lock()
 	if !m.active || m.stopping {
 		m.mu.Unlock()
@@ -220,30 +227,65 @@ func (m *Manager) recoverControlAt(
 		return fmt.Errorf("gateway address is unavailable")
 	}
 	registrations := m.registry.registrations()
+	var inspector *tunnel.InspectorConfig
+	if m.inspector != nil {
+		copy := *m.inspector
+		copy.Targets = append([]tunnel.InspectorTarget(nil), m.inspector.Targets...)
+		inspector = &copy
+	}
+	oldInspectorConn := m.inspectorConn
+	m.inspectorConn = nil
 	old, generation := m.control.beginRecovery()
 	m.mu.Unlock()
 
+	if oldInspectorConn != nil {
+		_ = oldInspectorConn.Close()
+	}
 	if old != nil {
 		_ = old.close()
 	}
 
-	control, lost, err := m.control.redial(ctx, gatewayAddress, registrations)
+	control, lost, inspectorRestored, err := m.control.redial(
+		ctx, gatewayAddress, registrations, inspector,
+	)
 	if err != nil {
 		m.mu.Lock()
 		m.control.recoveryFailed(generation)
 		m.mu.Unlock()
 		return err
 	}
+	var inspectorConn net.Conn
+	if inspectorRestored {
+		inspectorConn, err = openInspectorEvents(ctx, gatewayAddress, control.token)
+		if err != nil {
+			_ = control.stopInspector()
+			_ = control.close()
+			m.mu.Lock()
+			m.control.recoveryFailed(generation)
+			m.mu.Unlock()
+			return fmt.Errorf("restore Inspector events: %w", err)
+		}
+	}
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if !m.active || m.stopping || !m.control.finishRecovery(generation, control, lost) {
+		if inspectorConn != nil {
+			_ = inspectorConn.Close()
+		}
 		_ = control.close()
 		return fmt.Errorf("session is not connected")
 	}
 	m.gatewayIP = gatewayIP
 	m.gatewayAddress = gatewayAddress
 	m.sessionToken = control.token
+	if inspector != nil && !inspectorRestored {
+		m.inspector = nil
+	}
+	m.inspectorConn = inspectorConn
+	if inspectorConn != nil {
+		go m.readInspectorEvents(inspectorConn)
+	}
 	return nil
 }
 
@@ -273,13 +315,21 @@ func registrationFromRuntime(runtime *runtimeIntercept, subID string) (byte, uin
 }
 
 func (m *Manager) StopAll(ctx context.Context) error {
+	m.inspectorOp.Lock()
+	defer m.inspectorOp.Unlock()
 	m.mu.Lock()
 	m.stopping = true
 	ids := m.registry.ids()
+	inspectorConn := m.inspectorConn
+	m.inspectorConn = nil
+	m.inspector = nil
 	control := m.control.stop()
 	m.active = false
 	m.mu.Unlock()
 
+	if inspectorConn != nil {
+		_ = inspectorConn.Close()
+	}
 	var firstErr error
 	for _, id := range ids {
 		if err := m.Stop(ctx, id); err != nil && firstErr == nil {

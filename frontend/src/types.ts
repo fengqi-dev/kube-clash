@@ -66,6 +66,31 @@ export interface GatewayCapabilities {
   engine?: string;
 }
 
+export interface InspectorTarget {
+  id: string;
+  host: string;
+  port: number;
+  protocol: "http";
+  captureBody?: boolean;
+}
+
+export interface InspectorConfig {
+  maxBodySize: number;
+  targets: InspectorTarget[];
+}
+
+export interface InspectorState extends InspectorConfig {
+  active: boolean;
+}
+
+export interface InspectorEvent {
+  version: number;
+  type: number;
+  flowId: string;
+  sequence: number;
+  payload: Record<string, unknown>;
+}
+
 export interface NetworkDiagnostic {
   code: string;
   severity: "info" | "warning";

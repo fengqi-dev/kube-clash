@@ -92,9 +92,9 @@ jobs:
         run: go test -tags webkit2_41 ./...
 
       - name: Run race detector
-        run: go test -race ./internal/gateway ./internal/helper ./internal/singbox ./internal/session ./internal/socksbridge ./internal/tunnel
+        run: go test -race ./internal/gateway ./internal/helper ./internal/inspectoragent ./internal/intercept ./internal/singbox ./internal/session ./internal/socksbridge ./internal/tunnel
 
-      - name: Build Gateway binaries
+      - name: Build Gateway component binaries
         shell: bash
         run: |
           CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
@@ -103,6 +103,12 @@ jobs:
           CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
             go build -trimpath -ldflags="-s -w -X main.version=ci" \
             -o /tmp/kubeloop-gateway-arm64 ./cmd/kubeloop-gateway
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+            go build -trimpath -ldflags="-s -w -X main.version=ci" \
+            -o /tmp/kubeloop-inspector-agent-amd64 ./cmd/kubeloop-inspector-agent
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+            go build -trimpath -ldflags="-s -w -X main.version=ci" \
+            -o /tmp/kubeloop-inspector-agent-arm64 ./cmd/kubeloop-inspector-agent
 
       - name: Build privileged helper
         shell: bash
@@ -147,7 +153,7 @@ jobs:
           cpus: 2
           memory: 4096
 
-      - name: Build and load Gateway image
+      - name: Build and load Gateway component images
         shell: bash
         run: |
           set -euo pipefail
@@ -156,8 +162,13 @@ jobs:
             -trimpath -ldflags="-s -w" \
             -o build/bin/kube-loop-gateway \
             ./cmd/kubeloop-gateway
+          CGO_ENABLED=0 GOOS=linux GOARCH="$(go env GOARCH)" go build \
+            -trimpath -ldflags="-s -w" \
+            -o build/bin/kube-loop-inspector-agent \
+            ./cmd/kubeloop-inspector-agent
           eval "$(minikube docker-env --shell bash)"
           docker build -t kube-loop-gateway:dev -f build/gateway.e2e.Dockerfile .
+          docker build -t kube-loop-inspector-agent:dev -f build/inspector-agent.e2e.Dockerfile .
 
       - name: Install privileged helper
         shell: bash

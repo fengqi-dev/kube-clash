@@ -64,7 +64,8 @@ func (s *controlSession) redial(
 	ctx context.Context,
 	address string,
 	registrations []controlRegistration,
-) (*controlClient, chan struct{}, error) {
+	inspector *tunnel.InspectorConfig,
+) (*controlClient, chan struct{}, bool, error) {
 	var lastErr error
 	for attempt := 0; attempt < controlRedialAttempts; attempt++ {
 		if attempt > 0 {
@@ -73,14 +74,14 @@ func (s *controlSession) redial(
 			select {
 			case <-ctx.Done():
 				timer.Stop()
-				return nil, nil, ctx.Err()
+				return nil, nil, false, ctx.Err()
 			case <-timer.C:
 			}
 		}
 
 		client, lost, err := s.open(ctx, address)
 		if err != nil {
-			return nil, nil, err
+			return nil, nil, false, err
 		}
 		registered := make([]string, 0, len(registrations))
 		var registrationErr error
@@ -95,8 +96,16 @@ func (s *controlSession) redial(
 			}
 			registered = append(registered, registration.id)
 		}
+		inspectorRestored := false
+		if registrationErr == nil && inspector != nil && client.capabilities.Inspector {
+			if err := client.startInspector(*inspector); err != nil {
+				registrationErr = fmt.Errorf("restore Inspector: %w", err)
+			} else {
+				inspectorRestored = true
+			}
+		}
 		if registrationErr == nil {
-			return client, lost, nil
+			return client, lost, inspectorRestored, nil
 		}
 
 		for index := len(registered) - 1; index >= 0; index-- {
@@ -105,16 +114,17 @@ func (s *controlSession) redial(
 		_ = client.close()
 		lastErr = registrationErr
 		if !isTransientControlRegistrationError(registrationErr) {
-			return nil, nil, registrationErr
+			return nil, nil, false, registrationErr
 		}
 	}
-	return nil, nil, lastErr
+	return nil, nil, false, lastErr
 }
 
 func isTransientControlRegistrationError(err error) bool {
 	message := err.Error()
 	return strings.Contains(message, "already registered") ||
-		strings.Contains(message, "already in use")
+		strings.Contains(message, "already in use") ||
+		strings.Contains(message, "already active")
 }
 
 func (s *controlSession) attach(client *controlClient, lost chan struct{}) {

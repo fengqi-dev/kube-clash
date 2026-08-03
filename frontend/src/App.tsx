@@ -3,6 +3,7 @@ import { AppSidebar } from "@/components/layout/app-sidebar";
 import { StatusBar } from "@/components/layout/status-bar";
 import { ClustersView } from "@/components/clusters/clusters-view";
 import { ConnectionsView } from "@/components/connections/connections-view";
+import { InspectorView } from "@/components/inspector/inspector-view";
 import { HostAliasesView } from "@/components/host-aliases/host-aliases-view";
 import { LogsView } from "@/components/logs/logs-view";
 import { MCPView } from "@/components/mcp/mcp-view";
@@ -124,6 +125,9 @@ function App() {
           )}
           {view === "connections" && (
             <ConnectionsView ready={ready} metrics={session.metrics} />
+          )}
+          {view === "inspector" && (
+            <InspectorView ready={ready} session={session} />
           )}
           {view === "workload" && (
             <WorkloadView

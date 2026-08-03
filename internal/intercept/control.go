@@ -142,6 +142,27 @@ func (c *controlClient) unregister(interceptID string) error {
 	})
 }
 
+func (c *controlClient) startInspector(config tunnel.InspectorConfig) error {
+	if !c.capabilities.Inspector {
+		return fmt.Errorf("Gateway Inspector is unavailable")
+	}
+	return c.roundTrip(tunnel.ControlMessage{
+		Type:      tunnel.CtrlInspectorStart,
+		Inspector: &config,
+	})
+}
+
+func (c *controlClient) updateInspectorTargets(targets []tunnel.InspectorTarget) error {
+	return c.roundTrip(tunnel.ControlMessage{
+		Type:    tunnel.CtrlInspectorUpdateTargets,
+		Targets: targets,
+	})
+}
+
+func (c *controlClient) stopInspector() error {
+	return c.roundTrip(tunnel.ControlMessage{Type: tunnel.CtrlInspectorStop})
+}
+
 func (c *controlClient) roundTrip(message tunnel.ControlMessage) error {
 	c.writeMu.Lock()
 	defer c.writeMu.Unlock()

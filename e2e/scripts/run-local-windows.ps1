@@ -25,6 +25,7 @@ $cache = Join-Path $root ".gocache-e2e"
 if ([string]::IsNullOrWhiteSpace($GatewayImage)) {
     $GatewayImage = "kube-loop-gateway:e2e-local-$PID"
 }
+$InspectorImage = $GatewayImage.Replace("gateway", "inspector-agent")
 
 $mainPackages = @(
     "./e2e/connect",
@@ -196,6 +197,14 @@ to record the expected DNS failures.
                 "build/bin/kube-loop-gateway",
                 "./cmd/kubeloop-gateway"
             )
+            Invoke-Checked -Command go -Arguments @(
+                "build",
+                "-trimpath",
+                "-ldflags=-s -w",
+                "-o",
+                "build/bin/kube-loop-inspector-agent",
+                "./cmd/kubeloop-inspector-agent"
+            )
         }
         finally {
             $env:CGO_ENABLED = $oldCGO
@@ -205,6 +214,9 @@ to record the expected DNS failures.
         Invoke-Checked docker build `
             -t $GatewayImage `
             -f build/gateway.e2e.Dockerfile .
+        Invoke-Checked docker build `
+            -t $InspectorImage `
+            -f build/inspector-agent.e2e.Dockerfile .
         $imageBuilt = $true
     }
     elseif (-not (Test-Path -LiteralPath $singBox)) {
@@ -281,6 +293,7 @@ finally {
             --wait=false
         if ($imageBuilt) {
             & docker image rm $GatewayImage --force
+            & docker image rm $InspectorImage --force
         }
         Uninstall-TemporaryHelper
     }

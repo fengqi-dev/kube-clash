@@ -180,11 +180,11 @@ func TestControlSessionRedialRetriesStaleRegistration(t *testing.T) {
 	}()
 
 	session := newControlSession(nil)
-	client, _, err := session.redial(context.Background(), listener.Addr().String(), []controlRegistration{{
+	client, _, _, err := session.redial(context.Background(), listener.Addr().String(), []controlRegistration{{
 		id:         "default/api:tcp:80",
 		network:    tunnel.NetworkTCP,
 		listenPort: 20001,
-	}})
+	}}, nil)
 	if err != nil {
 		close(release)
 		t.Fatalf("redial: %v", err)

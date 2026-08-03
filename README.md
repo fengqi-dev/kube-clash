@@ -152,6 +152,14 @@ These checks verify transport reachability, not application-level response seman
 Generic UDP testing is intentionally unsupported because it requires a
 protocol-specific payload.
 
+## Traffic Inspector
+
+Traffic Inspector can capture selected plaintext HTTP/1.1 targets at the in-cluster
+Gateway. Selection is exact by host and port; headers are redacted, body capture is
+optional and bounded, and events remain in memory. Unselected TCP traffic and all UDP
+traffic keep using the direct path. HTTPS, HTTP/2, and gRPC support are planned in
+later phases; see the [Inspector design](docs/gateway-traffic-inspector-design.zh-CN.md).
+
 ## MCP for editors and agents
 
 KubeLoop can expose the same backend through a local MCP server using Streamable
@@ -206,7 +214,8 @@ wails dev
 ```
 
 `wails dev` builds and embeds the platform Helper automatically. To use a local
-Gateway image:
+Gateway image, build the matching derived Inspector Agent image as well
+(`kube-loop-gateway:dev` → `kube-loop-inspector-agent:dev`):
 
 ```bash
 KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
@@ -249,8 +258,8 @@ VITE_APP_VERSION="$VERSION" wails build -ldflags "-X main.version=${VERSION}"
 ```
 
 Pushing a `v*` tag triggers the release workflow. It builds six desktop targets,
-Gateway binaries, a multi-architecture Gateway image, checksums, the Homebrew Cask
-update, and the project website.
+Gateway and Inspector Agent binaries, both multi-architecture component images,
+checksums, the Homebrew Cask update, and the project website.
 
 ## Documentation
 

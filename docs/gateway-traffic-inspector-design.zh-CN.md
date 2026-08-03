@@ -1,8 +1,8 @@
 # Gateway Traffic Inspector 设计
 
-> 状态：提案
+> 状态：Phase 0、Phase 1 已实现；Phase 2–5 为提案
 > 范围：HTTP/1.1、HTTPS、HTTP/2、gRPC
-> 目标版本：待定
+> 当前实现：KCG2 + `native-http/1` 只读 Inspector Agent
 
 ## 1. 背景
 
@@ -29,7 +29,8 @@ Gateway 收到 TCP open 请求后解析目标地址，在集群内直接连接�
 本方案采用：
 
 1. **Inspector 位于 Gateway 层**，不在工作站额外创建 TUN 或透明代理。
-2. **mitmproxy 作为可替换的 Inspector Engine**，由独立 Inspector Agent sidecar 托管。
+2. **Inspector Engine 可替换**，由独立 Inspector Agent sidecar 托管。Phase 1 使用
+   `native-http/1`；mitmproxy 保留为 Phase 2 以后 TLS/HTTP2/gRPC Engine 的候选实现。
 3. **每个桌面 Session 使用隔离的 Inspector worker 和短期 Intermediate CA**。
 4. **Gateway 根据 Session、目标 IP 和端口显式选择 Inspector**，不自动接管全部集群流量。
 5. **其他 TCP/UDP 协议默认直接转发**，不经过 mitmproxy。
@@ -786,6 +787,8 @@ Minikube E2E 覆盖。真实 macOS/Windows TUN + Inspector 可由 self-hosted ru
 
 ### Phase 0：协议和能力
 
+状态：已完成。
+
 - KCG2 Session Token；
 - Gateway capability negotiation；
 - 独立 event channel；
@@ -793,6 +796,8 @@ Minikube E2E 覆盖。真实 macOS/Windows TUN + Inspector 可由 self-hosted ru
 - UI capability 状态。
 
 ### Phase 1：HTTP 只读
+
+状态：已完成（`native-http/1` Engine）。
 
 - Inspector Agent sidecar；
 - 每 Session worker；

@@ -14,6 +14,7 @@ export type AppView =
   | "overview"
   | "clusters"
   | "connections"
+  | "inspector"
   | "workload"
   | "network"
   | "host-aliases"

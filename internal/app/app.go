@@ -112,6 +112,11 @@ func (a *App) startup(ctx context.Context) {
 				runtime.EventsEmit(ctx, "session:metrics", metrics)
 			}
 		})
+		go func() {
+			for event := range a.manager.InspectorEvents() {
+				runtime.EventsEmit(ctx, "inspector:flow", event)
+			}
+		}()
 		a.manager.AppendLog("INFO", "application startup initialized")
 		go func() {
 			state := a.checkForUpdates(ctx)

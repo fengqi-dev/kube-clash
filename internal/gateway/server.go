@@ -18,9 +18,10 @@ import (
 )
 
 type Server struct {
-	Logger       *log.Logger
-	DialTimeout  time.Duration
-	Capabilities tunnel.Capabilities
+	Logger          *log.Logger
+	DialTimeout     time.Duration
+	Capabilities    tunnel.Capabilities
+	InspectorEngine InspectorEngine
 
 	mu              sync.Mutex
 	nextStream      atomic.Uint64
@@ -90,7 +91,8 @@ func (s *Server) handle(client net.Conn) {
 
 func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader) {
 	defer client.Close()
-	if err := s.authorizeSession(header); err != nil {
+	control, err := s.authorizeSession(header)
+	if err != nil {
 		_ = tunnel.WriteStatus(client, err)
 		return
 	}
@@ -108,6 +110,24 @@ func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader) {
 		s.logf("deny %s: %v", request.Address(), err)
 		return
 	}
+	if control != nil {
+		inspected, matched, inspectErr := control.dialInspector(ctx, request, targetAddress)
+		if matched && inspectErr == nil {
+			defer inspected.Close()
+			if err := tunnel.WriteStatus(client, nil); err != nil {
+				return
+			}
+			relayTCP(client, inspected)
+			return
+		}
+		if matched {
+			s.logf(
+				"Inspector fail-open for target %s: %v",
+				request.Address(), inspectErr,
+			)
+		}
+	}
+
 	network := "tcp"
 	if request.Command == tunnel.CommandUDP {
 		network = "udp"
@@ -149,17 +169,19 @@ func (s *Server) handleAccept(client net.Conn, header tunnel.SessionHeader) {
 	pending.serve(client)
 }
 
-func (s *Server) authorizeSession(header tunnel.SessionHeader) error {
+func (s *Server) authorizeSession(
+	header tunnel.SessionHeader,
+) (*controlSession, error) {
 	if header.Version == tunnel.ProtocolV1 {
-		return nil
+		return nil, nil
 	}
 	s.mu.Lock()
 	control := s.controlsByToken[header.Token]
 	s.mu.Unlock()
 	if control == nil {
-		return errors.New("unknown or expired KCG2 session")
+		return nil, errors.New("unknown or expired KCG2 session")
 	}
-	return nil
+	return control, nil
 }
 
 func (s *Server) handleInspectorEvents(client net.Conn, header tunnel.SessionHeader) {

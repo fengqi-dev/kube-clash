@@ -15,6 +15,7 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes"
@@ -23,9 +24,10 @@ import (
 )
 
 const (
-	GatewayNamespace = "kubeloop-system"
-	GatewayName      = "kubeloop-gateway"
-	GatewayPort      = 1080
+	GatewayNamespace    = "kubeloop-system"
+	GatewayName         = "kubeloop-gateway"
+	GatewayPort         = 1080
+	InspectorSocketPath = "/var/run/kubeloop-inspector/agent.sock"
 )
 
 // GatewayInfo identifies the running in-cluster Gateway Pod.
@@ -102,6 +104,7 @@ func GatewayInstallManifest(image string) string {
 	if image == "" {
 		image = "ghcr.io/fengqi-dev/kube-loop/gateway:latest"
 	}
+	inspectorImage := InspectorAgentImage(image)
 	return fmt.Sprintf(`apiVersion: v1
 kind: Namespace
 metadata:
@@ -133,14 +136,84 @@ spec:
         app.kubernetes.io/managed-by: kubeloop
     spec:
       automountServiceAccountToken: false
+      securityContext:
+        runAsNonRoot: true
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
       containers:
         - name: gateway
           image: %s
+          args:
+            - --inspector-agent-socket=%s
           ports:
             - name: tunnel
               containerPort: %d
               protocol: TCP
-`, GatewayNamespace, GatewayName, GatewayName, GatewayNamespace, GatewayName, GatewayName, GatewayName, image, GatewayPort)
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 10m
+              memory: 16Mi
+            limits:
+              cpu: 500m
+              memory: 128Mi
+          volumeMounts:
+            - name: inspector-runtime
+              mountPath: /var/run/kubeloop-inspector
+        - name: inspector-agent
+          image: %s
+          args:
+            - --socket=%s
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop:
+                - ALL
+          resources:
+            requests:
+              cpu: 20m
+              memory: 32Mi
+            limits:
+              cpu: "1"
+              memory: 256Mi
+          readinessProbe:
+            exec:
+              command:
+                - /kube-loop-inspector-agent
+                - --probe
+                - --socket=%s
+            initialDelaySeconds: 1
+            periodSeconds: 2
+          volumeMounts:
+            - name: inspector-runtime
+              mountPath: /var/run/kubeloop-inspector
+      volumes:
+        - name: inspector-runtime
+          emptyDir:
+            medium: Memory
+`, GatewayNamespace, GatewayName, GatewayName, GatewayNamespace, GatewayName,
+		GatewayName, GatewayName, image, InspectorSocketPath, GatewayPort,
+		inspectorImage, InspectorSocketPath, InspectorSocketPath)
+}
+
+func InspectorAgentImage(gatewayImage string) string {
+	if gatewayImage == "" {
+		return "ghcr.io/fengqi-dev/kube-loop/inspector-agent:latest"
+	}
+	slash := strings.LastIndex(gatewayImage, "/")
+	prefix := gatewayImage[:slash+1]
+	name := gatewayImage[slash+1:]
+	if strings.Contains(name, "gateway") {
+		return prefix + strings.Replace(name, "gateway", "inspector-agent", 1)
+	}
+	return "ghcr.io/fengqi-dev/kube-loop/inspector-agent:latest"
 }
 
 func ensureNamespace(ctx context.Context, client kubernetes.Interface) error {
@@ -190,11 +263,27 @@ func ensureDeployment(ctx context.Context, client kubernetes.Interface, image st
 func gatewayDeployment(image string) *appsv1.Deployment {
 	replicas := int32(1)
 	runAsNonRoot := true
+	fsGroup := int64(65532)
 	allowPrivilegeEscalation := false
 	readOnlyRootFilesystem := true
 	pullPolicy := corev1.PullIfNotPresent
 	if strings.HasSuffix(image, ":latest") {
 		pullPolicy = corev1.PullAlways
+	}
+	inspectorImage := InspectorAgentImage(image)
+	inspectorPullPolicy := corev1.PullIfNotPresent
+	if strings.HasSuffix(inspectorImage, ":latest") {
+		inspectorPullPolicy = corev1.PullAlways
+	}
+	securityContext := func() *corev1.SecurityContext {
+		return &corev1.SecurityContext{
+			AllowPrivilegeEscalation: &allowPrivilegeEscalation,
+			ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
+			Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+		}
+	}
+	volumeMount := corev1.VolumeMount{
+		Name: "inspector-runtime", MountPath: "/var/run/kubeloop-inspector",
 	}
 	return &appsv1.Deployment{
 		ObjectMeta: metav1.ObjectMeta{
@@ -211,19 +300,30 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 					AutomountServiceAccountToken: new(false),
 					SecurityContext: &corev1.PodSecurityContext{
 						RunAsNonRoot:   &runAsNonRoot,
+						FSGroup:        &fsGroup,
 						SeccompProfile: &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault},
 					},
 					Containers: []corev1.Container{{
 						Name:            "gateway",
 						Image:           image,
 						ImagePullPolicy: pullPolicy,
+						Args: []string{
+							"--inspector-agent-socket=" + InspectorSocketPath,
+						},
 						Ports: []corev1.ContainerPort{{
 							Name: "tunnel", ContainerPort: GatewayPort, Protocol: corev1.ProtocolTCP,
 						}},
-						SecurityContext: &corev1.SecurityContext{
-							AllowPrivilegeEscalation: &allowPrivilegeEscalation,
-							ReadOnlyRootFilesystem:   &readOnlyRootFilesystem,
-							Capabilities:             &corev1.Capabilities{Drop: []corev1.Capability{"ALL"}},
+						SecurityContext: securityContext(),
+						VolumeMounts:    []corev1.VolumeMount{volumeMount},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("10m"),
+								corev1.ResourceMemory: resource.MustParse("16Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("500m"),
+								corev1.ResourceMemory: resource.MustParse("128Mi"),
+							},
 						},
 						ReadinessProbe: &corev1.Probe{
 							ProbeHandler: corev1.ProbeHandler{
@@ -233,6 +333,42 @@ func gatewayDeployment(image string) *appsv1.Deployment {
 							},
 							InitialDelaySeconds: 1,
 							PeriodSeconds:       2,
+						},
+					}, {
+						Name:            "inspector-agent",
+						Image:           inspectorImage,
+						ImagePullPolicy: inspectorPullPolicy,
+						Args:            []string{"--socket=" + InspectorSocketPath},
+						SecurityContext: securityContext(),
+						VolumeMounts:    []corev1.VolumeMount{volumeMount},
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("20m"),
+								corev1.ResourceMemory: resource.MustParse("32Mi"),
+							},
+							Limits: corev1.ResourceList{
+								corev1.ResourceCPU:    resource.MustParse("1"),
+								corev1.ResourceMemory: resource.MustParse("256Mi"),
+							},
+						},
+						ReadinessProbe: &corev1.Probe{
+							ProbeHandler: corev1.ProbeHandler{
+								Exec: &corev1.ExecAction{Command: []string{
+									"/kube-loop-inspector-agent",
+									"--probe",
+									"--socket=" + InspectorSocketPath,
+								}},
+							},
+							InitialDelaySeconds: 1,
+							PeriodSeconds:       2,
+						},
+					}},
+					Volumes: []corev1.Volume{{
+						Name: "inspector-runtime",
+						VolumeSource: corev1.VolumeSource{
+							EmptyDir: &corev1.EmptyDirVolumeSource{
+								Medium: corev1.StorageMediumMemory,
+							},
 						},
 					}},
 				},

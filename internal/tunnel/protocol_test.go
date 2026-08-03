@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"bytes"
 	"errors"
+	"reflect"
 	"testing"
 )
 
@@ -77,6 +78,22 @@ func TestControlMessageRoundTrip(t *testing.T) {
 		{Type: CtrlInboundReady, InterceptID: "default/http:udp:53", Network: NetworkUDP, StreamID: 42},
 		{Type: CtrlAck},
 		{Type: CtrlError, Error: "listen failed"},
+		{
+			Type: CtrlInspectorStart,
+			Inspector: &InspectorConfig{
+				MaxBodySize: 1024,
+				Targets: []InspectorTarget{{
+					ID: "default/api:8080", Host: "api.default.svc", Port: 8080, Protocol: "http",
+				}},
+			},
+		},
+		{
+			Type: CtrlInspectorUpdateTargets,
+			Targets: []InspectorTarget{{
+				ID: "default/web:80", Host: "web.default.svc", Port: 80, Protocol: "http",
+			}},
+		},
+		{Type: CtrlInspectorStop},
 	}
 	for _, want := range cases {
 		var stream bytes.Buffer
@@ -87,7 +104,7 @@ func TestControlMessageRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("read %#v: %v", want, err)
 		}
-		if got != want {
+		if !reflect.DeepEqual(got, want) {
 			t.Fatalf("got %#v, want %#v", got, want)
 		}
 	}
