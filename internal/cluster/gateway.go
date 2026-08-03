@@ -79,10 +79,11 @@ func (p *Provider) EnsureGateway(ctx context.Context, contextName, image string)
 	if err := ensureNamespace(ctx, client); err != nil {
 		return GatewayInfo{}, err
 	}
-	if err := ensureDeployment(ctx, client, image); err != nil {
+	deployment, err := ensureDeployment(ctx, client, image)
+	if err != nil {
 		return GatewayInfo{}, err
 	}
-	return waitForGatewayPod(ctx, client)
+	return waitForGatewayPod(ctx, client, deployment.Generation)
 }
 
 // GetGateway finds an already-running Gateway Pod without installing resources.
@@ -233,31 +234,34 @@ func ensureNamespace(ctx context.Context, client kubernetes.Interface) error {
 	return nil
 }
 
-func ensureDeployment(ctx context.Context, client kubernetes.Interface, image string) error {
+func ensureDeployment(
+	ctx context.Context, client kubernetes.Interface, image string,
+) (*appsv1.Deployment, error) {
 	expected := gatewayDeployment(image)
 	existing, err := client.AppsV1().Deployments(GatewayNamespace).Get(
 		ctx, GatewayName, metav1.GetOptions{},
 	)
+	var applied *appsv1.Deployment
 	switch {
 	case apierrors.IsNotFound(err):
-		_, err = client.AppsV1().Deployments(GatewayNamespace).Create(
+		applied, err = client.AppsV1().Deployments(GatewayNamespace).Create(
 			ctx, expected, metav1.CreateOptions{},
 		)
 	case err != nil:
-		return fmt.Errorf("get gateway deployment: %w", err)
+		return nil, fmt.Errorf("get gateway deployment: %w", err)
 	default:
 		if existing.Labels["app.kubernetes.io/managed-by"] != "kubeloop" {
-			return errors.New("gateway deployment exists but is not managed by kube-loop")
+			return nil, errors.New("gateway deployment exists but is not managed by kube-loop")
 		}
 		expected.ResourceVersion = existing.ResourceVersion
-		_, err = client.AppsV1().Deployments(GatewayNamespace).Update(
+		applied, err = client.AppsV1().Deployments(GatewayNamespace).Update(
 			ctx, expected, metav1.UpdateOptions{},
 		)
 	}
 	if err != nil {
-		return fmt.Errorf("apply gateway deployment: %w", err)
+		return nil, fmt.Errorf("apply gateway deployment: %w", err)
 	}
-	return nil
+	return applied, nil
 }
 
 func gatewayDeployment(image string) *appsv1.Deployment {
@@ -384,31 +388,54 @@ func findReadyGatewayPod(ctx context.Context, client kubernetes.Interface) (Gate
 	if err != nil {
 		return GatewayInfo{}, fmt.Errorf("list gateway pods: %w", err)
 	}
+	var selected *corev1.Pod
 	for _, pod := range list.Items {
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
 		if pod.Status.Phase != corev1.PodRunning || pod.Status.PodIP == "" {
 			continue
 		}
 		if !podReady(pod) {
 			continue
 		}
-		return GatewayInfo{Name: pod.Name, IP: pod.Status.PodIP}, nil
+		if selected == nil ||
+			pod.CreationTimestamp.Time.After(selected.CreationTimestamp.Time) {
+			current := pod
+			selected = &current
+		}
+	}
+	if selected != nil {
+		return GatewayInfo{Name: selected.Name, IP: selected.Status.PodIP}, nil
 	}
 	return GatewayInfo{}, errors.New("gateway pod not found; ask an admin to install kubeloop-gateway")
 }
 
-func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (GatewayInfo, error) {
+func waitForGatewayPod(
+	ctx context.Context, client kubernetes.Interface, generation int64,
+) (GatewayInfo, error) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 	var lastErr error
 	for {
-		info, err := findReadyGatewayPod(ctx, client)
-		if err == nil {
-			return info, nil
+		deployment, err := client.AppsV1().Deployments(GatewayNamespace).Get(
+			ctx, GatewayName, metav1.GetOptions{},
+		)
+		switch {
+		case err != nil:
+			lastErr = fmt.Errorf("get gateway rollout: %w", err)
+		case !gatewayDeploymentRolledOut(deployment, generation):
+			lastErr = errors.New("gateway deployment rollout is not complete")
+		default:
+			info, findErr := findReadyGatewayPod(ctx, client)
+			if findErr == nil {
+				return info, nil
+			}
+			lastErr = findErr
 		}
 		if apierrors.IsForbidden(err) {
 			return GatewayInfo{}, err
 		}
-		lastErr = err
 		select {
 		case <-ctx.Done():
 			if lastErr != nil {
@@ -418,6 +445,22 @@ func waitForGatewayPod(ctx context.Context, client kubernetes.Interface) (Gatewa
 		case <-ticker.C:
 		}
 	}
+}
+
+func gatewayDeploymentRolledOut(deployment *appsv1.Deployment, generation int64) bool {
+	if deployment == nil || deployment.Status.ObservedGeneration < generation {
+		return false
+	}
+	desired := int32(1)
+	if deployment.Spec.Replicas != nil {
+		desired = *deployment.Spec.Replicas
+	}
+	status := deployment.Status
+	return status.Replicas == desired &&
+		status.UpdatedReplicas == desired &&
+		status.ReadyReplicas == desired &&
+		status.AvailableReplicas == desired &&
+		status.UnavailableReplicas == 0
 }
 
 // StartPortForward opens an API Server port-forward to a Gateway Pod.

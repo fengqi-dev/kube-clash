@@ -1,10 +1,15 @@
 package cluster
 
 import (
+	"context"
 	"strings"
 	"testing"
+	"time"
 
+	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestGatewayDeploymentIsUnprivileged(t *testing.T) {
@@ -72,6 +77,76 @@ func TestGatewayLatestImageIsAlwaysPulled(t *testing.T) {
 			t.Fatalf("latest %s image pull policy = %q, want Always",
 				container.Name, container.ImagePullPolicy)
 		}
+	}
+}
+
+func TestFindReadyGatewayPodPrefersCurrentPod(t *testing.T) {
+	oldCreated := metav1.NewTime(time.Now().Add(-time.Minute))
+	deletingAt := metav1.Now()
+	currentCreated := metav1.Now()
+	ready := []corev1.PodCondition{{
+		Type: corev1.PodReady, Status: corev1.ConditionTrue,
+	}}
+	client := fake.NewSimpleClientset(
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "gateway-old",
+				Namespace:         GatewayNamespace,
+				Labels:            gatewayLabels,
+				CreationTimestamp: oldCreated,
+				DeletionTimestamp: &deletingAt,
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning, PodIP: "10.0.0.1", Conditions: ready,
+			},
+		},
+		&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:              "gateway-current",
+				Namespace:         GatewayNamespace,
+				Labels:            gatewayLabels,
+				CreationTimestamp: currentCreated,
+			},
+			Status: corev1.PodStatus{
+				Phase: corev1.PodRunning, PodIP: "10.0.0.2", Conditions: ready,
+			},
+		},
+	)
+
+	info, err := findReadyGatewayPod(context.Background(), client)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if info.Name != "gateway-current" || info.IP != "10.0.0.2" {
+		t.Fatalf("gateway = %+v, want current ready pod", info)
+	}
+}
+
+func TestGatewayDeploymentRolledOut(t *testing.T) {
+	replicas := int32(1)
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Generation: 2},
+		Spec:       appsv1.DeploymentSpec{Replicas: &replicas},
+		Status: appsv1.DeploymentStatus{
+			ObservedGeneration: 2,
+			Replicas:           1,
+			UpdatedReplicas:    1,
+			ReadyReplicas:      1,
+			AvailableReplicas:  1,
+		},
+	}
+	if !gatewayDeploymentRolledOut(deployment, 2) {
+		t.Fatal("completed rollout was not recognized")
+	}
+
+	deployment.Status.Replicas = 2
+	if gatewayDeploymentRolledOut(deployment, 2) {
+		t.Fatal("rollout with an old replica was considered complete")
+	}
+	deployment.Status.Replicas = 1
+	deployment.Status.ObservedGeneration = 1
+	if gatewayDeploymentRolledOut(deployment, 2) {
+		t.Fatal("unobserved rollout was considered complete")
 	}
 }
 
