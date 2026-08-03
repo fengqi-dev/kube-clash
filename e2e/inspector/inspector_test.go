@@ -22,6 +22,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/session"
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 	"github.com/zalando/go-keyring"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -286,6 +287,13 @@ func TestReverseServiceInspectorDataPath(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	gateway, err := live.Provider.GetGateway(ctx, harness.KubeContext())
+	if err != nil {
+		t.Fatal(err)
+	}
+	tcpListenPort := harness.InterceptListenPort(
+		t, info.Ports, 8080, corev1.ProtocolTCP,
+	)
 	interceptStopped := false
 	t.Cleanup(func() {
 		if interceptStopped {
@@ -300,7 +308,7 @@ func TestReverseServiceInspectorDataPath(t *testing.T) {
 		"Host: echo." + harness.EchoNamespace + ".svc\r\n" +
 		"Connection: close\r\n\r\n"
 	_ = harness.WaitClusterProbe(
-		t, ctx, client, service.Spec.ClusterIP, 8080, "tcp",
+		t, ctx, client, gateway.IP, tcpListenPort, "tcp",
 		request, "HTTP/1.1 200",
 	)
 
