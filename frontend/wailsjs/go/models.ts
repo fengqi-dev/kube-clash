@@ -614,6 +614,33 @@ export namespace portfwd {
 
 }
 
+export namespace tunnel {
+
+	export class Capabilities {
+	    protocolVersion: number;
+	    inspector: boolean;
+	    protocols?: string[];
+	    maxBodySize?: number;
+	    maxTargets?: number;
+	    engine?: string;
+
+	    static createFrom(source: any = {}) {
+	        return new Capabilities(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.protocolVersion = source["protocolVersion"];
+	        this.inspector = source["inspector"];
+	        this.protocols = source["protocols"];
+	        this.maxBodySize = source["maxBodySize"];
+	        this.maxTargets = source["maxTargets"];
+	        this.engine = source["engine"];
+	    }
+	}
+
+}
+
 export namespace session {
 	
 	export class ConnectivityTestResult {
@@ -734,6 +761,7 @@ export namespace session {
 	    network?: NetworkDiagnostics;
 	    discovery?: cluster.Discovery;
 	    capabilities?: cluster.Capabilities;
+	    gatewayCapabilities?: tunnel.Capabilities;
 	    scopeNamespaces?: string[];
 	    gatewayManifest?: string;
 	    pods?: cluster.PodInfo[];
@@ -764,6 +792,7 @@ export namespace session {
 	        this.network = this.convertValues(source["network"], NetworkDiagnostics);
 	        this.discovery = this.convertValues(source["discovery"], cluster.Discovery);
 	        this.capabilities = this.convertValues(source["capabilities"], cluster.Capabilities);
+	        this.gatewayCapabilities = this.convertValues(source["gatewayCapabilities"], tunnel.Capabilities);
 	        this.scopeNamespaces = source["scopeNamespaces"];
 	        this.gatewayManifest = source["gatewayManifest"];
 	        this.pods = this.convertValues(source["pods"], cluster.PodInfo);
@@ -964,4 +993,3 @@ export namespace update {
 	}
 
 }
-

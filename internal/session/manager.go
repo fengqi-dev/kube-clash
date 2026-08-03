@@ -17,6 +17,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 type Phase string
@@ -51,24 +52,25 @@ type Request struct {
 }
 
 type State struct {
-	Phase           Phase                 `json:"phase"`
-	Context         string                `json:"context"`
-	Namespace       string                `json:"namespace"`
-	DNSNamespace    string                `json:"dnsNamespace,omitempty"`
-	Message         string                `json:"message"`
-	Error           string                `json:"error,omitempty"`
-	DNSWarning      string                `json:"dnsWarning,omitempty"`
-	Network         *NetworkDiagnostics   `json:"network,omitempty"`
-	Discovery       *cluster.Discovery    `json:"discovery,omitempty"`
-	Capabilities    *cluster.Capabilities `json:"capabilities,omitempty"`
-	ScopeNamespaces []string              `json:"scopeNamespaces,omitempty"`
-	GatewayManifest string                `json:"gatewayManifest,omitempty"`
-	Pods            []cluster.PodInfo     `json:"pods,omitempty"`
-	Services        []cluster.ServiceInfo `json:"services,omitempty"`
-	Events          []LogEvent            `json:"events,omitempty"`
-	CoreVersion     string                `json:"coreVersion,omitempty"`
-	ConnectedAt     *time.Time            `json:"connectedAt,omitempty"`
-	Metrics         *singbox.Metrics      `json:"metrics,omitempty"`
+	Phase               Phase                 `json:"phase"`
+	Context             string                `json:"context"`
+	Namespace           string                `json:"namespace"`
+	DNSNamespace        string                `json:"dnsNamespace,omitempty"`
+	Message             string                `json:"message"`
+	Error               string                `json:"error,omitempty"`
+	DNSWarning          string                `json:"dnsWarning,omitempty"`
+	Network             *NetworkDiagnostics   `json:"network,omitempty"`
+	Discovery           *cluster.Discovery    `json:"discovery,omitempty"`
+	Capabilities        *cluster.Capabilities `json:"capabilities,omitempty"`
+	GatewayCapabilities *tunnel.Capabilities  `json:"gatewayCapabilities,omitempty"`
+	ScopeNamespaces     []string              `json:"scopeNamespaces,omitempty"`
+	GatewayManifest     string                `json:"gatewayManifest,omitempty"`
+	Pods                []cluster.PodInfo     `json:"pods,omitempty"`
+	Services            []cluster.ServiceInfo `json:"services,omitempty"`
+	Events              []LogEvent            `json:"events,omitempty"`
+	CoreVersion         string                `json:"coreVersion,omitempty"`
+	ConnectedAt         *time.Time            `json:"connectedAt,omitempty"`
+	Metrics             *singbox.Metrics      `json:"metrics,omitempty"`
 	// InventoryRevision increments only on Informer-driven inventory snapshots
 	// (pod/service/deployment add/update/delete). UI lists should key off this
 	// instead of UpdatedAt, which also advances on the metrics ticker.

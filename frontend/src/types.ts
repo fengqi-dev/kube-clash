@@ -57,6 +57,15 @@ export interface Capabilities {
   issues?: string[];
 }
 
+export interface GatewayCapabilities {
+  protocolVersion: number;
+  inspector: boolean;
+  protocols?: string[];
+  maxBodySize?: number;
+  maxTargets?: number;
+  engine?: string;
+}
+
 export interface NetworkDiagnostic {
   code: string;
   severity: "info" | "warning";
@@ -137,6 +146,7 @@ export interface SessionState {
   network?: NetworkDiagnostics;
   discovery?: Discovery;
   capabilities?: Capabilities;
+  gatewayCapabilities?: GatewayCapabilities;
   scopeNamespaces?: string[];
   gatewayManifest?: string;
   pods?: PodInfo[];

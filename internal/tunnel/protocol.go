@@ -2,6 +2,7 @@ package tunnel
 
 import (
 	"bufio"
+	"crypto/rand"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -11,10 +12,16 @@ import (
 )
 
 const (
-	CommandTCP     byte = 1
-	CommandUDP     byte = 2
-	CommandControl byte = 3
-	CommandAccept  byte = 4
+	CommandTCP             byte = 1
+	CommandUDP             byte = 2
+	CommandControl         byte = 3
+	CommandAccept          byte = 4
+	CommandInspectorEvents byte = 5
+
+	ProtocolV1 byte = 1
+	ProtocolV2 byte = 2
+
+	SessionTokenSize = 32
 
 	StatusOK    byte = 0
 	StatusError byte = 1
@@ -25,7 +32,28 @@ const (
 	maxIDSize       = 256
 )
 
-var magic = [4]byte{'K', 'C', 'G', 1}
+var magicV1 = [4]byte{'K', 'C', 'G', ProtocolV1}
+var magicV2 = [4]byte{'K', 'C', 'G', ProtocolV2}
+
+type SessionToken [SessionTokenSize]byte
+
+func NewSessionToken() (SessionToken, error) {
+	var token SessionToken
+	if _, err := io.ReadFull(rand.Reader, token[:]); err != nil {
+		return SessionToken{}, fmt.Errorf("generate session token: %w", err)
+	}
+	return token, nil
+}
+
+func (t SessionToken) IsZero() bool {
+	return t == SessionToken{}
+}
+
+type SessionHeader struct {
+	Version byte
+	Command byte
+	Token   SessionToken
+}
 
 type OpenRequest struct {
 	Command byte
@@ -38,6 +66,14 @@ func (r OpenRequest) Address() string {
 }
 
 func WriteOpen(w io.Writer, request OpenRequest) error {
+	return writeOpen(w, SessionToken{}, request)
+}
+
+func WriteOpenV2(w io.Writer, token SessionToken, request OpenRequest) error {
+	return writeOpen(w, token, request)
+}
+
+func writeOpen(w io.Writer, token SessionToken, request OpenRequest) error {
 	if request.Command != CommandTCP && request.Command != CommandUDP {
 		return fmt.Errorf("unsupported command %d", request.Command)
 	}
@@ -47,12 +83,16 @@ func WriteOpen(w io.Writer, request OpenRequest) error {
 	if request.Port == 0 {
 		return errors.New("target port is required")
 	}
-	header := make([]byte, 9+len(request.Host))
-	copy(header[:4], magic[:])
-	header[4] = request.Command
-	binary.BigEndian.PutUint16(header[5:7], uint16(len(request.Host)))
-	copy(header[7:7+len(request.Host)], request.Host)
-	binary.BigEndian.PutUint16(header[7+len(request.Host):], request.Port)
+	prefix, err := sessionPrefix(token, request.Command)
+	if err != nil {
+		return err
+	}
+	header := make([]byte, len(prefix)+4+len(request.Host))
+	copy(header, prefix)
+	offset := len(prefix)
+	binary.BigEndian.PutUint16(header[offset:offset+2], uint16(len(request.Host)))
+	copy(header[offset+2:offset+2+len(request.Host)], request.Host)
+	binary.BigEndian.PutUint16(header[offset+2+len(request.Host):], request.Port)
 	return writeAll(w, header)
 }
 
@@ -88,31 +128,90 @@ func ReadOpenBody(r io.Reader, command byte) (OpenRequest, error) {
 	return OpenRequest{Command: command, Host: string(target[:hostSize]), Port: port}, nil
 }
 
-// ReadSessionHeader reads the shared magic + command byte used by all session types.
+// ReadSessionHeader reads the shared session prefix and returns its command.
+// Use ReadSessionHeaderInfo when the caller needs KCG2 session identity.
 func ReadSessionHeader(r io.Reader) (command byte, err error) {
+	header, err := ReadSessionHeaderInfo(r)
+	return header.Command, err
+}
+
+func ReadSessionHeaderInfo(r io.Reader) (SessionHeader, error) {
 	header := make([]byte, 5)
 	if _, err := io.ReadFull(r, header); err != nil {
-		return 0, err
+		return SessionHeader{}, err
 	}
-	if string(header[:4]) != string(magic[:]) {
-		return 0, errors.New("invalid tunnel protocol magic")
+	result := SessionHeader{Command: header[4]}
+	switch string(header[:4]) {
+	case string(magicV1[:]):
+		result.Version = ProtocolV1
+	case string(magicV2[:]):
+		result.Version = ProtocolV2
+		if _, err := io.ReadFull(r, result.Token[:]); err != nil {
+			return SessionHeader{}, err
+		}
+		if result.Token.IsZero() {
+			return SessionHeader{}, errors.New("KCG2 session token is required")
+		}
+	default:
+		return SessionHeader{}, errors.New("invalid tunnel protocol magic")
 	}
-	return header[4], nil
+	return result, nil
 }
 
 func WriteControlSession(w io.Writer) error {
-	header := make([]byte, 5)
-	copy(header[:4], magic[:])
-	header[4] = CommandControl
-	return writeAll(w, header)
+	return writeSessionHeader(w, SessionToken{}, CommandControl)
+}
+
+func WriteControlSessionV2(w io.Writer, token SessionToken) error {
+	return writeSessionHeader(w, token, CommandControl)
+}
+
+func WriteInspectorEventsSession(w io.Writer, token SessionToken) error {
+	if token.IsZero() {
+		return errors.New("KCG2 session token is required")
+	}
+	return writeSessionHeader(w, token, CommandInspectorEvents)
 }
 
 func WriteAccept(w io.Writer, streamID uint64) error {
-	header := make([]byte, 13)
-	copy(header[:4], magic[:])
-	header[4] = CommandAccept
-	binary.BigEndian.PutUint64(header[5:13], streamID)
+	return writeAccept(w, SessionToken{}, streamID)
+}
+
+func WriteAcceptV2(w io.Writer, token SessionToken, streamID uint64) error {
+	return writeAccept(w, token, streamID)
+}
+
+func writeAccept(w io.Writer, token SessionToken, streamID uint64) error {
+	prefix, err := sessionPrefix(token, CommandAccept)
+	if err != nil {
+		return err
+	}
+	header := make([]byte, len(prefix)+8)
+	copy(header, prefix)
+	binary.BigEndian.PutUint64(header[len(prefix):], streamID)
 	return writeAll(w, header)
+}
+
+func writeSessionHeader(w io.Writer, token SessionToken, command byte) error {
+	header, err := sessionPrefix(token, command)
+	if err != nil {
+		return err
+	}
+	return writeAll(w, header)
+}
+
+func sessionPrefix(token SessionToken, command byte) ([]byte, error) {
+	if token.IsZero() {
+		header := make([]byte, 5)
+		copy(header[:4], magicV1[:])
+		header[4] = command
+		return header, nil
+	}
+	header := make([]byte, 5+SessionTokenSize)
+	copy(header[:4], magicV2[:])
+	header[4] = command
+	copy(header[5:], token[:])
+	return header, nil
 }
 
 func ReadAcceptStreamID(r io.Reader) (uint64, error) {

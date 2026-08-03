@@ -40,6 +40,7 @@ type Server struct {
 	DialTimeout    time.Duration
 	HostTCP        HostTCPHandler
 	HostUDP        HostUDPHandler
+	SessionToken   tunnel.SessionToken
 
 	gatewayMu sync.RWMutex
 }
@@ -63,6 +64,12 @@ func (b *Bridge) SetHostUDPHandler(handler HostUDPHandler) {
 func (b *Bridge) SetGatewayAddress(address string) {
 	b.server.gatewayMu.Lock()
 	b.server.GatewayAddress = address
+	b.server.gatewayMu.Unlock()
+}
+
+func (b *Bridge) SetSessionToken(token tunnel.SessionToken) {
+	b.server.gatewayMu.Lock()
+	b.server.SessionToken = token
 	b.server.gatewayMu.Unlock()
 }
 
@@ -147,16 +154,24 @@ func (s *Server) openGateway(command byte, host string, port uint16) (net.Conn, 
 	}
 	s.gatewayMu.RLock()
 	gatewayAddress := s.GatewayAddress
+	sessionToken := s.SessionToken
 	s.gatewayMu.RUnlock()
 	connection, err := net.DialTimeout("tcp", gatewayAddress, timeout)
 	if err != nil {
 		return nil, fmt.Errorf("connect gateway: %w", err)
 	}
-	if err := tunnel.WriteOpen(connection, tunnel.OpenRequest{
+	request := tunnel.OpenRequest{
 		Command: command, Host: host, Port: port,
-	}); err != nil {
+	}
+	var handshakeErr error
+	if sessionToken.IsZero() {
+		handshakeErr = tunnel.WriteOpen(connection, request)
+	} else {
+		handshakeErr = tunnel.WriteOpenV2(connection, sessionToken, request)
+	}
+	if handshakeErr != nil {
 		connection.Close()
-		return nil, err
+		return nil, handshakeErr
 	}
 	if err := tunnel.ReadStatus(connection); err != nil {
 		connection.Close()

@@ -12,6 +12,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 func (m *Manager) Connect(parent context.Context, request Request) error {
@@ -209,11 +210,24 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 
-	if err := m.intercept.Start(ctx, request.Context, gateway.IP, forwarder.Address()); err != nil {
+	sessionToken, err := tunnel.NewSessionToken()
+	if err != nil {
+		m.fail(ctx, state, "Could not create the Gateway session identity", err)
+		return
+	}
+	if err := m.intercept.StartSession(
+		ctx, request.Context, gateway.IP, forwarder.Address(), sessionToken,
+	); err != nil {
 		m.fail(ctx, state, "Could not start the Service Intercept control channel", err)
 		return
 	}
-	m.AppendLog("INFO", "service intercept control channel ready")
+	gatewayCapabilities := m.intercept.GatewayCapabilities()
+	sessionToken = m.intercept.GatewaySessionToken()
+	state.GatewayCapabilities = &gatewayCapabilities
+	m.AppendLog("INFO", fmt.Sprintf(
+		"service intercept control channel ready: protocol=KCG%d inspector=%t",
+		gatewayCapabilities.ProtocolVersion, gatewayCapabilities.Inspector,
+	))
 	var interceptCloseOnce sync.Once
 	closeIntercept := closerFunc(func() {
 		interceptCloseOnce.Do(func() {
@@ -241,6 +255,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 		return
 	}
 	if hostBridge, ok := bridge.(*socksbridge.Bridge); ok {
+		hostBridge.SetSessionToken(sessionToken)
 		hostBridge.SetHostTCPHandler(m.intercept.HostTCP)
 		hostBridge.SetHostUDPHandler(m.intercept.HostUDP)
 		runtime.AddFunc("SOCKS Bridge host routes", func() {
@@ -312,6 +327,7 @@ func (m *Manager) run(ctx context.Context, request Request, done chan struct{}) 
 	state.ConnectedAt = &connectedAt
 	state.Metrics = &singbox.Metrics{}
 	state.Capabilities = &caps
+	state.GatewayCapabilities = &gatewayCapabilities
 	state.ScopeNamespaces = append([]string{}, caps.ScopeNamespaces...)
 	state.DNSNamespace = dnsNamespace
 	state.DNSWarning = ""

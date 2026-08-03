@@ -17,9 +17,12 @@ const (
 )
 
 type controlSession struct {
-	conn   net.Conn
-	server *Server
-	mu     sync.Mutex
+	conn    net.Conn
+	server  *Server
+	version byte
+	token   tunnel.SessionToken
+	mu      sync.Mutex
+	events  net.Conn
 }
 
 type interceptListener struct {
@@ -36,6 +39,7 @@ type interceptListener struct {
 type pendingStream struct {
 	id        uint64
 	network   byte
+	control   *controlSession
 	ready     chan net.Conn
 	tcpConn   net.Conn
 	udpPacket net.PacketConn
@@ -52,17 +56,32 @@ type udpAssociation struct {
 	pendingID uint64
 }
 
-func (s *Server) handleControl(client net.Conn) {
-	session := &controlSession{conn: client, server: s}
+func (s *Server) handleControl(client net.Conn, header tunnel.SessionHeader) {
+	session := &controlSession{
+		conn: client, server: s, version: header.Version, token: header.Token,
+	}
+	var replaced *controlSession
 	s.mu.Lock()
+	if header.Version == tunnel.ProtocolV2 {
+		replaced = s.controlsByToken[header.Token]
+		s.controlsByToken[header.Token] = session
+	}
 	s.controls[session] = struct{}{}
 	s.mu.Unlock()
+	if replaced != nil {
+		_ = replaced.conn.Close()
+	}
 	defer func() {
 		s.removeControl(session)
 		_ = client.Close()
 	}()
 	if err := tunnel.WriteStatus(client, nil); err != nil {
 		return
+	}
+	if header.Version == tunnel.ProtocolV2 {
+		if err := tunnel.WriteCapabilities(client, s.Capabilities); err != nil {
+			return
+		}
 	}
 	for {
 		message, err := tunnel.ReadControlMessage(client)
@@ -93,9 +112,37 @@ func (c *controlSession) reply(message tunnel.ControlMessage) error {
 	return tunnel.WriteControlMessage(c.conn, message)
 }
 
+func (c *controlSession) attachEvents(connection net.Conn) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.events != nil {
+		return errors.New("Inspector event channel is already connected")
+	}
+	c.events = connection
+	return nil
+}
+
+func (c *controlSession) detachEvents(connection net.Conn) {
+	c.mu.Lock()
+	if c.events == connection {
+		c.events = nil
+	}
+	c.mu.Unlock()
+}
+
 func (s *Server) removeControl(session *controlSession) {
+	session.mu.Lock()
+	events := session.events
+	session.events = nil
+	session.mu.Unlock()
+	if events != nil {
+		_ = events.Close()
+	}
 	s.mu.Lock()
 	delete(s.controls, session)
+	if session.version == tunnel.ProtocolV2 && s.controlsByToken[session.token] == session {
+		delete(s.controlsByToken, session.token)
+	}
 	var toClose []*interceptListener
 	for id, listener := range s.listeners {
 		if listener.control == session {
@@ -205,6 +252,7 @@ func (l *interceptListener) acceptTCP() {
 		pending := &pendingStream{
 			id:      streamID,
 			network: tunnel.NetworkTCP,
+			control: l.control,
 			ready:   make(chan net.Conn, 1),
 			tcpConn: conn,
 		}
@@ -334,6 +382,7 @@ func (l *interceptListener) acceptUDP() {
 		pending := &pendingStream{
 			id:        streamID,
 			network:   tunnel.NetworkUDP,
+			control:   l.control,
 			ready:     make(chan net.Conn, 1),
 			udpPacket: l.udp,
 			assoc:     assoc,
@@ -382,6 +431,31 @@ func (s *Server) takePending(streamID uint64) *pendingStream {
 	pending := s.pending[streamID]
 	delete(s.pending, streamID)
 	if pending != nil && pending.timer != nil {
+		pending.timer.Stop()
+	}
+	return pending
+}
+
+func (s *Server) takePendingForSession(
+	streamID uint64, header tunnel.SessionHeader,
+) *pendingStream {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	pending := s.pending[streamID]
+	if pending == nil {
+		return nil
+	}
+	if header.Version == tunnel.ProtocolV2 {
+		if pending.control == nil ||
+			pending.control.version != tunnel.ProtocolV2 ||
+			pending.control.token != header.Token {
+			return nil
+		}
+	} else if pending.control != nil && pending.control.version != tunnel.ProtocolV1 {
+		return nil
+	}
+	delete(s.pending, streamID)
+	if pending.timer != nil {
 		pending.timer.Stop()
 	}
 	return pending

@@ -8,6 +8,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 const controlRecoveryAttempts = 5
@@ -88,6 +89,15 @@ func (m *Manager) recoverGatewayControl(
 			lastErr = m.replaceGatewayPortForward(ctx, contextName, bridge, runtime)
 		}
 		if lastErr == nil {
+			if updater, ok := bridge.(interface {
+				SetSessionToken(tunnel.SessionToken)
+			}); ok {
+				updater.SetSessionToken(m.intercept.GatewaySessionToken())
+			}
+			capabilities := m.intercept.GatewayCapabilities()
+			current := m.State()
+			current.GatewayCapabilities = &capabilities
+			m.publish(current)
 			return nil
 		}
 		m.AppendLog("WARN", fmt.Sprintf(

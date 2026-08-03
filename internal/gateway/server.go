@@ -18,14 +18,16 @@ import (
 )
 
 type Server struct {
-	Logger      *log.Logger
-	DialTimeout time.Duration
+	Logger       *log.Logger
+	DialTimeout  time.Duration
+	Capabilities tunnel.Capabilities
 
-	mu         sync.Mutex
-	nextStream atomic.Uint64
-	controls   map[*controlSession]struct{}
-	listeners  map[string]*interceptListener
-	pending    map[uint64]*pendingStream
+	mu              sync.Mutex
+	nextStream      atomic.Uint64
+	controls        map[*controlSession]struct{}
+	controlsByToken map[tunnel.SessionToken]*controlSession
+	listeners       map[string]*interceptListener
+	pending         map[uint64]*pendingStream
 }
 
 func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
@@ -35,9 +37,14 @@ func NewServer(logger *log.Logger, dialTimeout time.Duration) *Server {
 	return &Server{
 		Logger:      logger,
 		DialTimeout: dialTimeout,
-		controls:    make(map[*controlSession]struct{}),
-		listeners:   make(map[string]*interceptListener),
-		pending:     make(map[uint64]*pendingStream),
+		Capabilities: tunnel.Capabilities{
+			ProtocolVersion: int(tunnel.ProtocolV2),
+			Inspector:       false,
+		},
+		controls:        make(map[*controlSession]struct{}),
+		controlsByToken: make(map[tunnel.SessionToken]*controlSession),
+		listeners:       make(map[string]*interceptListener),
+		pending:         make(map[uint64]*pendingStream),
 	}
 }
 
@@ -56,7 +63,7 @@ func (s *Server) Serve(listener net.Listener) error {
 
 func (s *Server) handle(client net.Conn) {
 	_ = client.SetReadDeadline(time.Now().Add(15 * time.Second))
-	command, err := tunnel.ReadSessionHeader(client)
+	header, err := tunnel.ReadSessionHeaderInfo(client)
 	if err != nil {
 		_ = client.Close()
 		if !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
@@ -66,22 +73,28 @@ func (s *Server) handle(client net.Conn) {
 	}
 	_ = client.SetReadDeadline(time.Time{})
 
-	switch command {
+	switch header.Command {
 	case tunnel.CommandTCP, tunnel.CommandUDP:
-		s.handleOutbound(client, command)
+		s.handleOutbound(client, header)
 	case tunnel.CommandControl:
-		s.handleControl(client)
+		s.handleControl(client, header)
 	case tunnel.CommandAccept:
-		s.handleAccept(client)
+		s.handleAccept(client, header)
+	case tunnel.CommandInspectorEvents:
+		s.handleInspectorEvents(client, header)
 	default:
-		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", command))
+		_ = tunnel.WriteStatus(client, fmt.Errorf("unsupported command %d", header.Command))
 		_ = client.Close()
 	}
 }
 
-func (s *Server) handleOutbound(client net.Conn, command byte) {
+func (s *Server) handleOutbound(client net.Conn, header tunnel.SessionHeader) {
 	defer client.Close()
-	request, err := tunnel.ReadOpenBody(client, command)
+	if err := s.authorizeSession(header); err != nil {
+		_ = tunnel.WriteStatus(client, err)
+		return
+	}
+	request, err := tunnel.ReadOpenBody(client, header.Command)
 	if err != nil {
 		s.logf("reject open from %s: %v", client.RemoteAddr(), err)
 		return
@@ -116,13 +129,13 @@ func (s *Server) handleOutbound(client net.Conn, command byte) {
 	relayTCP(client, target)
 }
 
-func (s *Server) handleAccept(client net.Conn) {
+func (s *Server) handleAccept(client net.Conn, header tunnel.SessionHeader) {
 	streamID, err := tunnel.ReadAcceptStreamID(client)
 	if err != nil {
 		_ = client.Close()
 		return
 	}
-	pending := s.takePending(streamID)
+	pending := s.takePendingForSession(streamID, header)
 	if pending == nil {
 		_ = tunnel.WriteStatus(client, fmt.Errorf("unknown stream %d", streamID))
 		_ = client.Close()
@@ -134,6 +147,48 @@ func (s *Server) handleAccept(client net.Conn) {
 		return
 	}
 	pending.serve(client)
+}
+
+func (s *Server) authorizeSession(header tunnel.SessionHeader) error {
+	if header.Version == tunnel.ProtocolV1 {
+		return nil
+	}
+	s.mu.Lock()
+	control := s.controlsByToken[header.Token]
+	s.mu.Unlock()
+	if control == nil {
+		return errors.New("unknown or expired KCG2 session")
+	}
+	return nil
+}
+
+func (s *Server) handleInspectorEvents(client net.Conn, header tunnel.SessionHeader) {
+	if header.Version != tunnel.ProtocolV2 {
+		_ = tunnel.WriteStatus(client, errors.New("Inspector events require KCG2"))
+		_ = client.Close()
+		return
+	}
+	s.mu.Lock()
+	control := s.controlsByToken[header.Token]
+	s.mu.Unlock()
+	if control == nil {
+		_ = tunnel.WriteStatus(client, errors.New("unknown or expired KCG2 session"))
+		_ = client.Close()
+		return
+	}
+	if err := control.attachEvents(client); err != nil {
+		_ = tunnel.WriteStatus(client, err)
+		_ = client.Close()
+		return
+	}
+	if err := tunnel.WriteStatus(client, nil); err != nil {
+		control.detachEvents(client)
+		_ = client.Close()
+		return
+	}
+	_, _ = io.Copy(io.Discard, client)
+	control.detachEvents(client)
+	_ = client.Close()
 }
 
 func (s *Server) relayUDP(client, target net.Conn) {

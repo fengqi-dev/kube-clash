@@ -76,6 +76,7 @@ type Manager struct {
 	contextName    string
 	gatewayIP      string
 	gatewayAddress string
+	sessionToken   tunnel.SessionToken
 	control        *controlSession
 	nextPort       uint32
 	registry       *runtimeRegistry
@@ -122,11 +123,31 @@ func NewManager(api ClusterAPI) *Manager {
 func (m *Manager) Start(
 	ctx context.Context, contextName, gatewayIP, gatewayAddress string,
 ) error {
+	return m.start(ctx, contextName, gatewayIP, gatewayAddress, tunnel.SessionToken{})
+}
+
+func (m *Manager) StartSession(
+	ctx context.Context,
+	contextName, gatewayIP, gatewayAddress string,
+	token tunnel.SessionToken,
+) error {
+	if token.IsZero() {
+		return fmt.Errorf("KCG2 session token is required")
+	}
+	return m.start(ctx, contextName, gatewayIP, gatewayAddress, token)
+}
+
+func (m *Manager) start(
+	ctx context.Context,
+	contextName, gatewayIP, gatewayAddress string,
+	token tunnel.SessionToken,
+) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if m.active {
 		return fmt.Errorf("intercept manager already started")
 	}
+	m.control.token = token
 	if err := m.control.connect(ctx, gatewayAddress); err != nil {
 		return err
 	}
@@ -136,7 +157,23 @@ func (m *Manager) Start(
 	m.contextName = contextName
 	m.gatewayIP = gatewayIP
 	m.gatewayAddress = gatewayAddress
+	m.sessionToken = m.control.current().token
 	return nil
+}
+
+func (m *Manager) GatewayCapabilities() tunnel.Capabilities {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if client := m.control.current(); client != nil {
+		return client.capabilities
+	}
+	return tunnel.Capabilities{}
+}
+
+func (m *Manager) GatewaySessionToken() tunnel.SessionToken {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.sessionToken
 }
 
 // ControlLost is closed when the Gateway control channel drops unexpectedly
@@ -206,6 +243,7 @@ func (m *Manager) recoverControlAt(
 	}
 	m.gatewayIP = gatewayIP
 	m.gatewayAddress = gatewayAddress
+	m.sessionToken = control.token
 	return nil
 }
 

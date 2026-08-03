@@ -22,6 +22,29 @@ func TestOpenRoundTrip(t *testing.T) {
 	}
 }
 
+func TestOpenV2RoundTrip(t *testing.T) {
+	token := testSessionToken()
+	var stream bytes.Buffer
+	want := OpenRequest{Command: CommandUDP, Host: "10.96.0.10", Port: 53}
+	if err := WriteOpenV2(&stream, token, want); err != nil {
+		t.Fatal(err)
+	}
+	header, err := ReadSessionHeaderInfo(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Version != ProtocolV2 || header.Command != CommandUDP || header.Token != token {
+		t.Fatalf("unexpected header %#v", header)
+	}
+	got, err := ReadOpenBody(&stream, header.Command)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != want {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
 func TestStatusRoundTrip(t *testing.T) {
 	var stream bytes.Buffer
 	if err := WriteStatus(&stream, errors.New("target denied")); err != nil {
@@ -91,6 +114,28 @@ func TestAcceptRoundTrip(t *testing.T) {
 	}
 }
 
+func TestAcceptV2RoundTrip(t *testing.T) {
+	token := testSessionToken()
+	var stream bytes.Buffer
+	if err := WriteAcceptV2(&stream, token, 101); err != nil {
+		t.Fatal(err)
+	}
+	header, err := ReadSessionHeaderInfo(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Version != ProtocolV2 || header.Command != CommandAccept || header.Token != token {
+		t.Fatalf("unexpected header %#v", header)
+	}
+	streamID, err := ReadAcceptStreamID(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if streamID != 101 {
+		t.Fatalf("streamID=%d", streamID)
+	}
+}
+
 func TestControlSessionHeader(t *testing.T) {
 	var stream bytes.Buffer
 	if err := WriteControlSession(&stream); err != nil {
@@ -103,4 +148,99 @@ func TestControlSessionHeader(t *testing.T) {
 	if command != CommandControl {
 		t.Fatalf("command=%d", command)
 	}
+}
+
+func TestControlSessionV2Capabilities(t *testing.T) {
+	token := testSessionToken()
+	var stream bytes.Buffer
+	if err := WriteControlSessionV2(&stream, token); err != nil {
+		t.Fatal(err)
+	}
+	want := Capabilities{
+		ProtocolVersion: 2,
+		Inspector:       true,
+		Protocols:       []string{"http", "https", "grpc"},
+		MaxBodySize:     1 << 20,
+		MaxTargets:      8,
+		Engine:          "mitmproxy",
+	}
+	if err := WriteCapabilities(&stream, want); err != nil {
+		t.Fatal(err)
+	}
+	header, err := ReadSessionHeaderInfo(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Version != ProtocolV2 || header.Command != CommandControl || header.Token != token {
+		t.Fatalf("unexpected header %#v", header)
+	}
+	got, err := ReadCapabilities(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.ProtocolVersion != want.ProtocolVersion ||
+		got.Inspector != want.Inspector ||
+		got.Engine != want.Engine ||
+		len(got.Protocols) != len(want.Protocols) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func TestV2RejectsZeroToken(t *testing.T) {
+	var stream bytes.Buffer
+	stream.Write([]byte{'K', 'C', 'G', ProtocolV2, CommandControl})
+	stream.Write(make([]byte, SessionTokenSize))
+	if _, err := ReadSessionHeaderInfo(&stream); err == nil {
+		t.Fatal("expected zero token to be rejected")
+	}
+}
+
+func TestInspectorEventsV2Header(t *testing.T) {
+	token := testSessionToken()
+	var stream bytes.Buffer
+	if err := WriteInspectorEventsSession(&stream, token); err != nil {
+		t.Fatal(err)
+	}
+	header, err := ReadSessionHeaderInfo(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if header.Version != ProtocolV2 ||
+		header.Command != CommandInspectorEvents ||
+		header.Token != token {
+		t.Fatalf("unexpected header %#v", header)
+	}
+}
+
+func TestInspectorEventRoundTrip(t *testing.T) {
+	want := InspectorEvent{
+		Version:  InspectorEventVersion1,
+		Type:     InspectorEventHeaders,
+		FlowID:   "flow-42",
+		Sequence: 7,
+		Payload:  []byte(`{"method":"GET","status":200}`),
+	}
+	var stream bytes.Buffer
+	if err := WriteInspectorEvent(&stream, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := ReadInspectorEvent(&stream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Version != want.Version ||
+		got.Type != want.Type ||
+		got.FlowID != want.FlowID ||
+		got.Sequence != want.Sequence ||
+		!bytes.Equal(got.Payload, want.Payload) {
+		t.Fatalf("got %#v, want %#v", got, want)
+	}
+}
+
+func testSessionToken() SessionToken {
+	var token SessionToken
+	for index := range token {
+		token[index] = byte(index + 1)
+	}
+	return token
 }

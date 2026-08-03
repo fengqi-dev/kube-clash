@@ -19,8 +19,10 @@ import (
 var errControlClosed = errors.New("gateway control channel closed; disconnect and reconnect")
 
 type controlClient struct {
-	address string
-	conn    net.Conn
+	address      string
+	conn         net.Conn
+	token        tunnel.SessionToken
+	capabilities tunnel.Capabilities
 
 	writeMu sync.Mutex
 	replyCh chan tunnel.ControlMessage
@@ -33,6 +35,25 @@ type controlClient struct {
 func dialControl(
 	ctx context.Context,
 	gatewayAddress string,
+	token tunnel.SessionToken,
+	onReady func(interceptID string, network byte, streamID uint64),
+	onClose func(),
+) (*controlClient, error) {
+	client, err := dialControlOnce(
+		ctx, gatewayAddress, token, onReady, onClose,
+	)
+	if err == nil || token.IsZero() || ctx.Err() != nil {
+		return client, err
+	}
+	return dialControlOnce(
+		ctx, gatewayAddress, tunnel.SessionToken{}, onReady, onClose,
+	)
+}
+
+func dialControlOnce(
+	ctx context.Context,
+	gatewayAddress string,
+	token tunnel.SessionToken,
 	onReady func(interceptID string, network byte, streamID uint64),
 	onClose func(),
 ) (*controlClient, error) {
@@ -41,20 +62,38 @@ func dialControl(
 	if err != nil {
 		return nil, fmt.Errorf("dial gateway control: %w", err)
 	}
-	if err := tunnel.WriteControlSession(conn); err != nil {
+	var handshakeErr error
+	if token.IsZero() {
+		handshakeErr = tunnel.WriteControlSession(conn)
+	} else {
+		handshakeErr = tunnel.WriteControlSessionV2(conn, token)
+	}
+	if handshakeErr != nil {
 		_ = conn.Close()
-		return nil, err
+		return nil, handshakeErr
 	}
 	if err := tunnel.ReadStatus(conn); err != nil {
 		_ = conn.Close()
 		return nil, fmt.Errorf("control handshake: %w", err)
 	}
+	var capabilities tunnel.Capabilities
+	if !token.IsZero() {
+		capabilities, err = tunnel.ReadCapabilities(conn)
+		if err != nil {
+			_ = conn.Close()
+			return nil, fmt.Errorf("read gateway capabilities: %w", err)
+		}
+	} else {
+		capabilities.ProtocolVersion = int(tunnel.ProtocolV1)
+	}
 	client := &controlClient{
-		address: gatewayAddress,
-		conn:    conn,
-		replyCh: make(chan tunnel.ControlMessage, 8),
-		onReady: onReady,
-		onClose: onClose,
+		address:      gatewayAddress,
+		conn:         conn,
+		token:        token,
+		capabilities: capabilities,
+		replyCh:      make(chan tunnel.ControlMessage, 8),
+		onReady:      onReady,
+		onClose:      onClose,
 	}
 	go client.readLoop()
 	return client, nil
@@ -136,15 +175,26 @@ func (c *controlClient) close() error {
 	return c.conn.Close()
 }
 
-func acceptStream(ctx context.Context, gatewayAddress string, streamID uint64) (net.Conn, error) {
+func acceptStream(
+	ctx context.Context,
+	gatewayAddress string,
+	token tunnel.SessionToken,
+	streamID uint64,
+) (net.Conn, error) {
 	var dialer net.Dialer
 	conn, err := dialer.DialContext(ctx, "tcp", gatewayAddress)
 	if err != nil {
 		return nil, err
 	}
-	if err := tunnel.WriteAccept(conn, streamID); err != nil {
+	var handshakeErr error
+	if token.IsZero() {
+		handshakeErr = tunnel.WriteAccept(conn, streamID)
+	} else {
+		handshakeErr = tunnel.WriteAcceptV2(conn, token, streamID)
+	}
+	if handshakeErr != nil {
 		_ = conn.Close()
-		return nil, err
+		return nil, handshakeErr
 	}
 	if err := tunnel.ReadStatus(conn); err != nil {
 		_ = conn.Close()

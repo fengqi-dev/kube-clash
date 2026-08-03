@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/fengqi-dev/kube-loop/internal/tunnel"
 )
 
 func TestSOCKSUDPPacketRoundTrip(t *testing.T) {
@@ -36,6 +38,54 @@ func TestSOCKSUDPDomainRoundTrip(t *testing.T) {
 	}
 	if host != "kube-dns.kube-system.svc.cluster.local" || port != 53 {
 		t.Fatalf("got %s:%d", host, port)
+	}
+}
+
+func TestOpenGatewayUsesKCG2SessionToken(t *testing.T) {
+	gateway, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+
+	var token tunnel.SessionToken
+	for index := range token {
+		token[index] = byte(index + 1)
+	}
+	requestCh := make(chan tunnel.OpenRequest, 1)
+	go func() {
+		connection, err := gateway.Accept()
+		if err != nil {
+			return
+		}
+		defer connection.Close()
+		header, err := tunnel.ReadSessionHeaderInfo(connection)
+		if err != nil ||
+			header.Version != tunnel.ProtocolV2 ||
+			header.Token != token {
+			return
+		}
+		request, err := tunnel.ReadOpenBody(connection, header.Command)
+		if err != nil {
+			return
+		}
+		requestCh <- request
+		_ = tunnel.WriteStatus(connection, nil)
+	}()
+
+	server := &Server{GatewayAddress: gateway.Addr().String(), SessionToken: token}
+	connection, err := server.openGateway(tunnel.CommandTCP, "10.0.0.8", 8080)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer connection.Close()
+	select {
+	case request := <-requestCh:
+		if request.Host != "10.0.0.8" || request.Port != 8080 {
+			t.Fatalf("unexpected request %#v", request)
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("timed out waiting for KCG2 request")
 	}
 }
 
