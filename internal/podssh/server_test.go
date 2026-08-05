@@ -14,6 +14,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -78,7 +79,7 @@ func (f *fakeExecutor) Exec(
 		content, ok := f.files["/tmp/hello.txt"]
 		f.mu.Unlock()
 		if !ok {
-			return os.ErrNotExist
+			return errors.New("pod exec failed")
 		}
 		archive := tar.NewWriter(streams.Stdout)
 		if err := archive.WriteHeader(&tar.Header{
@@ -264,6 +265,32 @@ func TestSFTPHandlerCopiesFilesWithTarStreams(t *testing.T) {
 	}
 }
 
+func TestSFTPHandlerCreatesMissingFileWithoutTruncateFlag(t *testing.T) {
+	executor := &fakeExecutor{files: make(map[string][]byte)}
+	handler := newSFTPHandler(executor, Target{
+		Context: "dev", Namespace: "default", Pod: "api", Container: "api", IP: "10.0.0.2",
+	})
+	put := sftp.NewRequest("Put", "/tmp/hello.txt")
+	put.Flags = 2 | 8 // SSH_FXF_WRITE | SSH_FXF_CREAT, as sent by OpenSSH scp.
+	writer, err := handler.Filewrite(put)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := writer.WriteAt([]byte("created by scp"), 0); err != nil {
+		t.Fatal(err)
+	}
+	closer, ok := writer.(io.Closer)
+	if !ok {
+		t.Fatal("upload writer is not closable")
+	}
+	if err := closer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if got := string(executor.files["/tmp/hello.txt"]); got != "created by scp" {
+		t.Fatalf("uploaded content=%q", got)
+	}
+}
+
 func TestReconcileMovesEnabledEndpointToReplacementPodIP(t *testing.T) {
 	server := NewServer(&fakeExecutor{}, WithSigner(testSigner(t)))
 	if err := server.Reconcile([]PodRef{{
@@ -350,7 +377,7 @@ func TestLoadOrCreateSignerCreatesOpenSSHPrivateKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Mode().Perm() != 0o600 {
+	if runtime.GOOS != "windows" && info.Mode().Perm() != 0o600 {
 		t.Fatalf("private key mode=%o", info.Mode().Perm())
 	}
 	assertOpenSSHCanReadPrivateKey(t, path, signer)

@@ -50,7 +50,10 @@ func (h *sftpHandler) Filewrite(request *sftp.Request) (io.WriterAt, error) {
 		file, err = os.CreateTemp("", "kubeloop-sftp-upload-*")
 	}
 	if err != nil {
-		if flags.Creat && errors.Is(err, os.ErrNotExist) {
+		// OpenSSH scp opens uploads with WRITE|CREAT but without TRUNC.
+		// A missing Pod file is reported by Kubernetes exec as a generic
+		// command error, so it cannot reliably satisfy os.ErrNotExist.
+		if flags.Creat {
 			file, err = os.CreateTemp("", "kubeloop-sftp-upload-*")
 		}
 		if err != nil {

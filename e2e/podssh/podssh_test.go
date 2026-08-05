@@ -68,6 +68,9 @@ func TestPodSSHSelectsContainerFromLoginName(t *testing.T) {
 	t.Run("scp-bidirectional", func(t *testing.T) {
 		testSCPBidirectional(t, podIP, identity)
 	})
+	t.Run("scp-directory-bidirectional", func(t *testing.T) {
+		testSCPDirectoryBidirectional(t, podIP, identity)
+	})
 
 	clientConfig := sshClientConfig("missing", identity.signer)
 	connection, err := ssh.Dial("tcp", net.JoinHostPort(podIP, "22"), clientConfig)
@@ -87,7 +90,7 @@ func testSCPBidirectional(t *testing.T, podIP string, identity testIdentity) {
 	remotePath := fmt.Sprintf("/tmp/kubeloop-e2e-scp-%d.txt", time.Now().UnixNano())
 	remote := scpRemote("sidecar", podIP, remotePath)
 
-	runSCP(t, identity, localSource, remote)
+	runSCP(t, identity, false, localSource, remote)
 	inContainer := runSSHCommand(
 		t,
 		podIP,
@@ -110,7 +113,7 @@ func testSCPBidirectional(t *testing.T, podIP string, identity testIdentity) {
 	}
 
 	localDownload := filepath.Join(t.TempDir(), "download.txt")
-	runSCP(t, identity, remote, localDownload)
+	runSCP(t, identity, false, remote, localDownload)
 	downloaded, err := os.ReadFile(localDownload)
 	if err != nil {
 		t.Fatal(err)
@@ -121,7 +124,93 @@ func testSCPBidirectional(t *testing.T, podIP string, identity testIdentity) {
 	_ = runSSHCommand(t, podIP, "sidecar", identity.signer, "rm -f "+remotePath)
 }
 
-func runSCP(t *testing.T, identity testIdentity, source, destination string) {
+func testSCPDirectoryBidirectional(t *testing.T, podIP string, identity testIdentity) {
+	t.Helper()
+	localSource := filepath.Join(t.TempDir(), "upload-tree")
+	nested := filepath.Join(localSource, "nested")
+	empty := filepath.Join(localSource, "empty")
+	if err := os.MkdirAll(nested, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(empty, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	files := map[string][]byte{
+		"root.txt":              []byte("root-level SCP directory file\n"),
+		"nested/child.txt":      []byte("nested SCP directory file\n"),
+		"nested/zero-bytes.bin": {},
+	}
+	for relative, content := range files {
+		if err := os.WriteFile(filepath.Join(localSource, filepath.FromSlash(relative)), content, 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	remotePath := fmt.Sprintf("/tmp/kubeloop-e2e-scp-dir-%d", time.Now().UnixNano())
+	remote := scpRemote("sidecar", podIP, remotePath)
+	runSCP(t, identity, true, localSource, remote)
+
+	for relative, want := range files {
+		got := runSSHCommand(
+			t,
+			podIP,
+			"sidecar",
+			identity.signer,
+			"cat "+remotePath+"/"+relative,
+		)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("uploaded directory file %s = %q, want %q", relative, got, want)
+		}
+	}
+	emptyResult := runSSHCommand(
+		t,
+		podIP,
+		"sidecar",
+		identity.signer,
+		"if [ -d "+remotePath+"/empty ]; then printf present; else printf absent; fi",
+	)
+	if string(emptyResult) != "present" {
+		t.Fatalf("empty uploaded directory is missing: %q", emptyResult)
+	}
+	echoContainer := runSSHCommand(
+		t,
+		podIP,
+		"echo",
+		identity.signer,
+		"if [ -e "+remotePath+" ]; then printf present; else printf absent; fi",
+	)
+	if string(echoContainer) != "absent" {
+		t.Fatalf("recursive SCP upload leaked into echo container: %q", echoContainer)
+	}
+
+	localDownload := filepath.Join(t.TempDir(), "download-tree")
+	runSCP(t, identity, true, remote, localDownload)
+	for relative, want := range files {
+		got, err := os.ReadFile(filepath.Join(localDownload, filepath.FromSlash(relative)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(got, want) {
+			t.Fatalf("downloaded directory file %s = %q, want %q", relative, got, want)
+		}
+	}
+	info, err := os.Stat(filepath.Join(localDownload, "empty"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !info.IsDir() {
+		t.Fatal("downloaded empty entry is not a directory")
+	}
+	_ = runSSHCommand(t, podIP, "sidecar", identity.signer, "rm -rf "+remotePath)
+}
+
+func runSCP(
+	t *testing.T,
+	identity testIdentity,
+	recursive bool,
+	source,
+	destination string,
+) {
 	t.Helper()
 	binary, err := exec.LookPath("scp")
 	if err != nil {
@@ -138,9 +227,11 @@ func runSCP(t *testing.T, identity testIdentity, source, destination string) {
 		"-o", "UserKnownHostsFile=" + identity.knownHostsPath,
 		"-o", "ConnectTimeout=10",
 		"-o", "LogLevel=ERROR",
-		source,
-		destination,
 	}
+	if recursive {
+		args = append(args, "-r")
+	}
+	args = append(args, source, destination)
 	output, err := exec.CommandContext(ctx, binary, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("scp %q -> %q: %v (output=%s)", source, destination, err, output)
