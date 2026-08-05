@@ -199,6 +199,11 @@ func (h *sftpHandler) downloadFile(ctx context.Context, remotePath string) (*os.
 		}
 		found = true
 	}
+	// tar.Reader stops after the two end-of-archive blocks, but GNU tar pads
+	// streamed archives to its blocking factor (10 KiB by default). Drain that
+	// padding before waiting for the Pod exec stream, otherwise its stdout
+	// writer and this goroutine wait on each other indefinitely.
+	_, _ = io.Copy(io.Discard, reader)
 	if err := <-execResult; err != nil {
 		return nil, err
 	}

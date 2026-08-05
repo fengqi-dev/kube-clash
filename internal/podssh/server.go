@@ -31,6 +31,10 @@ func WithSigner(signer ssh.Signer) Option {
 	}
 }
 
+func WithClientIdentityPath(path string) Option {
+	return func(server *Server) { server.clientIdentityPath = path }
+}
+
 func WithHostKeyPath(path string) Option {
 	return func(server *Server) { server.hostKeyPath = path }
 }
@@ -47,9 +51,10 @@ type Server struct {
 	signerOnce  sync.Once
 	signerErr   error
 
-	clientKeys []ssh.PublicKey
-	authOnce   sync.Once
-	authErr    error
+	clientKeys         []ssh.PublicKey
+	clientIdentityPath string
+	authOnce           sync.Once
+	authErr            error
 }
 
 func NewServer(executor Executor, options ...Option) *Server {
@@ -530,7 +535,7 @@ func (s *Server) authorizedClientKeys() ([]ssh.PublicKey, error) {
 			s.authErr = fmt.Errorf("find home directory for Pod SSH identity: %w", err)
 			return
 		}
-		s.clientKeys, s.authErr = loadOrCreateUserSSHKeys(home)
+		s.clientKeys, s.clientIdentityPath, s.authErr = loadOrCreateUserSSHKeys(home)
 	})
 	if s.authErr != nil {
 		return nil, s.authErr
@@ -541,10 +546,11 @@ func (s *Server) authorizedClientKeys() ([]ssh.PublicKey, error) {
 	return append([]ssh.PublicKey{}, s.clientKeys...), nil
 }
 
-func loadOrCreateUserSSHKeys(home string) ([]ssh.PublicKey, error) {
+func loadOrCreateUserSSHKeys(home string) ([]ssh.PublicKey, string, error) {
 	sshDir := filepath.Join(home, ".ssh")
 	names := []string{"id_ed25519", "id_ecdsa", "id_rsa"}
 	keys := make([]ssh.PublicKey, 0, len(names))
+	identityPath := ""
 	var firstErr error
 	ed25519Occupied := false
 	for _, name := range names {
@@ -564,16 +570,22 @@ func loadOrCreateUserSSHKeys(home string) ([]ssh.PublicKey, error) {
 				firstErr = fmt.Errorf("parse user SSH public key %s: %w", publicPath, parseErr)
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("read user SSH public key %s: %w", publicPath, err)
+			return nil, "", fmt.Errorf("read user SSH public key %s: %w", publicPath, err)
 		}
 		if content, err := os.ReadFile(privatePath); err == nil {
 			signer, parseErr := ssh.ParsePrivateKey(content)
 			if parseErr == nil {
 				keys = append(keys, signer.PublicKey())
+				if identityPath == "" {
+					identityPath = privatePath
+				}
 				continue
 			}
 			if publicKey != nil {
 				keys = append(keys, publicKey)
+				if identityPath == "" {
+					identityPath = privatePath
+				}
 				continue
 			}
 			if firstErr == nil {
@@ -583,43 +595,43 @@ func loadOrCreateUserSSHKeys(home string) ([]ssh.PublicKey, error) {
 				)
 			}
 		} else if !errors.Is(err, os.ErrNotExist) {
-			return nil, fmt.Errorf("read user SSH private key %s: %w", privatePath, err)
+			return nil, "", fmt.Errorf("read user SSH private key %s: %w", privatePath, err)
 		}
 		if publicKey != nil {
 			keys = append(keys, publicKey)
 		}
 	}
 	if len(keys) > 0 {
-		return keys, nil
+		return keys, identityPath, nil
 	}
 	if ed25519Occupied {
 		if firstErr != nil {
-			return nil, firstErr
+			return nil, "", firstErr
 		}
-		return nil, errors.New("~/.ssh/id_ed25519 exists but no usable public key was found")
+		return nil, "", errors.New("~/.ssh/id_ed25519 exists but no usable public key was found")
 	}
 	if err := os.MkdirAll(sshDir, 0o700); err != nil {
-		return nil, fmt.Errorf("create user SSH directory: %w", err)
+		return nil, "", fmt.Errorf("create user SSH directory: %w", err)
 	}
 	_, privateKey, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
-		return nil, fmt.Errorf("generate user SSH identity: %w", err)
+		return nil, "", fmt.Errorf("generate user SSH identity: %w", err)
 	}
 	privatePath := filepath.Join(sshDir, "id_ed25519")
 	if err := writeNewOpenSSHPrivateKey(privatePath, privateKey); err != nil {
-		return nil, fmt.Errorf("write user SSH identity: %w", err)
+		return nil, "", fmt.Errorf("write user SSH identity: %w", err)
 	}
 	signer, err := ssh.NewSignerFromKey(privateKey)
 	if err != nil {
 		_ = os.Remove(privatePath)
-		return nil, fmt.Errorf("create user SSH signer: %w", err)
+		return nil, "", fmt.Errorf("create user SSH signer: %w", err)
 	}
 	publicPath := privatePath + ".pub"
 	if err := writeNewFile(publicPath, ssh.MarshalAuthorizedKey(signer.PublicKey()), 0o644); err != nil {
 		_ = os.Remove(privatePath)
-		return nil, fmt.Errorf("write user SSH public key: %w", err)
+		return nil, "", fmt.Errorf("write user SSH public key: %w", err)
 	}
-	return []ssh.PublicKey{signer.PublicKey()}, nil
+	return []ssh.PublicKey{signer.PublicKey()}, privatePath, nil
 }
 
 func loadOrCreateSigner(path string) (ssh.Signer, error) {
@@ -717,10 +729,15 @@ func writeOpenSSHPrivateKey(path string, privateKey any) error {
 }
 
 func (s *Server) info(target Target) Info {
+	command := "ssh "
+	if s.clientIdentityPath != "" {
+		command += "-i " + shellQuote(s.clientIdentityPath) + " "
+	}
+	command += fmt.Sprintf("%s@%s", target.Container, target.IP)
 	return Info{
 		ID: targetID(target), Context: target.Context, Namespace: target.Namespace,
 		Pod: target.Pod, Container: target.Container, IP: target.IP, Port: DefaultPort,
-		Command: fmt.Sprintf("ssh %s@%s", target.Container, target.IP),
+		Command: command,
 	}
 }
 

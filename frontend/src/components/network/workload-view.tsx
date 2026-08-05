@@ -150,7 +150,10 @@ export function WorkloadView({
     const key = `${pod.namespace}/${pod.name}`;
     const endpoint = sshByPod.get(key);
     if (!endpoint) return;
-    const command = `ssh ${container}@${endpoint.ip}`;
+    const command = endpoint.command.replace(
+      `${endpoint.container}@${endpoint.ip}`,
+      `${container}@${endpoint.ip}`,
+    );
     try {
       await navigator.clipboard.writeText(command);
       toast.success(t("workload.sshCopied"), {

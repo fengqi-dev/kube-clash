@@ -18,6 +18,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/pkg/sftp"
 	"golang.org/x/crypto/ssh"
@@ -79,6 +80,12 @@ func (f *fakeExecutor) Exec(
 		content, ok := f.files["/tmp/hello.txt"]
 		f.mu.Unlock()
 		if !ok {
+			// GNU tar emits a 10 KiB padded empty archive even when the named
+			// file is missing. The SFTP reader must consume the padding before
+			// waiting for Exec to return.
+			if _, err := streams.Stdout.Write(make([]byte, 10*1024)); err != nil {
+				return err
+			}
 			return errors.New("pod exec failed")
 		}
 		archive := tar.NewWriter(streams.Stdout)
@@ -115,7 +122,11 @@ func testSigner(t *testing.T) ssh.Signer {
 func TestServerExecOverPodIP(t *testing.T) {
 	executor := &fakeExecutor{}
 	signer := testSigner(t)
-	server := NewServer(executor, WithSigner(signer))
+	server := NewServer(
+		executor,
+		WithSigner(signer),
+		WithClientIdentityPath("/tmp/id_ed25519"),
+	)
 	target := Target{
 		Context: "dev", Namespace: "default", Pod: "api-123", Container: "api", IP: "10.244.1.7",
 		Containers: []string{"api", "sidecar"},
@@ -124,7 +135,7 @@ func TestServerExecOverPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Command != "ssh api@10.244.1.7" {
+	if info.Command != "ssh -i '/tmp/id_ed25519' api@10.244.1.7" {
 		t.Fatalf("command=%q", info.Command)
 	}
 	serve, claimed := server.HostTCP(target.IP, DefaultPort)
@@ -272,9 +283,24 @@ func TestSFTPHandlerCreatesMissingFileWithoutTruncateFlag(t *testing.T) {
 	})
 	put := sftp.NewRequest("Put", "/tmp/hello.txt")
 	put.Flags = 2 | 8 // SSH_FXF_WRITE | SSH_FXF_CREAT, as sent by OpenSSH scp.
-	writer, err := handler.Filewrite(put)
-	if err != nil {
-		t.Fatal(err)
+	type openResult struct {
+		writer io.WriterAt
+		err    error
+	}
+	opened := make(chan openResult, 1)
+	go func() {
+		writer, err := handler.Filewrite(put)
+		opened <- openResult{writer: writer, err: err}
+	}()
+	var writer io.WriterAt
+	select {
+	case result := <-opened:
+		if result.err != nil {
+			t.Fatal(result.err)
+		}
+		writer = result.writer
+	case <-time.After(2 * time.Second):
+		t.Fatal("SFTP open deadlocked on GNU tar end padding")
 	}
 	if _, err := writer.WriteAt([]byte("created by scp"), 0); err != nil {
 		t.Fatal(err)
@@ -410,12 +436,15 @@ func TestLoadOrCreateUserSSHKeysPrefersExistingIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	keys, err := loadOrCreateUserSSHKeys(home)
+	keys, identityPath, err := loadOrCreateUserSSHKeys(home)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(keys) != 1 || !bytes.Equal(keys[0].Marshal(), signer.PublicKey().Marshal()) {
 		t.Fatal("existing user SSH key was not selected")
+	}
+	if identityPath != privatePath {
+		t.Fatalf("identity path=%q, want %q", identityPath, privatePath)
 	}
 	privateAfter, err := os.ReadFile(privatePath)
 	if err != nil {
@@ -428,7 +457,7 @@ func TestLoadOrCreateUserSSHKeysPrefersExistingIdentity(t *testing.T) {
 
 func TestLoadOrCreateUserSSHKeysGeneratesDefaultIdentity(t *testing.T) {
 	home := t.TempDir()
-	keys, err := loadOrCreateUserSSHKeys(home)
+	keys, identityPath, err := loadOrCreateUserSSHKeys(home)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -436,6 +465,9 @@ func TestLoadOrCreateUserSSHKeysGeneratesDefaultIdentity(t *testing.T) {
 		t.Fatalf("keys=%d", len(keys))
 	}
 	privatePath := filepath.Join(home, ".ssh", "id_ed25519")
+	if identityPath != privatePath {
+		t.Fatalf("identity path=%q, want %q", identityPath, privatePath)
+	}
 	content, err := os.ReadFile(privatePath)
 	if err != nil {
 		t.Fatal(err)

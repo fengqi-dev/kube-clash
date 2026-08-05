@@ -41,12 +41,15 @@ func TestPodSSHSelectsContainerFromLoginName(t *testing.T) {
 	live := harness.ConnectSession(t, ctx, session.Request{
 		Context: harness.KubeContext(), Namespace: harness.EchoNamespace,
 	}, func(manager *session.Manager) {
-		session.WithPodSSHOptions(podsshserver.WithSigner(identity.signer))(manager)
+		session.WithPodSSHOptions(
+			podsshserver.WithSigner(identity.signer),
+			podsshserver.WithClientIdentityPath(identity.path),
+		)(manager)
 	})
 	harness.RequireRoutedViaKubeLoop(t, podIP, clusterIP)
 
 	info := waitPodSSHEndpoint(t, live.Manager, podName)
-	if want := "ssh echo@" + podIP; info.Command != want {
+	if want := "ssh -i '" + identity.path + "' echo@" + podIP; info.Command != want {
 		t.Fatalf("copy command = %q, want %q", info.Command, want)
 	}
 
