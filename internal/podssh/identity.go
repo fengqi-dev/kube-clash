@@ -1,0 +1,47 @@
+package podssh
+
+import (
+	"fmt"
+)
+
+func (s *Server) info(target Target) Info {
+	command := "ssh "
+	if s.clientIdentityPath != "" {
+		command += "-i " + shellQuote(s.clientIdentityPath) + " "
+	}
+	command += fmt.Sprintf("%s@%s", target.Container, target.IP)
+	return Info{
+		ID: targetID(target), Context: target.Context, Namespace: target.Namespace,
+		Pod: target.Pod, Container: target.Container, IP: target.IP, Port: DefaultPort,
+		Command: command,
+	}
+}
+
+func targetForLogin(target Target, login string) (Target, bool) {
+	containers := target.Containers
+	if len(containers) == 0 {
+		containers = []string{target.Container}
+	}
+	if !contains(containers, login) {
+		return Target{}, false
+	}
+	target.Container = login
+	return target, true
+}
+
+func targetID(target Target) string {
+	return podIdentity(target.Context, target.Namespace, target.Pod)
+}
+
+func podIdentity(contextName, namespace, pod string) string {
+	return contextName + "/" + namespace + "/" + pod
+}
+
+func contains(items []string, wanted string) bool {
+	for _, item := range items {
+		if item == wanted {
+			return true
+		}
+	}
+	return false
+}

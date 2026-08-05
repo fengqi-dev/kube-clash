@@ -5,6 +5,7 @@ package helper
 import (
 	"os"
 	"path/filepath"
+	"strings"
 
 	"golang.org/x/sys/windows"
 )
@@ -87,10 +88,16 @@ func windowsDisplacedHelperPaths(current string) []string {
 	}
 	out := make([]string, 0, len(candidates))
 	for _, path := range candidates {
-		if current != "" && sameInstallPath(path, current) {
+		if current != "" && strings.EqualFold(filepath.Clean(path), filepath.Clean(current)) {
 			continue
 		}
 		out = append(out, path)
 	}
 	return out
+}
+
+// WindowsDisplacedHelperPaths returns legacy helper locations that may be
+// removed after installing into the current application root.
+func WindowsDisplacedHelperPaths(current string) []string {
+	return windowsDisplacedHelperPaths(current)
 }

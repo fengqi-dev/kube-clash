@@ -3,8 +3,6 @@ package intercept
 import (
 	"fmt"
 	"sort"
-
-	"github.com/fengqi-dev/kube-loop/internal/cluster"
 )
 
 type controlRegistrar interface {
@@ -32,7 +30,7 @@ func newStartTransaction(control controlRegistrar) *startTransaction {
 
 func (t *startTransaction) registerPorts(
 	interceptID string,
-	ports []cluster.InterceptPort,
+	ports []InterceptPort,
 	locals []PortMapping,
 ) error {
 	for _, port := range ports {

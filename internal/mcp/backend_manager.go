@@ -11,6 +11,7 @@ import (
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/filemanager"
 	"github.com/fengqi-dev/kube-loop/internal/helper"
+	helperinstall "github.com/fengqi-dev/kube-loop/internal/helper/install"
 	"github.com/fengqi-dev/kube-loop/internal/intercept"
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
 	"github.com/fengqi-dev/kube-loop/internal/portfwd"
@@ -190,7 +191,7 @@ func (b managerBackend) HelperStatus(ctx context.Context) helper.Status {
 
 func (b managerBackend) InstallHelper(ctx context.Context) error {
 	b.appendLog("INFO", "MCP requested privileged helper installation")
-	if err := helper.EnsureInstall(ctxOrBackground(ctx)); err != nil {
+	if err := helperinstall.EnsureInstall(ctxOrBackground(ctx)); err != nil {
 		b.appendLog("ERROR", fmt.Sprintf("MCP install privileged helper: %v", err))
 		return err
 	}
@@ -200,7 +201,7 @@ func (b managerBackend) InstallHelper(ctx context.Context) error {
 
 func (b managerBackend) UninstallHelper(ctx context.Context) error {
 	b.appendLog("INFO", "MCP requested privileged helper uninstall")
-	if err := helper.Uninstall(ctxOrBackground(ctx)); err != nil {
+	if err := helperinstall.Uninstall(ctxOrBackground(ctx)); err != nil {
 		b.appendLog("ERROR", fmt.Sprintf("MCP uninstall privileged helper: %v", err))
 		return err
 	}
