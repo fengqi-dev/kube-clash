@@ -424,8 +424,8 @@ func (s *sessionState) runSFTP() {
 	if err != nil && !errors.Is(err, os.ErrClosed) && !errors.Is(err, io.EOF) {
 		status = 1
 	}
-	_ = server.Close()
 	_, _ = s.channel.SendRequest("exit-status", false, ssh.Marshal(exitStatus{Status: status}))
+	_ = server.Close()
 	_ = s.channel.Close()
 	s.cancel()
 }
