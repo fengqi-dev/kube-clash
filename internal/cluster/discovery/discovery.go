@@ -15,13 +15,14 @@ import (
 )
 
 type Result struct {
-	PodCIDRs     []string
-	ServiceCIDRs []string
-	ServiceIPs   []string
-	DNSServer    string
-	Pods         int
-	Services     int
-	Deployments  int
+	PodCIDRs       []string
+	ServiceCIDRs   []string
+	ServiceIPs     []string
+	DNSServer      string
+	ClusterDomains []string
+	Pods           int
+	Services       int
+	Deployments    int
 }
 
 // Discover collects routable CIDRs and live resource counts. Node,
@@ -41,6 +42,16 @@ func Discover(
 	}
 	podSubnet, serviceSubnet, _ := subnetsFromKubeadm(ctx, client)
 	addCIDRs(podCIDRs, podSubnet)
+	componentPodCIDRs := make(map[string]struct{})
+	componentServiceCIDRs := make(map[string]struct{})
+	if systemPods, err := client.CoreV1().Pods("kube-system").List(ctx, metav1.ListOptions{}); err == nil {
+		componentPodCIDRs, componentServiceCIDRs = collectComponentCIDRs(systemPods.Items)
+		mergeCIDRs(podCIDRs, componentPodCIDRs)
+	}
+	probeNamespace := "default"
+	if len(namespaces) > 0 {
+		probeNamespace = namespaces[0]
+	}
 
 	var pods []corev1.Pod
 	var services []corev1.Service
@@ -92,19 +103,22 @@ func Discover(
 			}
 		}
 	}
+	mergeCIDRs(podCIDRs, inferPodCIDRs(pods))
 
 	deployments := 0
 	if list, err := client.AppsV1().Deployments("").List(ctx, metav1.ListOptions{}); err == nil {
 		deployments = len(list.Items)
 	}
 	return Result{
-		PodCIDRs:     sortedKeys(podCIDRs),
-		ServiceCIDRs: discoverServiceCIDRs(ctx, client, serviceSubnet),
-		ServiceIPs:   sortedKeys(serviceIPs),
-		DNSServer:    dnsServer,
-		Pods:         len(pods),
-		Services:     len(services),
-		Deployments:  deployments,
+		PodCIDRs: compactCIDRs(podCIDRs),
+		ServiceCIDRs: discoverServiceCIDRs(
+			ctx, client, probeNamespace, serviceSubnet, componentServiceCIDRs, services,
+		),
+		ServiceIPs:  sortedKeys(serviceIPs),
+		DNSServer:   dnsServer,
+		Pods:        len(pods),
+		Services:    len(services),
+		Deployments: deployments,
 	}, nil
 }
 
@@ -128,7 +142,10 @@ func collectNodePodCIDRs(nodes []corev1.Node) map[string]struct{} {
 func discoverServiceCIDRs(
 	ctx context.Context,
 	client kubernetes.Interface,
+	probeNamespace string,
 	kubeadmSubnet string,
+	componentCIDRs map[string]struct{},
+	services []corev1.Service,
 ) []string {
 	cidrs := make(map[string]struct{})
 	if list, err := client.NetworkingV1().ServiceCIDRs().List(ctx, metav1.ListOptions{}); err == nil {
@@ -138,10 +155,14 @@ func discoverServiceCIDRs(
 			}
 		}
 	}
-	if len(cidrs) == 0 {
-		addCIDRs(cidrs, kubeadmSubnet)
-	}
-	return sortedKeys(cidrs)
+	addCIDRs(cidrs, kubeadmSubnet)
+	mergeCIDRs(
+		cidrs,
+		componentCIDRs,
+		probeServiceCIDRs(ctx, client, probeNamespace),
+		inferServiceCIDRs(services),
+	)
+	return compactCIDRs(cidrs)
 }
 
 func subnetsFromKubeadm(
