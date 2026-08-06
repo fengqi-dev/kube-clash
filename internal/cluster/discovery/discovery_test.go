@@ -60,7 +60,9 @@ func TestDiscoverCollectsScopedNetworkInventory(t *testing.T) {
 		&corev1.ConfigMap{
 			ObjectMeta: metav1.ObjectMeta{Name: "kubeadm-config", Namespace: "kube-system"},
 			Data: map[string]string{
-				"ClusterConfiguration": "networking:\n  serviceSubnet: 10.96.0.0/12\n",
+				"ClusterConfiguration": "networking:\n" +
+					"  podSubnet: 10.244.0.0/16\n" +
+					"  serviceSubnet: 10.96.0.0/12\n",
 			},
 		},
 		&appsv1.Deployment{
@@ -78,7 +80,7 @@ func TestDiscoverCollectsScopedNetworkInventory(t *testing.T) {
 	if result.DNSServer != "10.96.0.10" {
 		t.Fatalf("DNS server = %q", result.DNSServer)
 	}
-	if !reflect.DeepEqual(result.PodCIDRs, []string{"10.244.1.0/24"}) {
+	if !reflect.DeepEqual(result.PodCIDRs, []string{"10.244.0.0/16", "10.244.1.0/24"}) {
 		t.Fatalf("Pod CIDRs = %v", result.PodCIDRs)
 	}
 	if !reflect.DeepEqual(result.ServiceCIDRs, []string{"10.96.0.0/12"}) {

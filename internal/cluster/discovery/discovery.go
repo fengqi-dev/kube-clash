@@ -39,6 +39,8 @@ func Discover(
 	if nodes, err := client.CoreV1().Nodes().List(ctx, metav1.ListOptions{}); err == nil {
 		podCIDRs = collectNodePodCIDRs(nodes.Items)
 	}
+	podSubnet, serviceSubnet, _ := subnetsFromKubeadm(ctx, client)
+	addCIDRs(podCIDRs, podSubnet)
 
 	var pods []corev1.Pod
 	var services []corev1.Service
@@ -97,7 +99,7 @@ func Discover(
 	}
 	return Result{
 		PodCIDRs:     sortedKeys(podCIDRs),
-		ServiceCIDRs: discoverServiceCIDRs(ctx, client),
+		ServiceCIDRs: discoverServiceCIDRs(ctx, client, serviceSubnet),
 		ServiceIPs:   sortedKeys(serviceIPs),
 		DNSServer:    dnsServer,
 		Pods:         len(pods),
@@ -123,47 +125,59 @@ func collectNodePodCIDRs(nodes []corev1.Node) map[string]struct{} {
 	return podCIDRs
 }
 
-func discoverServiceCIDRs(ctx context.Context, client kubernetes.Interface) []string {
+func discoverServiceCIDRs(
+	ctx context.Context,
+	client kubernetes.Interface,
+	kubeadmSubnet string,
+) []string {
 	cidrs := make(map[string]struct{})
 	if list, err := client.NetworkingV1().ServiceCIDRs().List(ctx, metav1.ListOptions{}); err == nil {
 		for _, item := range list.Items {
 			for _, raw := range item.Spec.CIDRs {
-				if prefix, err := netip.ParsePrefix(raw); err == nil {
-					cidrs[prefix.Masked().String()] = struct{}{}
-				}
+				addCIDRs(cidrs, raw)
 			}
 		}
 	}
 	if len(cidrs) == 0 {
-		if subnet, err := serviceSubnetFromKubeadm(ctx, client); err == nil && subnet != "" {
-			if prefix, err := netip.ParsePrefix(subnet); err == nil {
-				cidrs[prefix.Masked().String()] = struct{}{}
-			}
-		}
+		addCIDRs(cidrs, kubeadmSubnet)
 	}
 	return sortedKeys(cidrs)
 }
 
-func serviceSubnetFromKubeadm(ctx context.Context, client kubernetes.Interface) (string, error) {
+func subnetsFromKubeadm(
+	ctx context.Context,
+	client kubernetes.Interface,
+) (podSubnet, serviceSubnet string, err error) {
 	configMap, err := client.CoreV1().ConfigMaps("kube-system").Get(
 		ctx, "kubeadm-config", metav1.GetOptions{},
 	)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	raw, ok := configMap.Data["ClusterConfiguration"]
 	if !ok || strings.TrimSpace(raw) == "" {
-		return "", fmt.Errorf("kubeadm-config missing ClusterConfiguration")
+		return "", "", fmt.Errorf("kubeadm-config missing ClusterConfiguration")
 	}
 	var parsed struct {
 		Networking struct {
+			PodSubnet     string `yaml:"podSubnet"`
 			ServiceSubnet string `yaml:"serviceSubnet"`
 		} `yaml:"networking"`
 	}
 	if err := yaml.Unmarshal([]byte(raw), &parsed); err != nil {
-		return "", err
+		return "", "", err
 	}
-	return strings.TrimSpace(parsed.Networking.ServiceSubnet), nil
+	return strings.TrimSpace(parsed.Networking.PodSubnet),
+		strings.TrimSpace(parsed.Networking.ServiceSubnet),
+		nil
+}
+
+func addCIDRs(cidrs map[string]struct{}, values string) {
+	for raw := range strings.SplitSeq(values, ",") {
+		if prefix, err := netip.ParsePrefix(strings.TrimSpace(raw)); err == nil {
+			cidrs[prefix.Masked().String()] = struct{}{}
+		}
+	}
 }
 
 func sortedKeys(values map[string]struct{}) []string {
