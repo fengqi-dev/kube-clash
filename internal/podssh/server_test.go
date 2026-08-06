@@ -236,6 +236,31 @@ func TestTargetForLoginRejectsUnknownContainer(t *testing.T) {
 	}
 }
 
+func TestCommandSelectsContainerFromActiveEndpoint(t *testing.T) {
+	target := Target{
+		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
+		Containers: []string{"api", "sidecar"}, IP: "10.0.0.2",
+	}
+	server := &Server{
+		targets:            map[string]Target{target.IP: target},
+		clientIdentityPath: "/tmp/key with spaces",
+	}
+	command, err := server.Command(targetID(target), "sidecar")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := "ssh -i " + shellquote.Join(server.clientIdentityPath) + " sidecar@10.0.0.2"
+	if command != want {
+		t.Fatalf("command=%q, want %q", command, want)
+	}
+	if _, err := server.Command(targetID(target), "missing"); err == nil {
+		t.Fatal("unknown container command was accepted")
+	}
+	if _, err := server.Command("dev/default/missing", "api"); err == nil {
+		t.Fatal("unknown endpoint command was accepted")
+	}
+}
+
 func TestSFTPHandlerCopiesFilesWithTarStreams(t *testing.T) {
 	executor := &fakeExecutor{files: make(map[string][]byte)}
 	handler := newSFTPHandler(executor, Target{
