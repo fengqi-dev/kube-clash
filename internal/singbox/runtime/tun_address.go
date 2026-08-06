@@ -30,7 +30,7 @@ func selectTUNAddress() (string, error) {
 
 func selectTUNAddressFrom(occupied []netip.Prefix) (string, error) {
 	for _, secondOctet := range []int{19, 18} {
-		for thirdOctet := 0; thirdOctet <= 255; thirdOctet++ {
+		for thirdOctet := range 256 {
 			for fourthOctet := 0; fourthOctet <= 252; fourthOctet += 4 {
 				raw := fmt.Sprintf(
 					"198.%d.%d.%d/30",

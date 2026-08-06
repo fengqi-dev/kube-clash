@@ -3,7 +3,6 @@ package podexec
 import (
 	"context"
 	"fmt"
-	"net/url"
 
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
 	corev1 "k8s.io/api/core/v1"
@@ -13,13 +12,7 @@ import (
 	"k8s.io/client-go/tools/remotecommand"
 )
 
-var newRemoteExecutor = func(
-	config *rest.Config,
-	method string,
-	target *url.URL,
-) (remotecommand.Executor, error) {
-	return remotecommand.NewSPDYExecutor(config, method, target)
-}
+var newRemoteExecutor = remotecommand.NewSPDYExecutor
 
 // Exec streams a command through the Kubernetes pods/exec subresource.
 func Exec(

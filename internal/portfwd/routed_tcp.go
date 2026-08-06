@@ -29,8 +29,7 @@ func newRoutedForwarder(
 		listener: listener, target: target, dialer: dialer, ctx: ctx, cancel: cancel,
 		conns: make(map[net.Conn]struct{}),
 	}
-	forwarder.wg.Add(1)
-	go forwarder.serve()
+	forwarder.wg.Go(forwarder.serve)
 	return forwarder
 }
 
@@ -52,7 +51,6 @@ func (f *routedForwarder) Close() error {
 }
 
 func (f *routedForwarder) serve() {
-	defer f.wg.Done()
 	for {
 		client, err := f.listener.Accept()
 		if err != nil {

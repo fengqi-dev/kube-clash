@@ -1,7 +1,9 @@
 package restoreplan
 
 import (
-	"sort"
+	"cmp"
+	"maps"
+	"slices"
 
 	"github.com/fengqi-dev/kube-loop/internal/store"
 )
@@ -32,11 +34,7 @@ func BuildStartup(snapshot store.State) Startup {
 		ContextCount: len(snapshot.Clusters),
 		LastContext:  snapshot.UI.LastContext,
 	}
-	contexts := make([]string, 0, len(snapshot.Clusters))
-	for contextName := range snapshot.Clusters {
-		contexts = append(contexts, contextName)
-	}
-	sort.Strings(contexts)
+	contexts := slices.Sorted(maps.Keys(snapshot.Clusters))
 	for _, contextName := range contexts {
 		cluster := snapshot.Clusters[contextName]
 		if cluster == nil {
@@ -58,13 +56,7 @@ func BuildStartup(snapshot store.State) Startup {
 	if contextName == "" || cluster == nil || !cluster.Connected {
 		return plan
 	}
-	namespace := cluster.Namespace
-	if namespace == "" {
-		namespace = snapshot.UI.LastNamespace
-	}
-	if namespace == "" {
-		namespace = "default"
-	}
+	namespace := cmp.Or(cluster.Namespace, snapshot.UI.LastNamespace, "default")
 	mode := cluster.ConnectionMode
 	if mode != "socks" {
 		mode = "tun"

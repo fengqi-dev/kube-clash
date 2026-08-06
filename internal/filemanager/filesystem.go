@@ -9,6 +9,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -240,10 +241,8 @@ func (m *Manager) validatePodIdentity(ctx context.Context, target Target) error 
 			if !pod.Ready {
 				return errors.New("Pod is not ready")
 			}
-			for _, container := range pod.Containers {
-				if container == target.Container {
-					return nil
-				}
+			if slices.Contains(pod.Containers, target.Container) {
+				return nil
 			}
 			return errors.New("container no longer exists")
 		}
@@ -264,10 +263,6 @@ func podTarget(target Target) podssh.Target {
 		Context: target.Context, Namespace: target.Namespace,
 		Pod: target.Pod, Container: target.Container,
 	}
-}
-
-func shellQuote(value string) string {
-	return "'" + strings.ReplaceAll(value, "'", "'\"'\"'") + "'"
 }
 
 func sameModTime(left, right time.Time) bool {

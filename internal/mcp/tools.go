@@ -199,11 +199,7 @@ func registerTools(server *mcpsdk.Server, backend Backend) {
 		Description: "Execute a shell command in a Pod container through the Kubernetes exec backend used by Pod SSH. " +
 			"Returns stdout, stderr, and exitCode; non-zero command exits are returned as structured results.",
 	}, func(ctx context.Context, _ *mcpsdk.CallToolRequest, in podCommandIn) (*mcpsdk.CallToolResult, PodCommandResult, error) {
-		out, err := backend.ExecPodCommand(ctx, PodCommandRequest{
-			Context: in.Context, Namespace: in.Namespace, Pod: in.Pod,
-			PodUID: in.PodUID, Container: in.Container, Command: in.Command,
-			TimeoutSeconds: in.TimeoutSeconds,
-		})
+		out, err := backend.ExecPodCommand(ctx, PodCommandRequest(in))
 		return nil, out, err
 	})
 

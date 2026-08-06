@@ -157,10 +157,7 @@ func (m *Manager) StartPreview(ctx context.Context, request PreviewRequest) (Inf
 	m.mu.Unlock()
 	defer m.releaseStartReservation(key, reservation)
 
-	ports, err := buildPreviewPorts(locals, m.allocateListenPort)
-	if err != nil {
-		return Info{}, err
-	}
+	ports := buildPreviewPorts(locals, m.allocateListenPort)
 
 	previewID := fmt.Sprintf("%s/%s", request.Namespace, request.Name)
 	transaction := newStartTransaction(control)

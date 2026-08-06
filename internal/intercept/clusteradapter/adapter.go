@@ -2,6 +2,7 @@ package clusteradapter
 
 import (
 	"context"
+	"maps"
 
 	corev1 "k8s.io/api/core/v1"
 	discoveryv1 "k8s.io/api/discovery/v1"
@@ -120,9 +121,7 @@ func serviceModel(service *corev1.Service) *intercept.Service {
 		})
 	}
 	selector := make(map[string]string, len(service.Spec.Selector))
-	for key, value := range service.Spec.Selector {
-		selector[key] = value
-	}
+	maps.Copy(selector, service.Spec.Selector)
 	return &intercept.Service{
 		Namespace: service.Namespace,
 		Name:      service.Name,

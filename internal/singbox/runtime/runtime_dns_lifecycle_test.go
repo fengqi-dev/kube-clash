@@ -9,7 +9,7 @@ import (
 )
 
 func TestProcessUpdateDNSNamespaceConcurrentClose(t *testing.T) {
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		done := make(chan struct{})
 		close(done)
 		process := &Process{

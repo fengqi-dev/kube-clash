@@ -3,7 +3,7 @@ package cluster
 import (
 	"context"
 	"fmt"
-	"sort"
+	"slices"
 
 	clusterdiscovery "github.com/fengqi-dev/kube-loop/internal/cluster/discovery"
 	corev1 "k8s.io/api/core/v1"
@@ -81,7 +81,7 @@ func (p *Provider) Namespaces(ctx context.Context, contextName string) ([]string
 	for _, item := range list.Items {
 		names = append(names, item.Name)
 	}
-	sort.Strings(names)
+	slices.Sort(names)
 	return names, nil
 }
 

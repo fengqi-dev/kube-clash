@@ -3,7 +3,9 @@ package portfwd
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -248,11 +250,8 @@ func (m *Manager) Stop(id string) error {
 
 func (m *Manager) StopAll() {
 	m.mu.Lock()
-	items := make([]*runtimeForward, 0, len(m.active))
-	for id, item := range m.active {
-		items = append(items, item)
-		delete(m.active, id)
-	}
+	items := slices.Collect(maps.Values(m.active))
+	clear(m.active)
 	m.mu.Unlock()
 	for _, item := range items {
 		_ = item.forwarder.Close()

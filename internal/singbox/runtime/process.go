@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -52,9 +53,7 @@ func (p *Process) Config() []byte {
 	if len(p.config) == 0 {
 		return nil
 	}
-	out := make([]byte, len(p.config))
-	copy(out, p.config)
-	return out
+	return slices.Clone(p.config)
 }
 
 func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) error {
@@ -67,7 +66,7 @@ func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) erro
 	nextSpec.DNSNamespace = namespace
 	nextSpec.Namespace = namespace
 	dns, err := nextSpec.DNS()
-	domains := append([]string{}, nextSpec.ClusterDomains...)
+	domains := slices.Clone(nextSpec.ClusterDomains)
 	sessionID := nextSpec.ID
 	proxy := p.dnsProxy
 	if err == nil {
@@ -91,7 +90,7 @@ func (p *Process) UpdateDNSNamespace(ctx context.Context, namespace string) erro
 
 func (p *Process) ProbeClusterDNS(ctx context.Context) error {
 	p.specMu.Lock()
-	domains := append([]string{}, p.spec.ClusterDomains...)
+	domains := slices.Clone(p.spec.ClusterDomains)
 	port := p.dnsPort
 	p.specMu.Unlock()
 	if len(domains) == 0 {

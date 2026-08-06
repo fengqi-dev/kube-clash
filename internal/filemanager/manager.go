@@ -15,6 +15,7 @@ import (
 
 	"github.com/fengqi-dev/kube-loop/internal/cluster"
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
+	"github.com/kballard/go-shellquote"
 )
 
 const stateVersion = 1
@@ -107,7 +108,7 @@ func (m *Manager) ListPodDirectory(
 		return nil, err
 	}
 	var stdout bytes.Buffer
-	if err := m.exec(ctx, target, "ls -A1 -- "+shellQuote(remotePath), nil, &stdout); err != nil {
+	if err := m.exec(ctx, target, "ls -A1 -- "+shellquote.Join(remotePath), nil, &stdout); err != nil {
 		return nil, fmt.Errorf("list container directory: %w", err)
 	}
 	names := strings.Split(strings.TrimSuffix(stdout.String(), "\n"), "\n")
@@ -179,7 +180,7 @@ func (m *Manager) CreatePodDirectory(
 		return err
 	}
 	destination := path.Join(parent, name)
-	if err := m.exec(ctx, target, "mkdir -- "+shellQuote(destination), nil, io.Discard); err != nil {
+	if err := m.exec(ctx, target, "mkdir -- "+shellquote.Join(destination), nil, io.Discard); err != nil {
 		return fmt.Errorf("create container directory: %w", err)
 	}
 	return nil
@@ -205,7 +206,7 @@ func (m *Manager) CreatePodFile(
 		return err
 	}
 	destination := path.Join(parent, name)
-	quoted := shellQuote(destination)
+	quoted := shellquote.Join(destination)
 	script := "if [ -e " + quoted + " ] || [ -L " + quoted +
 		" ]; then echo 'destination already exists' >&2; exit 1; fi; : > " + quoted
 	if err := m.exec(ctx, target, script, nil, io.Discard); err != nil {
@@ -263,7 +264,7 @@ func (m *Manager) RenamePodPath(
 	}
 	if err := m.exec(
 		ctx, target,
-		"mv -- "+shellQuote(source)+" "+shellQuote(destination),
+		"mv -- "+shellquote.Join(source)+" "+shellquote.Join(destination),
 		nil, io.Discard,
 	); err != nil {
 		return fmt.Errorf("rename container path: %w", err)
@@ -296,7 +297,7 @@ func (m *Manager) DeletePodPath(ctx context.Context, target Target, rawPath stri
 	if cleaned == "/" {
 		return errors.New("cannot delete the container root")
 	}
-	if err := m.exec(ctx, target, "rm -rf -- "+shellQuote(cleaned), nil, io.Discard); err != nil {
+	if err := m.exec(ctx, target, "rm -rf -- "+shellquote.Join(cleaned), nil, io.Discard); err != nil {
 		return fmt.Errorf("delete container path: %w", err)
 	}
 	return nil

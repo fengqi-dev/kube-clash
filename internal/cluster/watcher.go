@@ -4,8 +4,9 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"maps"
 	"net/netip"
-	"sort"
+	"slices"
 
 	clusterinventory "github.com/fengqi-dev/kube-loop/internal/cluster/inventory"
 	appsv1 "k8s.io/api/apps/v1"
@@ -66,11 +67,7 @@ func snapshotFromLists(
 			}
 		}
 	}
-	ips := make([]string, 0, len(serviceIPs))
-	for ip := range serviceIPs {
-		ips = append(ips, ip)
-	}
-	sort.Strings(ips)
+	ips := slices.Sorted(maps.Keys(serviceIPs))
 	return InventorySnapshot{
 		Pods:         len(pods),
 		Services:     len(services),

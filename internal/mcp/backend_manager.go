@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 	"time"
 
@@ -253,13 +254,7 @@ func (b managerBackend) ExecPodCommand(
 	if container == "" {
 		return PodCommandResult{}, fmt.Errorf("Pod %s/%s has no regular containers", request.Namespace, request.Pod)
 	}
-	foundContainer := false
-	for _, name := range selected.Containers {
-		if name == container {
-			foundContainer = true
-			break
-		}
-	}
+	foundContainer := slices.Contains(selected.Containers, container)
 	if !foundContainer {
 		return PodCommandResult{}, fmt.Errorf(
 			"container %q not found in Pod %s/%s",
@@ -300,8 +295,10 @@ func (b managerBackend) ExecPodCommand(
 	if execErr != nil {
 		result.ExitCode = 1
 		result.Error = execErr.Error()
-		var exitErr interface{ ExitStatus() int }
-		if errors.As(execErr, &exitErr) {
+		if exitErr, ok := errors.AsType[interface {
+			error
+			ExitStatus() int
+		}](execErr); ok {
 			result.ExitCode = exitErr.ExitStatus()
 		} else if errors.Is(commandCtx.Err(), context.DeadlineExceeded) {
 			result.ExitCode = 124
@@ -354,10 +351,7 @@ func newCappedBuffer(limit int) *cappedBuffer {
 func (b *cappedBuffer) Write(value []byte) (int, error) {
 	available := b.limit - b.Len()
 	if available > 0 {
-		write := len(value)
-		if write > available {
-			write = available
-		}
+		write := min(len(value), available)
 		_, _ = b.Buffer.Write(value[:write])
 	}
 	if len(value) > available {

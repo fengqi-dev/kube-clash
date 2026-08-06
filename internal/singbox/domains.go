@@ -61,7 +61,7 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 		if strings.ContainsAny(domain, " \t/") {
 			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
 		}
-		if !safeDNSName(domain) {
+		if !dnsname.ValidClusterDomain(domain) {
 			return nil, fmt.Errorf("invalid host alias domain %q", item.Domain)
 		}
 		ip, err := netip.ParseAddr(strings.TrimSpace(item.IP))
@@ -76,24 +76,6 @@ func NormalizeHostAliases(items []HostAlias) ([]HostAlias, error) {
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].Domain < out[j].Domain })
 	return out, nil
-}
-
-func safeDNSName(value string) bool {
-	if value == "" || len(value) > 253 || strings.HasPrefix(value, ".") ||
-		strings.HasSuffix(value, ".") {
-		return false
-	}
-	for label := range strings.SplitSeq(value, ".") {
-		if label == "" || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
-			return false
-		}
-		for _, r := range label {
-			if (r < 'a' || r > 'z') && (r < '0' || r > '9') && r != '-' {
-				return false
-			}
-		}
-	}
-	return true
 }
 
 // SearchDomains returns Kubernetes-style DNS search suffixes for short names

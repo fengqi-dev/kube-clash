@@ -240,20 +240,19 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 	tunInbound := map[string]any{
 		// dns_mode is sing-box 1.14+; we pin 1.13 and use /etc/resolver
 		// (or platform split DNS) + dns-in instead of TUN DNS hijack.
-		"type":          "tun",
-		"tag":           "tun-in",
-		"address":       []string{options.TUNAddress},
-		"mtu":           9000,
-		"auto_route":    true,
-		"strict_route":  strictRouteForPlatform(runtime.GOOS),
+		"type":       "tun",
+		"tag":        "tun-in",
+		"address":    []string{options.TUNAddress},
+		"mtu":        9000,
+		"auto_route": true,
+		// Windows WFP strict_route blocks DNS on other interfaces
+		"strict_route": runtime.GOOS != "windows",
+		// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube
+		// bridge conflicts that otherwise break kubectl port-forward to Gateway.
+		// See https://sing-box.sagernet.org/configuration/inbound/tun/
+		"auto_redirect": runtime.GOOS == "linux",
 		"stack":         "mixed",
 		"route_address": routes,
-	}
-	// Linux: auto_redirect uses nftables and avoids TUN vs Docker/Minikube
-	// bridge conflicts that otherwise break kubectl port-forward to Gateway.
-	// See https://sing-box.sagernet.org/configuration/inbound/tun/
-	if runtime.GOOS == "linux" {
-		tunInbound["auto_redirect"] = true
 	}
 	inbounds := []map[string]any{
 		tunInbound,
@@ -326,9 +325,3 @@ func Generate(network NetworkSpec, options Options) ([]byte, error) {
 
 	return json.MarshalIndent(config, "", "  ")
 }
-
-// strictRouteForPlatform keeps strict routing on platforms where it only
-// constrains route selection. On Windows sing-box implements strict_route
-// with WFP rules that also block DNS on other interfaces. That can conflict
-// with Clash/Mihomo and other VPN clients even though kube-loop only installs
-// precise Pod/Service routes.

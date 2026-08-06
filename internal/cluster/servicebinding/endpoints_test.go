@@ -35,8 +35,8 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 			AddressType: discoveryv1.AddressTypeIPv4,
 			Endpoints:   []discoveryv1.Endpoint{{Addresses: []string{"10.244.0.5"}}},
 			Ports: []discoveryv1.EndpointPort{{
-				Name: endpointTestPtr("http"), Protocol: endpointTestPtr(corev1.ProtocolTCP),
-				Port: endpointTestPtr(int32(8080)),
+				Name: new("http"), Protocol: endpointTestPtr(corev1.ProtocolTCP),
+				Port: new(int32(8080)),
 			}},
 		},
 	)
@@ -120,8 +120,9 @@ func TestApplyAndRestoreServiceIntercept(t *testing.T) {
 	}
 }
 
+//go:fix inline
 func endpointTestPtr[T any](value T) *T {
-	return &value
+	return new(value)
 }
 
 func TestApplyServiceInterceptRollsBackWhenManagedSliceCreationFails(t *testing.T) {

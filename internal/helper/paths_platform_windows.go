@@ -44,20 +44,11 @@ func platformLegacyBinaryInstallPath() string {
 }
 
 func platformBundledSingBoxPath() string {
-	return filepath.Join(platformInstallRoot(), "sing-box.exe")
-}
-
-// platformInstallRoot is the desktop app install directory (may be on D: etc).
-// Derived from the running executable so NSIS custom InstallDir is respected:
-//
-//	{root}\KubeLoop.exe
-//	{root}\resources\kubeloop-helper.exe
-func platformInstallRoot() string {
 	executable, err := os.Executable()
 	if err != nil {
-		return windowsProgramFilesProductRoot()
+		return filepath.Join(windowsProgramFilesProductRoot(), "sing-box.exe")
 	}
-	return platformInstallRootForExecutable(executable)
+	return filepath.Join(platformInstallRootForExecutable(executable), "sing-box.exe")
 }
 
 func platformInstallRootForExecutable(executable string) string {

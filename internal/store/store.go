@@ -7,6 +7,8 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+
+	"github.com/fengqi-dev/kube-loop/internal/fsatomic"
 )
 
 // Store persists State as a JSON file.
@@ -93,16 +95,8 @@ func (s *Store) saveLocked() error {
 		return fmt.Errorf("encode state: %w", err)
 	}
 	raw = append(raw, '\n')
-	if err := os.MkdirAll(filepath.Dir(s.path), 0o755); err != nil {
-		return fmt.Errorf("create state directory: %w", err)
-	}
-	temp := s.path + ".tmp"
-	if err := os.WriteFile(temp, raw, 0o600); err != nil {
-		return fmt.Errorf("write state: %w", err)
-	}
-	if err := os.Rename(temp, s.path); err != nil {
-		_ = os.Remove(temp)
-		return fmt.Errorf("replace state: %w", err)
+	if err := fsatomic.WriteFile(s.path, raw, 0o755, 0o600); err != nil {
+		return fmt.Errorf("save state: %w", err)
 	}
 	return nil
 }

@@ -3,6 +3,7 @@ package runtime
 import (
 	"fmt"
 	"net"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -48,7 +49,7 @@ func startDNSSearchProxy(
 	}
 	proxy := &dnsSearchProxy{
 		upstream:  net.JoinHostPort(upstreamHost, fmt.Sprintf("%d", upstreamPort)),
-		search:    append([]string(nil), search...),
+		search:    slices.Clone(search),
 		domains:   domains,
 		clientUDP: &dns.Client{Net: "udp", Timeout: 3 * time.Second, UDPSize: 1232},
 		clientTCP: &dns.Client{Net: "tcp", Timeout: 5 * time.Second},
@@ -75,7 +76,7 @@ func startDNSSearchProxy(
 func (p *dnsSearchProxy) SetSearch(search []string) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	p.search = append([]string(nil), search...)
+	p.search = slices.Clone(search)
 }
 
 func (p *dnsSearchProxy) SetClusterDomains(domains []string) {
@@ -115,8 +116,8 @@ func (p *dnsSearchProxy) serveDNS(w dns.ResponseWriter, req *dns.Msg) {
 		return
 	}
 	p.mu.Lock()
-	search := append([]string(nil), p.search...)
-	domains := append([]string(nil), p.domains...)
+	search := slices.Clone(p.search)
+	domains := slices.Clone(p.domains)
 	p.mu.Unlock()
 
 	original := req.Question[0].Name

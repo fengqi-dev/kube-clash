@@ -2,7 +2,8 @@ package intercept
 
 import (
 	"fmt"
-	"sort"
+	"maps"
+	"slices"
 )
 
 type controlRegistrar interface {
@@ -62,11 +63,11 @@ func (t *startTransaction) rollback() {
 	if t.committed {
 		return
 	}
-	for i := len(t.compensations) - 1; i >= 0; i-- {
-		t.compensations[i]()
+	for _, compensate := range slices.Backward(t.compensations) {
+		compensate()
 	}
-	for i := len(t.registered) - 1; i >= 0; i-- {
-		_ = t.control.unregister(t.registered[i])
+	for _, subID := range slices.Backward(t.registered) {
+		_ = t.control.unregister(subID)
 	}
 }
 
@@ -74,12 +75,7 @@ func unregisterPorts(control controlRegistrar, portKeys map[string]PortMapping) 
 	if control == nil {
 		return
 	}
-	ids := make([]string, 0, len(portKeys))
-	for subID := range portKeys {
-		ids = append(ids, subID)
-	}
-	sort.Strings(ids)
-	for _, subID := range ids {
+	for _, subID := range slices.Sorted(maps.Keys(portKeys)) {
 		_ = control.unregister(subID)
 	}
 }

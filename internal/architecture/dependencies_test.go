@@ -44,7 +44,6 @@ func TestCoreFeaturePackagesDoNotImportInfrastructure(t *testing.T) {
 	}
 
 	for _, rule := range rules {
-		rule := rule
 		t.Run(rule.path, func(t *testing.T) {
 			assertImportsDoNotMatch(t, filepath.Join(root, rule.path), rule.forbidden)
 		})

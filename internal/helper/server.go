@@ -154,11 +154,6 @@ func (s *Server) dispatch(request Request) Response {
 	}
 }
 
-func (s *Server) activeSessionIDs() []string {
-	ids, _ := s.activeSessionState()
-	return ids
-}
-
 func (s *Server) activeSessionState() ([]string, int) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

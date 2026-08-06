@@ -1,26 +1,19 @@
 package socksbridge
 
 import (
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"net"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/fengqi-dev/kube-loop/internal/tunnel"
-)
-
-const (
-	socksVersion  = 5
-	methodNone    = 0
-	commandTCP    = 1
-	commandUDP    = 3
-	addressIPv4   = 1
-	addressDomain = 3
-	addressIPv6   = 4
+	"github.com/things-go/go-socks5"
+	"github.com/things-go/go-socks5/bufferpool"
+	"github.com/things-go/go-socks5/statute"
 )
 
 // HostTCPHandler claims intercepted Service destinations on the host TUN path.
@@ -64,80 +57,87 @@ func (b *Bridge) SetGatewayAddress(address string) {
 }
 
 func (s *Server) Serve(listener net.Listener) error {
-	for {
-		connection, err := listener.Accept()
-		if err != nil {
-			if errors.Is(err, net.ErrClosed) {
-				return nil
-			}
-			return err
-		}
-		go s.handle(connection)
+	server := socks5.NewServer(
+		socks5.WithResolver(remoteResolver{}),
+		socks5.WithBufferPool(bufferpool.NewPool(tunnel.MaxDatagramSize+512)),
+		socks5.WithDial(s.dial),
+		socks5.WithConnectHandle(s.handleConnect),
+	)
+	if err := server.Serve(listener); err != nil && !errors.Is(err, net.ErrClosed) {
+		return err
 	}
+	return nil
 }
 
-func (s *Server) handle(control net.Conn) {
-	defer control.Close()
-	reader := bufio.NewReader(control)
-	if err := negotiate(reader, control); err != nil {
-		return
-	}
-	command, host, port, err := readRequest(reader)
+func (s *Server) handleConnect(
+	ctx context.Context,
+	writer io.Writer,
+	request *socks5.Request,
+) error {
+	host, port, err := destination(request.DestAddr)
 	if err != nil {
-		_ = writeReply(control, 1, nil)
-		return
+		_ = socks5.SendReply(writer, statute.RepAddrTypeNotSupported, nil)
+		return err
 	}
-	switch command {
-	case commandTCP:
-		s.handleTCP(control, host, port)
-	case commandUDP:
-		s.handleUDP(control)
-	default:
-		_ = writeReply(control, 7, nil)
-	}
-}
-
-func (s *Server) handleTCP(client net.Conn, host string, port uint16) {
 	if s.HostTCP != nil {
 		if serve, ok := s.HostTCP(host, port); ok && serve != nil {
-			if err := writeReply(client, 0, client.LocalAddr()); err != nil {
-				return
+			client, ok := writer.(net.Conn)
+			if !ok {
+				_ = socks5.SendReply(writer, statute.RepServerFailure, nil)
+				return errors.New("SOCKS client is not a network connection")
 			}
-			serve(client)
-			return
+			if err := socks5.SendReply(writer, statute.RepSuccess, client.LocalAddr()); err != nil {
+				return err
+			}
+			serve(&bufferedConn{Conn: client, reader: request.Reader})
+			return nil
 		}
 	}
-	gateway, err := s.openGateway(tunnel.CommandTCP, host, port)
+
+	target, err := s.openGateway(ctx, tunnel.CommandTCP, host, port)
 	if err != nil {
-		_ = writeReply(client, 5, nil)
-		return
+		_ = socks5.SendReply(writer, statute.RepConnectionRefused, nil)
+		return err
 	}
-	defer gateway.Close()
-	if err := writeReply(client, 0, client.LocalAddr()); err != nil {
-		return
+	defer target.Close()
+	if err := socks5.SendReply(writer, statute.RepSuccess, request.LocalAddr); err != nil {
+		return err
 	}
-	relay(client, gateway)
+	relay(writer, request.Reader, target)
+	return nil
 }
 
-func (s *Server) handleUDP(control net.Conn) {
-	listener, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1")})
+func (s *Server) dial(ctx context.Context, network, address string) (net.Conn, error) {
+	host, rawPort, err := net.SplitHostPort(address)
 	if err != nil {
-		_ = writeReply(control, 1, nil)
-		return
+		return nil, fmt.Errorf("split SOCKS destination: %w", err)
 	}
-	defer listener.Close()
-	if err := writeReply(control, 0, listener.LocalAddr()); err != nil {
-		return
+	value, err := strconv.ParseUint(rawPort, 10, 16)
+	if err != nil {
+		return nil, fmt.Errorf("parse SOCKS destination port: %w", err)
 	}
-	association := &udpAssociation{
-		server: s, listener: listener, tunnels: make(map[string]*udpTunnel),
+	port := uint16(value)
+	if network != "udp" {
+		return s.openGateway(ctx, tunnel.CommandTCP, host, port)
 	}
-	go association.serve()
-	_, _ = io.Copy(io.Discard, control)
-	association.close()
+	if s.HostUDP != nil {
+		if dial, ok := s.HostUDP(host, port); ok && dial != nil {
+			return dial(ctx)
+		}
+	}
+	connection, err := s.openGateway(ctx, tunnel.CommandUDP, host, port)
+	if err != nil {
+		return nil, err
+	}
+	return newFramedConn(connection), nil
 }
 
-func (s *Server) openGateway(command byte, host string, port uint16) (net.Conn, error) {
+func (s *Server) openGateway(
+	ctx context.Context,
+	command byte,
+	host string,
+	port uint16,
+) (net.Conn, error) {
 	timeout := s.DialTimeout
 	if timeout == 0 {
 		timeout = 10 * time.Second
@@ -145,7 +145,7 @@ func (s *Server) openGateway(command byte, host string, port uint16) (net.Conn, 
 	s.gatewayMu.RLock()
 	gatewayAddress := s.GatewayAddress
 	s.gatewayMu.RUnlock()
-	connection, err := net.DialTimeout("tcp", gatewayAddress, timeout)
+	connection, err := (&net.Dialer{Timeout: timeout}).DialContext(ctx, "tcp", gatewayAddress)
 	if err != nil {
 		return nil, fmt.Errorf("connect gateway: %w", err)
 	}
@@ -160,6 +160,39 @@ func (s *Server) openGateway(command byte, host string, port uint16) (net.Conn, 
 		return nil, err
 	}
 	return connection, nil
+}
+
+func destination(address *statute.AddrSpec) (string, uint16, error) {
+	if address == nil || address.Port < 0 || address.Port > 65535 {
+		return "", 0, errors.New("invalid SOCKS destination")
+	}
+	host := address.FQDN
+	if host == "" && address.IP != nil {
+		host = address.IP.String()
+	}
+	if host == "" {
+		return "", 0, errors.New("empty SOCKS destination")
+	}
+	return host, uint16(address.Port), nil
+}
+
+func relay(client io.Writer, clientReader io.Reader, target net.Conn) {
+	done := make(chan struct{}, 2)
+	go func() {
+		_, _ = io.Copy(target, clientReader)
+		if value, ok := target.(interface{ CloseWrite() error }); ok {
+			_ = value.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	go func() {
+		_, _ = io.Copy(client, target)
+		if value, ok := client.(interface{ CloseWrite() error }); ok {
+			_ = value.CloseWrite()
+		}
+		done <- struct{}{}
+	}()
+	<-done
 }
 
 func Listen(ctx context.Context, gatewayAddress, listenAddress string) (*Bridge, error) {

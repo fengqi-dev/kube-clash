@@ -3,13 +3,10 @@ package singbox
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"net/netip"
-	"sort"
+	"slices"
 )
-
-func strictRouteForPlatform(goos string) bool {
-	return goos != "windows"
-}
 
 func clusterRoutes(network NetworkSpec) ([]string, error) {
 	routeSet := make(map[string]struct{})
@@ -40,23 +37,13 @@ func clusterRoutes(network NetworkSpec) ([]string, error) {
 	if len(routeSet) == 0 {
 		return nil, errors.New("cluster discovery returned no routable addresses")
 	}
-	routes := make([]string, 0, len(routeSet))
-	for route := range routeSet {
-		routes = append(routes, route)
-	}
-	sort.Strings(routes)
+	routes := slices.Sorted(maps.Keys(routeSet))
 	return routes, nil
 }
 
 func validatePort(port int, label string) error {
 	if port < 1 || port > 65535 {
-		return fmt.Errorf("%s port must be between 1 and 65535", errLabel(label))
+		return fmt.Errorf("%s port must be between 1 and 65535", label)
 	}
 	return nil
 }
-
-func errLabel(label string) string { return label }
-
-// ResolverDomains returns split-DNS match domains routed to the local dns-in.
-// "svc" is included so macOS /etc/resolver/svc catches short names like
-// static-web.default.svc (search domains alone query the primary resolver).

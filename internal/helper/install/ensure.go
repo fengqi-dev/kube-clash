@@ -116,16 +116,17 @@ func waitForHelperReady(
 		if err == nil && response.Protocol == helper.ProtocolVersion && response.CoreReady {
 			return nil
 		}
-		if err == nil && response.Protocol == helper.ProtocolVersion && !response.CoreReady {
-			lastErr = fmt.Errorf("helper is running but bundled sing-box is not configured")
-		} else if err != nil {
+		switch {
+		case err != nil:
 			lastErr = err
-		} else {
+		case response.Protocol != helper.ProtocolVersion:
 			lastErr = fmt.Errorf(
 				"helper protocol %d does not match expected protocol %d",
 				response.Protocol,
 				helper.ProtocolVersion,
 			)
+		default:
+			lastErr = fmt.Errorf("helper is running but bundled sing-box is not configured")
 		}
 
 		timer := time.NewTimer(interval)

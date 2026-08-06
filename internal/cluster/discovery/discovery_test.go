@@ -28,6 +28,22 @@ func TestCollectNodePodCIDRsUsesOnlyAdvertisedCIDRs(t *testing.T) {
 	}
 }
 
+func TestDiscoverPreservesEmptyNetworkLists(t *testing.T) {
+	result, err := Discover(context.Background(), fake.NewSimpleClientset(), nil)
+	if err != nil {
+		t.Fatalf("discover: %v", err)
+	}
+	for name, values := range map[string][]string{
+		"PodCIDRs":     result.PodCIDRs,
+		"ServiceCIDRs": result.ServiceCIDRs,
+		"ServiceIPs":   result.ServiceIPs,
+	} {
+		if values == nil {
+			t.Errorf("%s = nil, want empty slice", name)
+		}
+	}
+}
+
 func TestDiscoverCollectsScopedNetworkInventory(t *testing.T) {
 	client := fake.NewSimpleClientset(
 		&corev1.Node{Spec: corev1.NodeSpec{PodCIDR: "10.244.1.0/24"}},

@@ -502,7 +502,7 @@ export namespace filemanager {
 
 }
 
-export namespace helperapi {
+export namespace helper {
 
 	export class Status {
 	    installed: boolean;

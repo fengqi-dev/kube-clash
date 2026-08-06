@@ -38,7 +38,7 @@ func normalizePreviewPorts(ports []PortMapping) ([]PortMapping, error) {
 
 func buildPreviewPorts(
 	locals []PortMapping, allocate func() int32,
-) ([]InterceptPort, error) {
+) []InterceptPort {
 	ports := make([]InterceptPort, 0, len(locals))
 	for _, local := range locals {
 		protocol := ProtocolTCP
@@ -53,7 +53,7 @@ func buildPreviewPorts(
 			ListenPort:  allocate(),
 		})
 	}
-	return ports, nil
+	return ports
 }
 
 func buildPortsForLocals(
@@ -69,7 +69,7 @@ func buildPortsForLocals(
 			if protocol == "" {
 				protocol = ProtocolTCP
 			}
-			if servicePort.Port != local.ServicePort || !equalProtocol(local.Protocol, string(protocol)) {
+			if servicePort.Port != local.ServicePort || !equalProtocol(local.Protocol, protocol) {
 				continue
 			}
 			name := servicePort.Name
@@ -141,13 +141,13 @@ func (m Mapping) resolveLocals(service *Service) ([]PortMapping, error) {
 
 func localFor(port InterceptPort, locals []PortMapping) PortMapping {
 	for _, local := range locals {
-		if local.ServicePort == port.ServicePort && equalProtocol(local.Protocol, string(port.Protocol)) {
+		if local.ServicePort == port.ServicePort && equalProtocol(local.Protocol, port.Protocol) {
 			return local
 		}
 	}
 	return PortMapping{
 		ServicePort: port.ServicePort,
-		Protocol:    string(port.Protocol),
+		Protocol:    port.Protocol,
 		LocalHost:   "127.0.0.1",
 		LocalPort:   int(port.ServicePort),
 	}

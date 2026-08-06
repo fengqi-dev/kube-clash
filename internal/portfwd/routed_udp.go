@@ -2,7 +2,9 @@ package portfwd
 
 import (
 	"context"
+	"maps"
 	"net"
+	"slices"
 	"sync"
 	"time"
 )
@@ -34,8 +36,7 @@ func newRoutedUDPForwarder(
 		socket: socket, target: target, dialer: dialer, ctx: ctx, cancel: cancel,
 		associations: make(map[string]*udpAssociation),
 	}
-	forwarder.wg.Add(1)
-	go forwarder.serve()
+	forwarder.wg.Go(forwarder.serve)
 	return forwarder
 }
 
@@ -47,11 +48,8 @@ func (f *routedUDPForwarder) Close() error {
 		f.cancel()
 		err = f.socket.Close()
 		f.mu.Lock()
-		items := make([]*udpAssociation, 0, len(f.associations))
-		for key, item := range f.associations {
-			items = append(items, item)
-			delete(f.associations, key)
-		}
+		items := slices.Collect(maps.Values(f.associations))
+		clear(f.associations)
 		f.mu.Unlock()
 		for _, item := range items {
 			_ = item.upstream.Close()
@@ -62,7 +60,6 @@ func (f *routedUDPForwarder) Close() error {
 }
 
 func (f *routedUDPForwarder) serve() {
-	defer f.wg.Done()
 	buffer := make([]byte, 65535)
 	for {
 		n, client, err := f.socket.ReadFromUDP(buffer)
@@ -106,13 +103,11 @@ func (f *routedUDPForwarder) association(client *net.UDPAddr) (*udpAssociation, 
 	}
 	f.associations[key] = item
 	f.mu.Unlock()
-	f.wg.Add(1)
-	go f.readReplies(key, item)
+	f.wg.Go(func() { f.readReplies(key, item) })
 	return item, nil
 }
 
 func (f *routedUDPForwarder) readReplies(key string, item *udpAssociation) {
-	defer f.wg.Done()
 	defer f.removeAssociation(key, item)
 	buffer := make([]byte, 65535)
 	for {

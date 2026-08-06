@@ -76,6 +76,3 @@ func (p *Provider) StartPodPortForward(
 		ctx, config, namespace, podName, localPort, remotePort,
 	)
 }
-
-//go:fix inline
-func boolPointer(value bool) *bool { return new(value) }

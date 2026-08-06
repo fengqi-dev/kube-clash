@@ -45,11 +45,10 @@ func enableService(binaryPath string) error {
 	}
 	_ = exec.Command("launchctl", "bootout", "system/"+label).Run()
 	cmd := exec.Command("launchctl", "bootstrap", "system", plistPath)
-	output, err := cmd.CombinedOutput()
-	if err != nil {
+	if _, err := cmd.CombinedOutput(); err != nil {
 		// Older macOS fallback.
 		cmd = exec.Command("launchctl", "load", "-w", plistPath)
-		output, err = cmd.CombinedOutput()
+		output, err := cmd.CombinedOutput()
 		if err != nil {
 			return fmt.Errorf("launchctl load helper: %w: %s", err, strings.TrimSpace(string(output)))
 		}

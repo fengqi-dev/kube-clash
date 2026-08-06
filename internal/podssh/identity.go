@@ -2,12 +2,15 @@ package podssh
 
 import (
 	"fmt"
+	"slices"
+
+	"github.com/kballard/go-shellquote"
 )
 
 func (s *Server) info(target Target) Info {
 	command := "ssh "
 	if s.clientIdentityPath != "" {
-		command += "-i " + shellQuote(s.clientIdentityPath) + " "
+		command += "-i " + shellquote.Join(s.clientIdentityPath) + " "
 	}
 	command += fmt.Sprintf("%s@%s", target.Container, target.IP)
 	return Info{
@@ -38,10 +41,5 @@ func podIdentity(contextName, namespace, pod string) string {
 }
 
 func contains(items []string, wanted string) bool {
-	for _, item := range items {
-		if item == wanted {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(items, wanted)
 }

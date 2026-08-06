@@ -3,8 +3,9 @@ package discovery
 import (
 	"context"
 	"fmt"
+	"maps"
 	"net/netip"
-	"sort"
+	"slices"
 	"strings"
 
 	"go.yaml.in/yaml/v3"
@@ -166,10 +167,7 @@ func serviceSubnetFromKubeadm(ctx context.Context, client kubernetes.Interface) 
 }
 
 func sortedKeys(values map[string]struct{}) []string {
-	items := make([]string, 0, len(values))
-	for item := range values {
-		items = append(items, item)
-	}
-	sort.Strings(items)
+	items := slices.AppendSeq(make([]string, 0, len(values)), maps.Keys(values))
+	slices.Sort(items)
 	return items
 }

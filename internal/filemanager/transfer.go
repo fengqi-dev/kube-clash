@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"github.com/fengqi-dev/kube-loop/internal/podssh"
+	"github.com/kballard/go-shellquote"
 )
 
 func (m *Manager) download(ctx context.Context, task TransferTask) error {
@@ -47,9 +48,9 @@ func (m *Manager) download(ctx context.Context, task TransferTask) error {
 		return err
 	}
 	m.updateProgress(task.ID, offset)
-	script := "cat -- " + shellQuote(task.SourcePath)
+	script := "cat -- " + shellquote.Join(task.SourcePath)
 	if offset > 0 {
-		script = "tail -c +" + strconv.FormatInt(offset+1, 10) + " -- " + shellQuote(task.SourcePath)
+		script = "tail -c +" + strconv.FormatInt(offset+1, 10) + " -- " + shellquote.Join(task.SourcePath)
 	}
 	writer := &progressWriter{
 		writer: file, done: offset,
@@ -90,7 +91,7 @@ func (m *Manager) upload(ctx context.Context, task TransferTask) error {
 		offset = remote.Size
 	}
 	if offset > task.TotalBytes {
-		_ = m.exec(ctx, task.Target, "rm -f -- "+shellQuote(task.TempPath), nil, io.Discard)
+		_ = m.exec(ctx, task.Target, "rm -f -- "+shellquote.Join(task.TempPath), nil, io.Discard)
 		offset = 0
 	}
 	file, err := os.Open(task.SourcePath)
@@ -107,7 +108,7 @@ func (m *Manager) upload(ctx context.Context, task TransferTask) error {
 		operator = ">>"
 	}
 	parent := path.Dir(task.TempPath)
-	script := "mkdir -p -- " + shellQuote(parent) + " && cat " + operator + " " + shellQuote(task.TempPath)
+	script := "mkdir -p -- " + shellquote.Join(parent) + " && cat " + operator + " " + shellquote.Join(task.TempPath)
 	reader := &progressReader{
 		reader: file, done: offset,
 		update: func(done int64) { m.updateProgress(task.ID, done) },
@@ -123,9 +124,9 @@ func (m *Manager) upload(ctx context.Context, task TransferTask) error {
 			return fmt.Errorf("destination %s already exists", task.DestinationPath)
 		}
 	}
-	finalize := "mv -- " + shellQuote(task.TempPath) + " " + shellQuote(task.DestinationPath)
+	finalize := "mv -- " + shellquote.Join(task.TempPath) + " " + shellquote.Join(task.DestinationPath)
 	if task.Overwrite {
-		finalize = "rm -rf -- " + shellQuote(task.DestinationPath) + " && " + finalize
+		finalize = "rm -rf -- " + shellquote.Join(task.DestinationPath) + " && " + finalize
 	}
 	return m.exec(ctx, task.Target, finalize, nil, io.Discard)
 }
@@ -149,7 +150,7 @@ func (m *Manager) downloadDirectory(ctx context.Context, task TransferTask) erro
 	reader, writer := io.Pipe()
 	result := make(chan error, 1)
 	go func() {
-		script := "tar cf - -C " + shellQuote(task.SourcePath) + " ."
+		script := "tar cf - -C " + shellquote.Join(task.SourcePath) + " ."
 		execErr := m.exec(ctx, task.Target, script, nil, writer)
 		_ = writer.CloseWithError(execErr)
 		result <- execErr
@@ -161,6 +162,7 @@ func (m *Manager) downloadDirectory(ctx context.Context, task TransferTask) erro
 	if extractErr != nil {
 		_ = reader.CloseWithError(extractErr)
 	}
+	_, _ = io.Copy(io.Discard, reader)
 	execErr := <-result
 	if extractErr != nil {
 		return extractErr
@@ -206,9 +208,9 @@ func (m *Manager) uploadDirectory(ctx context.Context, task TransferTask) error 
 		_ = writer.CloseWithError(archiveErr)
 		result <- archiveErr
 	}()
-	script := "rm -rf -- " + shellQuote(task.TempPath) +
-		" && mkdir -p -- " + shellQuote(task.TempPath) +
-		" && tar xf - -C " + shellQuote(task.TempPath)
+	script := "rm -rf -- " + shellquote.Join(task.TempPath) +
+		" && mkdir -p -- " + shellquote.Join(task.TempPath) +
+		" && tar xf - -C " + shellquote.Join(task.TempPath)
 	execErr := m.exec(ctx, task.Target, script, reader, io.Discard)
 	if execErr != nil {
 		_ = reader.CloseWithError(execErr)
@@ -225,9 +227,9 @@ func (m *Manager) uploadDirectory(ctx context.Context, task TransferTask) error 
 			return fmt.Errorf("destination %s already exists", task.DestinationPath)
 		}
 	}
-	finalize := "mv -- " + shellQuote(task.TempPath) + " " + shellQuote(task.DestinationPath)
+	finalize := "mv -- " + shellquote.Join(task.TempPath) + " " + shellquote.Join(task.DestinationPath)
 	if task.Overwrite {
-		finalize = "rm -rf -- " + shellQuote(task.DestinationPath) + " && " + finalize
+		finalize = "rm -rf -- " + shellquote.Join(task.DestinationPath) + " && " + finalize
 	}
 	return m.exec(ctx, task.Target, finalize, nil, io.Discard)
 }
@@ -246,7 +248,7 @@ func (m *Manager) remoteStat(ctx context.Context, target Target, remotePath stri
 	go func() {
 		err := m.executor.Exec(ctx, podTarget(target), []string{
 			"/bin/sh", "-c",
-			"tar cf - --no-recursion -C " + shellQuote(parent) + " " + shellQuote("./"+base),
+			"tar cf - --no-recursion -C " + shellquote.Join(parent) + " " + shellquote.Join("./"+base),
 		}, podssh.Streams{Stdout: writer, Stderr: io.Discard})
 		_ = writer.CloseWithError(err)
 		result <- err
