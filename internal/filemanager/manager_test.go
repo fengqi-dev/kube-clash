@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -224,6 +225,9 @@ func TestResumeDownloadFromPartialFile(t *testing.T) {
 }
 
 func TestPodOperationsQuoteSpecialPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a local POSIX shell to emulate the Pod filesystem")
+	}
 	root := filepath.Join(t.TempDir(), "remote parent $")
 	if err := os.MkdirAll(root, 0o700); err != nil {
 		t.Fatal(err)
@@ -278,6 +282,9 @@ func TestPodOperationsQuoteSpecialPaths(t *testing.T) {
 }
 
 func TestFileAndDirectoryTransfersQuoteSpecialPaths(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("requires a local POSIX shell to emulate the Pod filesystem")
+	}
 	ctx := context.Background()
 	target := Target{
 		Context: "dev", Namespace: "default", Pod: "api", Container: "api",
