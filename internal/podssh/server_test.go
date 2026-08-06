@@ -136,7 +136,15 @@ func TestServerExecOverPodIP(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if info.Command != "ssh -i "+shellquote.Join("/tmp/id_ed25519")+" api@10.244.1.7" {
+	wantCommand := shellquote.Join(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile="+os.DevNull,
+		"-o", "LogLevel=ERROR",
+		"-i", "/tmp/id_ed25519",
+		"api@10.244.1.7",
+	)
+	if info.Command != wantCommand {
 		t.Fatalf("command=%q", info.Command)
 	}
 	serve, claimed := server.HostTCP(target.IP, DefaultPort)
@@ -249,7 +257,14 @@ func TestCommandSelectsContainerFromActiveEndpoint(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := "ssh -i " + shellquote.Join(server.clientIdentityPath) + " sidecar@10.0.0.2"
+	want := shellquote.Join(
+		"ssh",
+		"-o", "StrictHostKeyChecking=no",
+		"-o", "UserKnownHostsFile="+os.DevNull,
+		"-o", "LogLevel=ERROR",
+		"-i", server.clientIdentityPath,
+		"sidecar@10.0.0.2",
+	)
 	if command != want {
 		t.Fatalf("command=%q, want %q", command, want)
 	}
