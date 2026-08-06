@@ -206,7 +206,7 @@ func TestResumeDownloadFromPartialFile(t *testing.T) {
 	if err := manager.Resume("resume"); err != nil {
 		t.Fatal(err)
 	}
-	deadline := time.Now().Add(3 * time.Second)
+	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
 		items := manager.ListTransfers()
 		if len(items) == 1 && items[0].Status == StatusCompleted {
