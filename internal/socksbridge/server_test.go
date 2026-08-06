@@ -374,8 +374,10 @@ func TestHostUDPHandlerBypassesGateway(t *testing.T) {
 	if _, err := io.ReadFull(control, reply); err != nil {
 		t.Fatal(err)
 	}
-	// UDP ASSOCIATE
-	if _, err := control.Write([]byte{5, 3, 0, 1, 0, 0, 0, 0, 0, 0}); err != nil {
+	// UDP ASSOCIATE with a claimed client port that deliberately differs from
+	// the socket below. sing-box can behave this way, and a loopback-only bridge
+	// must accept the actual datagram source.
+	if _, err := control.Write([]byte{5, 3, 0, 1, 127, 0, 0, 1, 0, 9}); err != nil {
 		t.Fatal(err)
 	}
 	head := make([]byte, 4)
