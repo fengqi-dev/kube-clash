@@ -266,12 +266,11 @@ npm ci --prefix frontend
 wails dev
 ```
 
-`wails dev` builds and embeds the platform Helper automatically. To use a local
-Gateway image:
-
-```bash
-KUBELOOP_GATEWAY_IMAGE=kube-loop-gateway:dev wails dev
-```
+`wails dev` builds and embeds the platform Helper and builds a content-addressed
+local Gateway image automatically. Docker Desktop Kubernetes can use the image
+directly; the active Minikube, kind, or k3d cluster receives the image through
+its local image loader. Set `KUBELOOP_GATEWAY_IMAGE` only to override this
+development image explicitly.
 
 ### Tests
 
