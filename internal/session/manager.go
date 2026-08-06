@@ -18,7 +18,6 @@ import (
 	portfwdclusteradapter "github.com/fengqi-dev/kube-loop/internal/portfwd/clusteradapter"
 	"github.com/fengqi-dev/kube-loop/internal/singbox"
 	singboxdist "github.com/fengqi-dev/kube-loop/internal/singbox/distribution"
-	"github.com/fengqi-dev/kube-loop/internal/socksbridge"
 	"github.com/fengqi-dev/kube-loop/internal/store"
 	"github.com/fengqi-dev/kube-loop/internal/traffic"
 )
@@ -222,14 +221,9 @@ const (
 
 func NewManager(provider ClusterProvider, options ...Option) *Manager {
 	manager := &Manager{
-		catalog:    provider,
-		connection: provider,
-		gateway:    provider,
-		bridgeFactory: func(
-			ctx context.Context, gatewayAddress, listenAddress string,
-		) (net.Listener, error) {
-			return socksbridge.Listen(ctx, gatewayAddress, listenAddress)
-		},
+		catalog:      provider,
+		connection:   provider,
+		gateway:      provider,
 		gatewayImage: ResolveGatewayImage(""),
 		intercept:    intercept.NewManager(clusteradapter.New(provider)),
 		portfwd:      portfwd.NewManager(portfwdclusteradapter.New(provider)),

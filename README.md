@@ -225,6 +225,8 @@ directories in both upload and download directions.
 
 - kubeconfig credentials remain in the Go desktop process.
 - The Gateway is unprivileged, has no Kubernetes credentials, and is not publicly exposed.
+- Each desktop connection uses a random 256-bit Gateway capability; outbound
+  dials, reverse listeners, and pending streams are isolated by that session.
 - The privileged Helper accepts authenticated, field-constrained IPC—not commands
   or caller-selected executable/config paths.
 - sing-box and feature inbounds bind locally and use per-session credentials.
